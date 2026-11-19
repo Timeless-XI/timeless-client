@@ -827,6 +827,22 @@ impl ActorGpu {
             *t = bind.clone();
         }
     }
+
+    /// The texture `slot` as `bind`, except on the mirrored copies of the meshes using it (the model's right side),
+    /// which draw with `mirrored` from a slot of their own.
+    pub fn set_texture_sides(&mut self, slot: usize, bind: &wgpu::BindGroup, mirrored: &wgpu::BindGroup) {
+        self.set_texture(slot, bind);
+        let side = *self.side_slot.get_or_insert_with(|| {
+            self.textures.push(bind.clone());
+            self.textures.len() - 1
+        });
+        self.textures[side] = mirrored.clone();
+        for (d, m) in self.draws.iter_mut().zip(&self.mirror) {
+            if *m && d.0 == slot {
+                d.0 = side;
+            }
+        }
+    }
 }
 
 /// A character's GPU side: its textures, and either a vertex buffer re-filled with a CPU-posed mesh
@@ -838,6 +854,10 @@ pub struct ActorGpu {
     slot: HashMap<String, usize>,
     vertices: Option<(wgpu::Buffer, usize)>,
     draws: Vec<(usize, std::ops::Range<u32>, u8)>,
+    /// Timeless XI: per draw, whether it is a mirrored copy (custom looks give that side its own texture).
+    mirror: Vec<bool>,
+    /// Timeless XI: the extra texture slot the mirrored side of a custom look draws with.
+    side_slot: Option<usize>,
     instance: wgpu::Buffer,
     /// `wepN` meshes not drawn (bit N; scheduler ops 0x75 / 0xa3, MODLOG "Weapon meshes hidden and shown").
     pub hidden_weps: u16,
@@ -955,6 +975,8 @@ pub struct SkinMesh {
     verts: Vec<SkinVertex>,
     /// Texture, vertices, and N of a `wepN` part (NO_WEP otherwise).
     groups: Vec<(String, std::ops::Range<u32>, u8)>,
+    /// Timeless XI: per group, whether it is a mirrored mesh's second copy (the model's other side; custom looks).
+    mirrored: Vec<bool>,
     bones: usize,
     /// Cloth particles numbered (SkinVertex.cloth).
     cloth: usize,
@@ -968,6 +990,7 @@ impl SkinMesh {
         let slot_of = |b: usize| if b < bones { b as u32 } else { bones as u32 };
         let mut verts: Vec<SkinVertex> = Vec::new();
         let mut groups = Vec::new();
+        let mut mirrored = Vec::new();
         // Cloth particles in part order, after the bones and the identity slot.
         let mut particles = 0usize;
         for part in &ch.parts {
@@ -1004,13 +1027,14 @@ impl SkinMesh {
                     }
                 }
                 groups.push((g.texture.clone(), start..verts.len() as u32, wep));
+                mirrored.push(part.mirrored);
             }
         }
         if verts.is_empty() {
             verts.push(SkinVertex::zeroed());
         }
         let sim = cloth::ClothModel::build(&ch.parts, &ch.skeleton).map(std::sync::Arc::new);
-        SkinMesh { verts, groups, bones, cloth: particles, sim }
+        SkinMesh { verts, groups, mirrored, bones, cloth: particles, sim }
     }
 }
 
@@ -3476,6 +3500,7 @@ impl ZoneRenderer {
             .iter()
             .map(|(tex, r, wep)| (a.slot.get(tex.as_str()).copied().unwrap_or(0), r.clone(), *wep))
             .collect();
+        a.mirror = mesh.mirrored.clone();
         let vertices = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("skinned actor"),
             contents: bytemuck::cast_slice(&mesh.verts),
@@ -3529,6 +3554,8 @@ impl ZoneRenderer {
                 mapped_at_creation: false,
             });
             let actor = ActorGpu {
+                mirror: mesh.mirrored.clone(),
+                side_slot: None,
                 faded_pending: Default::default(),
                 textures: vec![self.magenta.clone(); ch.textures.len() + 1],
                 slot,
@@ -3704,6 +3731,8 @@ impl ZoneRenderer {
             mapped_at_creation: false,
         });
         ActorGpu {
+            mirror: Vec::new(),
+            side_slot: None,
             faded_pending: Default::default(),
             textures,
             slot,

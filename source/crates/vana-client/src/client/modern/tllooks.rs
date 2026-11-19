@@ -2,7 +2,7 @@
 //! two-tone hair, eye colour, face markings, lip tint, and a grey-to-black nose slider. Every interface.
 
 use super::super::World;
-use super::super::timeless::looks::{MARKS, Settings};
+use super::super::timeless::looks::{BOTH, LEFT, MARKS, RIGHT, SIDED, Settings};
 use egui::{Color32, Context, CornerRadius, Id, RichText, Stroke, vec2};
 
 fn gold() -> Color32 {
@@ -154,10 +154,29 @@ fn body(ui: &mut egui::Ui, s: &mut Settings) {
     heading(ui, "Eyes");
     rgb(ui, &mut s.eyes, &EYES);
     heading(ui, "Face markings");
-    for (k, name) in MARKS.iter().enumerate() {
-        ui.checkbox(&mut s.marks[k], RichText::new(*name).color(text()));
-    }
-    if s.marks.iter().any(|m| *m) {
+    s.marks.resize(MARKS.len(), 0);
+    ui.label(RichText::new("Left / Right = under your character's own left or right eye.").small().color(muted()));
+    egui::Grid::new("tl looks marks").num_columns(2).spacing(vec2(10.0, 4.0)).show(ui, |ui| {
+        for (k, name) in MARKS.iter().enumerate() {
+            ui.label(RichText::new(*name).color(text()));
+            ui.horizontal(|ui| {
+                let v = &mut s.marks[k];
+                if SIDED[k] {
+                    for (val, label) in [(0, "Off"), (LEFT, "Left"), (BOTH, "Both"), (RIGHT, "Right")] {
+                        ui.selectable_value(v, val, label);
+                    }
+                } else {
+                    if *v != 0 {
+                        *v = BOTH;
+                    }
+                    ui.selectable_value(v, 0, "Off");
+                    ui.selectable_value(v, BOTH, "On");
+                }
+            });
+            ui.end_row();
+        }
+    });
+    if s.marks.iter().any(|m| *m != 0) {
         rgb(ui, &mut s.mark_colour, &MARK);
         ui.horizontal(|ui| {
             ui.label(RichText::new("Strength").color(muted()));
