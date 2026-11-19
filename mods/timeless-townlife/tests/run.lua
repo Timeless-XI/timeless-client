@@ -1,0 +1,131 @@
+-- Timeless Town Life's tests: lua tests/run.lua (from the mod folder).
+
+local H = dofile("tests/harness.lua")
+local n = 0
+local function ok(cond, what)
+  n = n + 1
+  if not cond then error("FAIL " .. what, 2) end
+end
+
+H.mod_id = "timeless-townlife"
+H.settings = {}
+H.player.pos = { x = -190, y = -6, z = -78 }
+H.player.zone = 235
+H.entities[17000301] = { id = 17000301, index = 301, name = "Ysolde", kind = "npc", pos = { x = -186.5, y = -6, z = -80 } }
+
+dofile("init.lua")
+local protocol = require("lib.protocol")
+local world = require("lib.world")
+local town = require("lib.town")
+
+-- Asks the server ("tl on") soon after loading, and every 20 s
+H.run(3)
+local sent = H.take_sent()
+ok(#sent == 1 and sent[1] == "tl on", "asks with tl on")
+H.run(10)
+ok(#H.take_sent() == 0, "not again at once")
+H.run(11)
+ok(H.take_sent()[1] == "tl on", "and again 20 s later")
+
+-- The snapshot, hidden from chat
+local snap = {
+  "TL1|C|235|Bastok Markets",
+  "TL1|L|1|-140.2,-4.0,-107.5|1", "TL1|L|2|-147.6,-4.0,-103.7|1",
+  "TL1|S|1|smoke|-190.0,8.0,-147.0|0", "TL1|S|2|hammer|-190.0,2.0,-146.0|28", "TL1|S|3|crowd|-276.1,-13.6,-68.1|35",
+  "TL1|T|news|The caravan from Jeuno reached Bastok Markets.",
+  "TL1|T|here|Gustaberg Goods: Ysolde until 6:00, then Hrodgar.",
+  "TL1|T|caravan|Daily: up the South Gustaberg road from 4:00, in the Markets 7:00-10:00.",
+  "TL1|T|market|Market day is every Earthsday, 6:00-20:00.",
+  "TL1|T|gossip|Ysolde: Three hundred gil, Hrodgar.",
+  "TL1|E",
+}
+for _, l in ipairs(snap) do ok(H.line(l) == false, "feed line hidden: " .. l:sub(1, 12)) end
+ok(H.line("Hrodgar : Have a look.") ~= false, "ordinary chat untouched")
+local m = town.model
+ok(m.zone == 235 and m.zone_name == "Bastok Markets", "zone")
+ok(m.lamps[1] and m.lamps[2] and m.lamps[1].x == -140.2, "lamps lit")
+ok(m.scenery[2].kind == "hammer" and m.scenery[2].range == 28, "scenery")
+ok(#m.rows == 5, "town rows")
+
+-- Lamps glow, smoke rises
+H.run(0.3)
+ok(H.draws.lamp1 and H.draws.lamp1.kind == "image" and H.draws.lamp1.facing == "camera", "a lamp glows")
+ok(H.draws.lamp1g and H.draws.lamp1g.kind == "ring", "and lights the ground")
+H.line("TL1|L|2|-147.6,-4.0,-103.7|0")
+H.run(0.3)
+ok(H.draws.lamp2 == nil and H.draws.lamp1, "a lamp put out stops glowing")
+
+-- Sounds by distance: the hammer from 28 yalms is out of range at 68 yalms away; walk closer
+ok(#H.sounds == 0, "no sounds far away")
+H.player.pos = { x = -190, y = 2, z = -140 }
+H.run(0.5)
+ok(#H.sounds == 1 and H.sounds[1].path == "sounds/hammer.wav" and H.sounds[1].volume > 0.2, "hammering by the furnaces")
+H.run(2)
+ok(#H.sounds == 1, "not every frame")
+H.run(4)
+ok(#H.sounds == 2, "again after the sound's length")
+H.settings.sounds = false
+H.run(10)
+ok(#H.sounds == 2, "sounds setting off")
+H.settings.sounds = nil
+
+-- Smoke near the furnaces
+ok(H.draws.smoke1_0 and H.draws.smoke1_0.path == "img/smoke.png", "chimney smoke")
+H.settings.smoke = false
+H.run(0.3)
+ok(H.draws.smoke1_0 == nil, "smoke setting off")
+H.settings.smoke = nil
+
+-- Speech bubbles
+H.player.pos = { x = -190, y = -6, z = -78 }
+H.line("TL1|B|301|Go on home, Hrodgar. I've got it from here.")
+H.run(0.2)
+ok(H.hud.tlb_301 and H.hud.tlb_301.kind == "bubble", "a speech bubble over Ysolde")
+ok(H.hud.tlbt_301.text:find("Go on home", 1, true), "with what she said")
+H.run(10)
+ok(H.hud.tlb_301 == nil, "and it goes")
+H.line("TL1|B|999|Nobody here.")
+H.run(0.2)
+ok(H.hud.tlb_999 == nil, "no bubble for someone out of sight")
+
+-- The Town window
+H.take_sent()
+H.command("/town")
+ok(ui.is_open("town"), "/town opens the window")
+H.run(0.2)
+ok(H.take_sent()[1] == "tl town", "and asks for fresh rows")
+H.check_draws("town")
+local texts = {}
+for _, d in ipairs(H.windows.town.el.town.draw) do if d.type == "text" then texts[#texts + 1] = d.text end end
+local all = table.concat(texts, " | ")
+ok(all:find("Bastok Markets", 1, true) and all:find("Headlines", 1, true) and all:find("Gossip", 1, true), "sections")
+ok(all:find("Ysolde until 6:00", 1, true), "who has the stall")
+H.click("town", "town", "refresh")
+H.run(0.2)
+ok(H.take_sent()[1] == "tl town", "Refresh asks again")
+H.command("/town")
+ok(not ui.is_open("town"), "/town closes it")
+
+-- A new zone: everything forgotten, a fresh snapshot asked for
+H.fire("zone_change")
+H.run(0.3)
+ok(H.draws.lamp1 == nil and #town.model.rows == 0, "zone change clears the town")
+H.run(3)
+ok(H.take_sent()[1] == "tl on", "and asks again in the new zone")
+
+-- Menu card
+local card = H.provided["timeless-townlife"].timeless_menu()
+ok(card.title == "Town" and card.open == "//town", "a card on the Timeless menu")
+
+-- Unload
+H.fire("unload")
+ok(H.take_sent()[1] == "tl off", "tl off on unload")
+
+-- The protocol on its own
+local pm = protocol.new_model()
+ok(protocol.feed(pm, "TL1|L|x|bad|1", 0) == true, "a bad lamp line is ignored")
+ok(protocol.feed(pm, "WM1|E|x", 0) == false, "someone else's line")
+ok(protocol.extract("[3] TL1|E\n") == "TL1|E", "extract")
+ok(#world.wrap(string.rep("word ", 60), 34) == 3, "bubbles wrap to 3 lines")
+
+io.write(("%d checks passed\n"):format(n))
