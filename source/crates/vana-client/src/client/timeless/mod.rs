@@ -6,3 +6,4 @@ pub mod book;
 pub mod fishing;
 pub mod hdicon;
 pub mod hotbar;
+pub mod icons;

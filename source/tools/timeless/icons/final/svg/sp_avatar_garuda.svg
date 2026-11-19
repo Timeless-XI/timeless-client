@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>Summon - Garuda</title>
+  <defs>
+  <filter id="b06" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="0.6"/></filter>
+  <filter id="b1" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="1"/></filter>
+  <filter id="b2" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2"/></filter>
+  <filter id="b3" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="3.2"/></filter>
+  <filter id="b5" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="5"/></filter>
+  <filter id="b8" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="8"/></filter>
+  <filter id="cast" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.4"/></filter>
+  <filter id="mottle" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB">
+    <feTurbulence type="fractalNoise" baseFrequency="0.55" numOctaves="3" seed="4" result="n"/>
+    <feColorMatrix in="n" type="matrix" values="0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0 0 0 0 1" result="g"/>
+    <feComponentTransfer in="g" result="gs"><feFuncR type="linear" slope="0.45" intercept="0.68"/><feFuncG type="linear" slope="0.45" intercept="0.68"/><feFuncB type="linear" slope="0.45" intercept="0.68"/></feComponentTransfer>
+    <feComposite in="gs" in2="SourceGraphic" operator="in" result="gi"/>
+    <feBlend in="SourceGraphic" in2="gi" mode="multiply"/>
+  </filter>
+  <filter id="wood" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB">
+    <feTurbulence type="turbulence" baseFrequency="0.035 0.55" numOctaves="3" seed="9" result="n"/>
+    <feColorMatrix in="n" type="matrix" values="0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0 0 0 0 1" result="g"/>
+    <feComponentTransfer in="g" result="gs"><feFuncR type="linear" slope="-0.9" intercept="1.05"/><feFuncG type="linear" slope="-0.9" intercept="1.05"/><feFuncB type="linear" slope="-0.9" intercept="1.05"/></feComponentTransfer>
+    <feComposite in="gs" in2="SourceGraphic" operator="in" result="gi"/>
+    <feBlend in="SourceGraphic" in2="gi" mode="multiply"/>
+  </filter>
+  <filter id="woodH" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB">
+    <feTurbulence type="turbulence" baseFrequency="0.55 0.035" numOctaves="3" seed="9" result="n"/>
+    <feColorMatrix in="n" type="matrix" values="0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0 0 0 0 1" result="g"/>
+    <feComponentTransfer in="g" result="gs"><feFuncR type="linear" slope="-0.9" intercept="1.05"/><feFuncG type="linear" slope="-0.9" intercept="1.05"/><feFuncB type="linear" slope="-0.9" intercept="1.05"/></feComponentTransfer>
+    <feComposite in="gs" in2="SourceGraphic" operator="in" result="gi"/>
+    <feBlend in="SourceGraphic" in2="gi" mode="multiply"/>
+  </filter>
+  <filter id="rock" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB">
+    <feTurbulence type="fractalNoise" baseFrequency="0.09" numOctaves="4" seed="3" result="n"/>
+    <feDiffuseLighting in="n" surfaceScale="3.2" diffuseConstant="1.15" lighting-color="#ffffff" result="l"><feDistantLight azimuth="225" elevation="48"/></feDiffuseLighting>
+    <feComponentTransfer in="l" result="ls"><feFuncR type="linear" slope="0.9" intercept="0.25"/><feFuncG type="linear" slope="0.9" intercept="0.25"/><feFuncB type="linear" slope="0.9" intercept="0.25"/></feComponentTransfer>
+    <feComposite in="ls" in2="SourceGraphic" operator="in" result="li"/>
+    <feBlend in="SourceGraphic" in2="li" mode="multiply"/>
+  </filter>
+  <filter id="hammered" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB">
+    <feTurbulence type="fractalNoise" baseFrequency="0.35" numOctaves="2" seed="11" result="n"/>
+    <feDiffuseLighting in="n" surfaceScale="1.2" diffuseConstant="1.1" lighting-color="#ffffff" result="l"><feDistantLight azimuth="225" elevation="55"/></feDiffuseLighting>
+    <feComponentTransfer in="l" result="ls"><feFuncR type="linear" slope="0.55" intercept="0.5"/><feFuncG type="linear" slope="0.55" intercept="0.5"/><feFuncB type="linear" slope="0.55" intercept="0.5"/></feComponentTransfer>
+    <feComposite in="ls" in2="SourceGraphic" operator="in" result="li"/>
+    <feBlend in="SourceGraphic" in2="li" mode="multiply"/>
+  </filter>
+  <filter id="organic" x="-10%" y="-10%" width="120%" height="120%">
+    <feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="2" seed="5" result="n"/>
+    <feDisplacementMap in="SourceGraphic" in2="n" scale="5" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+  <filter id="flameD" x="-20%" y="-20%" width="140%" height="140%">
+    <feTurbulence type="fractalNoise" baseFrequency="0.045 0.09" numOctaves="3" seed="21" result="n"/>
+    <feDisplacementMap in="SourceGraphic" in2="n" scale="11" xChannelSelector="R" yChannelSelector="G" result="d"/>
+    <feGaussianBlur in="d" stdDeviation="0.5"/>
+  </filter>
+  <filter id="paperT" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <feTurbulence type="fractalNoise" baseFrequency="0.25" numOctaves="4" seed="2" result="n"/>
+    <feColorMatrix in="n" type="matrix" values="0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0 0 0 0 1" result="g"/>
+    <feComponentTransfer in="g" result="gs"><feFuncR type="linear" slope="0.5" intercept="0.68"/><feFuncG type="linear" slope="0.5" intercept="0.66"/><feFuncB type="linear" slope="0.5" intercept="0.6"/></feComponentTransfer>
+    <feComposite in="gs" in2="SourceGraphic" operator="in" result="gi"/>
+    <feBlend in="SourceGraphic" in2="gi" mode="multiply"/>
+  </filter>
+  <filter id="grainD" x="0" y="0" width="100%" height="100%">
+    <feTurbulence type="fractalNoise" baseFrequency="1.1" numOctaves="2" seed="7"/>
+    <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -2.2 0 0 0 1.25"/>
+  </filter>
+  <filter id="grainL" x="0" y="0" width="100%" height="100%">
+    <feTurbulence type="fractalNoise" baseFrequency="1.3" numOctaves="1" seed="13"/>
+    <feColorMatrix type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  2.4 0 0 0 -1.45"/>
+  </filter>
+  <clipPath id="plateClip"><rect x="3" y="3" width="122" height="122" rx="11"/></clipPath>
+  <radialGradient id="vign" cx="50%" cy="46%" r="72%"><stop offset="0.55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.72"/></radialGradient>
+  <linearGradient id="rimP" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#d7d2c4"/><stop offset="0.35" stop-color="#8f8a80"/><stop offset="0.7" stop-color="#4e4a46"/><stop offset="1" stop-color="#262321"/></linearGradient>
+  <radialGradient id="soft" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#fff" stop-opacity="1"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+
+  </defs>
+  <g clip-path="url(#plateClip)">
+  <defs><radialGradient id="sky1" cx="50%" cy="40%" r="75%"><stop offset="0" stop-color="#1e4a3a"/><stop offset="0.55" stop-color="#0c2a20"/><stop offset="1" stop-color="#030a08"/></radialGradient></defs><rect width="128" height="128" fill="url(#sky1)"/><circle cx="72.3" cy="33.4" r="0.43" fill="#e8fff2" fill-opacity="0.42"/><circle cx="100.3" cy="58.7" r="0.46" fill="#e8fff2" fill-opacity="0.40"/><circle cx="66.4" cy="27.0" r="0.30" fill="#e8fff2" fill-opacity="0.87"/><circle cx="121.6" cy="8.9" r="0.54" fill="#e8fff2" fill-opacity="0.66"/><circle cx="50.3" cy="24.2" r="0.47" fill="#e8fff2" fill-opacity="0.57"/><circle cx="85.6" cy="48.4" r="0.25" fill="#e8fff2" fill-opacity="0.76"/><circle cx="120.0" cy="68.0" r="0.45" fill="#e8fff2" fill-opacity="0.33"/><circle cx="6.5" cy="14.6" r="0.58" fill="#e8fff2" fill-opacity="0.48"/><circle cx="48.5" cy="63.5" r="0.33" fill="#e8fff2" fill-opacity="0.63"/><circle cx="56.6" cy="10.2" r="0.43" fill="#e8fff2" fill-opacity="0.81"/><circle cx="24.1" cy="20.4" r="0.37" fill="#e8fff2" fill-opacity="0.32"/><circle cx="63.6" cy="58.4" r="0.46" fill="#e8fff2" fill-opacity="0.62"/><circle cx="105.2" cy="15.6" r="0.43" fill="#e8fff2" fill-opacity="0.52"/><circle cx="75.8" cy="13.2" r="0.51" fill="#e8fff2" fill-opacity="0.36"/><circle cx="25.3" cy="57.7" r="0.58" fill="#e8fff2" fill-opacity="0.56"/><circle cx="54.0" cy="21.7" r="0.31" fill="#e8fff2" fill-opacity="0.67"/><circle cx="26.7" cy="13.6" r="0.38" fill="#e8fff2" fill-opacity="0.40"/><circle cx="81.3" cy="58.5" r="0.51" fill="#e8fff2" fill-opacity="0.59"/><circle cx="46.3" cy="33.8" r="0.20" fill="#e8fff2" fill-opacity="0.73"/><circle cx="44.5" cy="26.4" r="0.23" fill="#e8fff2" fill-opacity="0.57"/><circle cx="73.6" cy="31.0" r="0.55" fill="#e8fff2" fill-opacity="0.70"/><circle cx="34.0" cy="39.6" r="0.56" fill="#e8fff2" fill-opacity="0.61"/><circle cx="75.8" cy="10.0" r="0.40" fill="#e8fff2" fill-opacity="0.58"/><circle cx="52.5" cy="32.9" r="0.43" fill="#e8fff2" fill-opacity="0.62"/><circle cx="62.8" cy="16.6" r="0.38" fill="#e8fff2" fill-opacity="0.88"/><circle cx="54.2" cy="8.3" r="0.20" fill="#e8fff2" fill-opacity="0.62"/><circle cx="11.9" cy="11.9" r="0.24" fill="#e8fff2" fill-opacity="0.57"/><circle cx="121.2" cy="37.0" r="0.38" fill="#e8fff2" fill-opacity="0.56"/><circle cx="64.1" cy="34.6" r="0.49" fill="#e8fff2" fill-opacity="0.84"/><circle cx="87.0" cy="33.1" r="0.46" fill="#e8fff2" fill-opacity="0.85"/><circle cx="23.8" cy="21.2" r="0.45" fill="#e8fff2" fill-opacity="0.71"/><circle cx="80.5" cy="43.7" r="0.53" fill="#e8fff2" fill-opacity="0.59"/><circle cx="99.7" cy="67.6" r="0.37" fill="#e8fff2" fill-opacity="0.82"/><circle cx="89.3" cy="62.9" r="0.22" fill="#e8fff2" fill-opacity="0.85"/><g filter="url(#organic)"><path d="M-4.0 71.2 L4.5 81.7 L24.1 72.5 L33.1 72.0 L49.2 71.9 L66.2 73.0 L78.5 66.5 L89.0 68.4 L102.3 81.1 L118.1 72.4 L129.3 77.8 L132 128 L-4 128 Z" fill="#2a5a44" fill-opacity="0.85"/></g><path d="M-4.0 71.2 L4.5 81.7 L24.1 72.5 L33.1 72.0 L49.2 71.9 L66.2 73.0 L78.5 66.5 L89.0 68.4 L102.3 81.1 L118.1 72.4 L129.3 77.8" fill="none" stroke="#8ff0c0" stroke-opacity="0.18" stroke-width="1" filter="url(#b06)"/><ellipse cx="64" cy="82" rx="70" ry="5" fill="#7ae0b0" fill-opacity="0.18" filter="url(#b3)"/><g filter="url(#rock)"><path d="M-4.0 83.7 L21.0 86.4 L37.2 90.4 L56.7 92.8 L72.4 86.8 L93.2 85.2 L110.4 89.1 L125.8 86.1 L132 128 L-4 128 Z" fill="#123428"/></g><path d="M-4.0 83.7 L21.0 86.4 L37.2 90.4 L56.7 92.8 L72.4 86.8 L93.2 85.2 L110.4 89.1 L125.8 86.1" fill="none" stroke="#8ff0c0" stroke-opacity="0.22" stroke-width="0.9" filter="url(#b06)"/><rect x="0" y="0" width="128" height="106" fill="#000" fill-opacity="0.28"/><g filter="url(#organic)"><path d="M-4 104 C30 100 96 102 132 100 L132 132 L-4 132 Z" fill="#0a1e16"/></g><g filter="url(#mottle)"><path d="M-4 104 C30 100 96 102 132 100 L132 132 L-4 132 Z" fill="#123428" fill-opacity="0.45"/></g>
+  <defs><radialGradient id="rg2" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#8ff0c0" stop-opacity="0.24499999999999997"/><stop offset="0.6" stop-color="#8ff0c0" stop-opacity="0.08399999999999999"/><stop offset="1" stop-color="#8ff0c0" stop-opacity="0"/></radialGradient></defs><ellipse cx="64" cy="104" rx="46" ry="12" fill="url(#rg2)"/><ellipse cx="64" cy="104" rx="38" ry="8" fill="none" stroke="#8ff0c0" stroke-opacity="0.39" stroke-width="2.2" filter="url(#b1)"/><ellipse cx="64" cy="104" rx="38" ry="8" fill="none" stroke="#e8fff2" stroke-opacity="0.49" stroke-width="0.5"/><ellipse cx="64" cy="104" rx="31.2" ry="6.4" fill="none" stroke="#e8fff2" stroke-opacity="0.24" stroke-width="0.4"/><defs><radialGradient id="halo3" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#6ae0a0" stop-opacity="0.55"/><stop offset="0.5" stop-color="#6ae0a0" stop-opacity="0.1925"/><stop offset="1" stop-color="#6ae0a0" stop-opacity="0"/></radialGradient></defs><circle cx="64" cy="58" r="48" fill="url(#halo3)"/><circle cx="64" cy="58" r="34" fill="none" stroke="#6ae0a0" stroke-width="2" filter="url(#b06)"/><circle cx="64" cy="58" r="34" fill="none" stroke="#e8fff2" stroke-width="0.5"/><circle cx="64" cy="58" r="28" fill="none" stroke="#e8fff2" stroke-opacity="0.5" stroke-width="0.4" stroke-dasharray="1.4 2"/><path d="M64.0 30.0 L88.3 72.0" stroke="#e8fff2" stroke-opacity="0.35" stroke-width="0.5"/><path d="M88.2 44.0 L64.0 86.0" stroke="#e8fff2" stroke-opacity="0.35" stroke-width="0.5"/><path d="M88.2 72.0 L39.8 72.0" stroke="#e8fff2" stroke-opacity="0.35" stroke-width="0.5"/><path d="M64.0 86.0 L39.7 44.0" stroke="#e8fff2" stroke-opacity="0.35" stroke-width="0.5"/><path d="M39.8 72.0 L64.0 30.0" stroke="#e8fff2" stroke-opacity="0.35" stroke-width="0.5"/><path d="M39.8 44.0 L88.2 44.0" stroke="#e8fff2" stroke-opacity="0.35" stroke-width="0.5"/><g filter="url(#mottle)"><clipPath id="c4"><path d="M64 30 L84 58 L64 86 L44 58 Z"/></clipPath><path d="M64 30 L84 58 L64 86 L44 58 Z" fill="#4a2e0c"/><g clip-path="url(#c4)"><path d="M64 30 L84 58 L64 86 L44 58 Z" fill="#c09040" transform="translate(-1.6 -2.0)" filter="url(#b1)"/><ellipse cx="58" cy="44" rx="4" ry="8" fill="#ffe6a8" fill-opacity="0.75" filter="url(#b3)"/><path d="M64 30 L84 58 L64 86 L44 58 Z" fill="none" stroke="#ffd080" stroke-opacity="0.55" stroke-width="1.6" transform="translate(-0.72 -0.90)" filter="url(#b06)"/><path d="M64 30 L84 58 L64 86 L44 58 Z" fill="none" stroke="#000" stroke-opacity="0.4" stroke-width="2.4" filter="url(#b1)"/></g><path d="M64 30 L84 58 L64 86 L44 58 Z" fill="none" stroke="#24160a" stroke-opacity="0.85" stroke-width="0.5" stroke-linejoin="round"/></g><path d="M64 45.00 L77.00 58.00 L64 71.00 L51.00 58.00 Z" fill="#0a3a20"/><path d="M64 45.00 L77.00 58.00 L64 58.00 Z" fill="#5ad890"/><path d="M64 45.00 L51.00 58.00 L64 58.00 Z" fill="#c8ffe0" fill-opacity="0.8"/><path d="M64 45.00 L77.00 58.00 L64 71.00 L51.00 58.00 Z" fill="none" stroke="#0a0a12" stroke-width="0.4"/><circle cx="60.1" cy="53.45" r="16.38" fill="#fff6dc" fill-opacity="0.33" filter="url(#b1)"/><path d="M60.1 44.35 Q61.19 52.36 69.2 53.45 Q61.19 54.54 60.1 62.550000000000004 Q59.01 54.54 51.0 53.45 Q59.01 52.36 60.1 44.35 Z" fill="#fff6dc" fill-opacity="0.95"/>
+  </g>
+
+  <g clip-path="url(#plateClip)">
+    <rect x="3" y="3" width="122" height="122" fill="url(#vign)"/>
+    <rect x="3" y="3" width="122" height="122" rx="11" fill="none" stroke="#000" stroke-opacity="0.75" stroke-width="9" filter="url(#b3)"/>
+    <rect x="3" y="3" width="122" height="122" filter="url(#grainD)" opacity="0.13"/>
+    <rect x="3" y="3" width="122" height="122" filter="url(#grainL)" opacity="0.07"/>
+  </g>
+  <rect x="3" y="3" width="122" height="122" rx="11" fill="none" stroke="#050403" stroke-width="3.2"/>
+  <g filter="url(#mottle)"><rect x="3.6" y="3.6" width="120.8" height="120.8" rx="10.4" fill="none" stroke="url(#rimP)" stroke-width="2.2"/></g>
+  <rect x="6.2" y="6.2" width="115.6" height="115.6" rx="8" fill="none" stroke="#000" stroke-opacity="0.6" stroke-width="0.8"/>
+  <g fill="none" stroke="#e8fff2" stroke-opacity="0.32" stroke-width="0.6"><path d="M46 8 H58 M70 8 H82"/><path d="M46 120 H58 M70 120 H82"/></g>
+  <g fill="#e8fff2" fill-opacity="0.75"><path d="M64 5.4 L66.4 7.8 L64 10.2 L61.6 7.8 Z"/><path d="M64 117.8 L66.4 120.2 L64 122.6 L61.6 120.2 Z"/></g>
+</svg>

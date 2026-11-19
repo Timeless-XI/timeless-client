@@ -922,11 +922,16 @@ fn carry(p: &Panels, w: &mut World, slots: &[(usize, usize, Rect)]) {
     }
 }
 
-/// The plate colour of a slot drawn as the pack's glyph on a plate (Attack red, the Misc Book's blue).
+/// The plate colour of a slot drawn as the pack's glyph on a plate (Attack red, the Misc Book's blue). Timeless XI:
+/// none for a slot with a painted Timeless View icon (timeless::icons), which is a whole picture of its own.
 pub(super) fn plate(s: &Slot) -> Option<&'static str> {
+    use super::super::timeless::icons;
     match s {
+        Slot::Attack if icons::misc("attack").is_some() => None,
         Slot::Attack => Some("hp"),
+        Slot::Misc { key } if icons::misc(key).is_some() => None,
         Slot::Misc { .. } => Some("focus"),
+        Slot::Gear { .. } if icons::misc("gear").is_some() => None,
         Slot::Gear { .. } => Some("tp"),
         _ => None,
     }
@@ -943,20 +948,36 @@ pub(super) fn icon(p: &Panels, w: &World, s: &Slot) -> Option<(egui::TextureId, 
         }
         Slot::Item { id, .. } => p.m.item_icon(p.ctx, w.item_info.as_deref()?, *id).map(|t| (t, FULL_UV)),
         Slot::Command { .. } => None,
+        // Timeless XI: the painted Timeless View icons first (timeless::icons), else the pack's glyphs.
         Slot::Attack => {
+            let k = if hotbar::engaged(w) { "disengage" } else { "attack" };
+            if let Some(t) = painted(p, k) {
+                return Some(t);
+            }
             let s = p.m.art.sprite(if hotbar::engaged(w) { "icons/disengage" } else { "icons/attack" })?;
             Some((s.tex, s.uv))
         }
         Slot::Gear { .. } => {
+            if let Some(t) = painted(p, "gear") {
+                return Some(t);
+            }
             let s = p.m.art.sprite("icons/equipment")?;
             Some((s.tex, s.uv))
         }
         Slot::Misc { key } => {
+            if let Some(t) = painted(p, key) {
+                return Some(t);
+            }
             let m = super::super::timeless::book::misc(key)?;
             let s = p.m.art.sprite(&format!("icons/{}", m.icon))?;
             Some((s.tex, s.uv))
         }
     }
+}
+
+/// Timeless XI: a Misc Book key's painted Timeless View icon.
+fn painted(p: &Panels, key: &str) -> Option<(egui::TextureId, Rect)> {
+    p.m.timeless_icon(p.ctx, super::super::timeless::icons::misc(key)?)
 }
 
 /// A command's stand-in icon: its verb on a plate.

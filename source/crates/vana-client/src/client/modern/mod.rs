@@ -1823,8 +1823,32 @@ impl Modern {
         kind: super::magic::Kind,
         id: u16,
     ) -> Option<(egui::TextureId, Rect)> {
+        // Timeless XI: the Timeless interface shows the painted Timeless View icons where the action has one.
+        if self.theme.timeless() {
+            use super::timeless::icons;
+            let name = match kind {
+                super::magic::Kind::Magic => icons::spell(id),
+                super::magic::Kind::Ability => {
+                    w.actions.as_ref().and_then(|a| a.abilities.get(id as usize)).and_then(|a| icons::ability(a.id))
+                }
+                _ => None,
+            };
+            if let Some(t) = name.and_then(|n| self.timeless_icon(ctx, n)) {
+                return Some(t);
+            }
+        }
         let (lib, k) = super::magic::row_icon(w, kind, id)?;
         self.list_icon(ctx, gu, lib, k, super::magic::picture(w, kind, id))
+    }
+
+    /// Timeless XI: a painted Timeless View icon (timeless::icons) as a texture, made at about a slot's size on screen.
+    pub(super) fn timeless_icon(&self, ctx: &Context, name: &str) -> Option<(egui::TextureId, Rect)> {
+        let size = super::timeless::icons::size_for(ctx.pixels_per_point());
+        self.texture(ctx, &format!("tlicon {name} {size}"), || {
+            let (w, h, rgba) = super::timeless::icons::rgba(name, size)?;
+            Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba))
+        })
+        .map(|t| (t, FULL_UV))
     }
 }
 
