@@ -4,6 +4,8 @@
 --              Quests (the server's custom quests in progress and those you can start) and Retail (retail quests
 --              you've accepted). /journal and /questlog work too.
 --   Tracker    an edge window with your current missions, kept on screen (the Tracker switch, or /ql tracker).
+--   Stories    your kept companions' stories as a book: each chapter's state, and the words of every chapter you've
+--              lived (from the server's companions module, asked with "st data" when you open the tab; /ql stories).
 --
 -- Spoilers: with "Show full steps" off (the default), missions only say where to go next; each storyline's "Show step"
 -- reveals its step for the session. The Journal asks the server's questlog module for your progress when it opens,
@@ -28,6 +30,14 @@ local function ask()
 end
 journal.ask = ask
 
+-- The Stories tab asks the companions module ("st data"); at most every few seconds
+local stories_asked = -100
+journal.ask_stories = function()
+  if now() - stories_asked < 3 then return end
+  stories_asked = now()
+  pcall(action.send, "st data")
+end
+
 -- Ask in a few seconds (several events in a row only ask once).
 local function ask_soon(seconds)
   if not journal.wanted() then return end
@@ -40,6 +50,12 @@ journal.setup()
 -- The feed: read it and take it out of the chat log.
 filters.chat(function(text)
   if type(text) ~= "string" then return nil end
+  -- The Stories tab's book (companions_stories.lua)
+  local sline = journal.stories.extract(text)
+  if sline then
+    if journal.stories.feed(journal.stories.model, sline, os.time()) == "book" then journal.render_all() end
+    return false
+  end
   local line = protocol.extract(text)
   if not line then return nil end
   if protocol.feed(journal.model, line, os.time()) then

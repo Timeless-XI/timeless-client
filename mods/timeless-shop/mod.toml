@@ -1,0 +1,17 @@
+name = "Timeless Shop"
+version = "1.0.0"
+authors = ["TimelessXI"]
+description = "The Goblin Bazaar, the Wandering Merchant and the Everglass Shop as real shop windows with item previews, dressed for the shopkeeper's race: a goblin's patched sack, a moogle's pom-pom, Elvaan gilt, Tarutaru stars..."
+permissions = ["packets.write"]
+
+[commands.storefront]
+help = "The shop window: a sample shop in a race's colours, or close it."
+args = ""
+forms = [
+  { args = "demo [race]", help = "A sample shop: goblin, moogle, hume, elvaan, tarutaru, mithra, galka, quadav, yagudo, orc, tonberry or guild." },
+  { args = "close", help = "Closes the shop window." },
+]
+
+[commands.timelessshop]
+help = "The same as /storefront."
+args = ""

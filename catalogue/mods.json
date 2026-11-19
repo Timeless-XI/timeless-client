@@ -3333,17 +3333,17 @@
       "id": "timeless-journal",
       "name": "Timeless Journal",
       "kind": "lua",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "authors": [
         "TimelessXI"
       ],
-      "description": "TimelessXI's Journal (/ql): your missions and quests and what to do next, without spoilers unless you want them, and a tracker with your current missions on the screen's edge.",
+      "description": "TimelessXI's Journal (/ql): your missions and quests and what to do next, without spoilers unless you want them, and a tracker with your current missions on the screen's edge, and your companions' stories as a book.",
       "files": [
         {
           "path": "init.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-journal/init.lua",
-          "sha256": "3a49ac58eaf75b4c2fa8278f6c2f08ed9f17ffa99c41470fda9657d8cb0baba4",
-          "size": 4844
+          "sha256": "46f19747e02d9b85d5010c533e4554f8739815d00248a3d8cc4e8a5fa1adea7a",
+          "size": 5579
         },
         {
           "path": "lib/action.lua",
@@ -3360,14 +3360,20 @@
         {
           "path": "lib/journal.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-journal/lib/journal.lua",
-          "sha256": "d1ff627fc0e7612bde96a013200ed9a07e8c29f9c273771f28afbb6feba37376",
-          "size": 13286
+          "sha256": "d483426bd0df258936ece814ce2f6a7d67e2a5a67848655472708191fc5b100f",
+          "size": 13736
         },
         {
           "path": "lib/protocol.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-journal/lib/protocol.lua",
           "sha256": "1f44216925e4625042e9d5483da1000d557fee89aedd32d347452cda539ec5cf",
           "size": 5351
+        },
+        {
+          "path": "lib/stories.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-journal/lib/stories.lua",
+          "sha256": "1237b45c29ac049830563261affa883ebe0a38099a2d6ae135062f06aed19402",
+          "size": 9522
         },
         {
           "path": "lib/style.lua",
@@ -3378,8 +3384,8 @@
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-journal/mod.toml",
-          "sha256": "fbbe9576edc81a04499afa70cc813e556ae833c7d6398d9f6d0024de0c13412a",
-          "size": 950
+          "sha256": "6c867698ec2c41a659a7e196f90addbec99fd510be498c85fa771d357cbf3ce2",
+          "size": 1039
         }
       ],
       "required": true,
@@ -3389,8 +3395,8 @@
           "args": "",
           "forms": [
             {
-              "args": "missions|quests|retail",
-              "help": "Opens it on that tab."
+              "args": "missions|quests|retail|stories",
+              "help": "Opens it on that tab (stories: your kept companions' stories)."
             },
             {
               "args": "tracker",
@@ -3502,6 +3508,77 @@
       }
     },
     {
+      "id": "timeless-masterworks",
+      "name": "Timeless Masterworks",
+      "kind": "lua",
+      "version": "1.0.0",
+      "authors": [
+        "TimelessXI"
+      ],
+      "description": "Your crafting ledger (/masterworks): skills and guild ranks, recipe mastery with the Masterwork chance each recipe has reached, Masterworks made, rested synths and Flash of Insight, today's craft orders and your apprentice.",
+      "files": [
+        {
+          "path": "init.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/init.lua",
+          "sha256": "5b2e669cbdd1a2b103f2f4aada40b7c1128fbc125881b5c00bc86a35432ac6a6",
+          "size": 3215
+        },
+        {
+          "path": "lib/action.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/lib/action.lua",
+          "sha256": "c5f9015a4ca8266302f05cfc6ea743efcb64aae67f085dbbbd0e68b3b0eacaa7",
+          "size": 652
+        },
+        {
+          "path": "lib/canvas.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/lib/canvas.lua",
+          "sha256": "8aefe1988225bedb0703d74ea4519b209f68558626c580c32a8039df1e3d5ee3",
+          "size": 10638
+        },
+        {
+          "path": "lib/ledger.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/lib/ledger.lua",
+          "sha256": "889b673759194d91b552475e356c3e38a8abcd3f8320c632e7325d589f7dd9e3",
+          "size": 10603
+        },
+        {
+          "path": "lib/protocol.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/lib/protocol.lua",
+          "sha256": "247cfc397aff7b2309b9de0bc3d338575005d3c02fc840fb7a0c54463bf731f8",
+          "size": 4739
+        },
+        {
+          "path": "lib/style.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/lib/style.lua",
+          "sha256": "c906bac41070aed7af413fa07cb10bc308baf1ab1be99c9f5e4c24e2ff3961f2",
+          "size": 2753
+        },
+        {
+          "path": "mod.toml",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/mod.toml",
+          "sha256": "3363c271e99dfebdc9f6e2d99715950979efeea726b658b787dbf18b439d8196",
+          "size": 712
+        }
+      ],
+      "required": true,
+      "commands": {
+        "masterworks": {
+          "help": "Opens or closes your crafting ledger.",
+          "args": "",
+          "forms": [
+            {
+              "args": "update",
+              "help": "Asks the server again now."
+            }
+          ]
+        },
+        "timelessmasterworks": {
+          "help": "The same as /masterworks.",
+          "args": ""
+        }
+      }
+    },
+    {
       "id": "timeless-menu",
       "name": "TimelessMenu",
       "kind": "lua",
@@ -3566,6 +3643,87 @@
         },
         "timeless": {
           "help": "The same as /tm.",
+          "args": ""
+        }
+      }
+    },
+    {
+      "id": "timeless-shop",
+      "name": "Timeless Shop",
+      "kind": "lua",
+      "version": "1.0.0",
+      "authors": [
+        "TimelessXI"
+      ],
+      "description": "The Goblin Bazaar, the Wandering Merchant and the Everglass Shop as real shop windows with item previews, dressed for the shopkeeper's race: a goblin's patched sack, a moogle's pom-pom, Elvaan gilt, Tarutaru stars...",
+      "files": [
+        {
+          "path": "init.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/init.lua",
+          "sha256": "5c053f0fe2c010e6895b5367819ac4714345462c21c2ccb089e5929d1e47ecb5",
+          "size": 6208
+        },
+        {
+          "path": "lib/action.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/lib/action.lua",
+          "sha256": "92b79965b0006555e819d84dbe0b19061c901ef9b4dc6fdbbdc1aa8685ec1861",
+          "size": 651
+        },
+        {
+          "path": "lib/canvas.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/lib/canvas.lua",
+          "sha256": "8aefe1988225bedb0703d74ea4519b209f68558626c580c32a8039df1e3d5ee3",
+          "size": 10638
+        },
+        {
+          "path": "lib/protocol.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/lib/protocol.lua",
+          "sha256": "709f48b4169f5e1ebd8f16a037bbbfaea738e53d69939cc9bd8c6f6b4e99d2f3",
+          "size": 3646
+        },
+        {
+          "path": "lib/style.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/lib/style.lua",
+          "sha256": "c906bac41070aed7af413fa07cb10bc308baf1ab1be99c9f5e4c24e2ff3961f2",
+          "size": 2753
+        },
+        {
+          "path": "lib/themes.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/lib/themes.lua",
+          "sha256": "4a9d8d941c81ddee79d38ada448a0a59df87efb7170054c9a4d739eea1444be0",
+          "size": 22929
+        },
+        {
+          "path": "lib/window.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/lib/window.lua",
+          "sha256": "e10a4a472896178e856d44b6389f51433000db5517632c05c0c65de355cdedfd",
+          "size": 15238
+        },
+        {
+          "path": "mod.toml",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/mod.toml",
+          "sha256": "825b2f6714f3877ddbd36aa76f53739b0ea53cfcb86d63145a5ce812846c6271",
+          "size": 723
+        }
+      ],
+      "required": true,
+      "commands": {
+        "storefront": {
+          "help": "The shop window: a sample shop in a race's colours, or close it.",
+          "args": "",
+          "forms": [
+            {
+              "args": "demo [race]",
+              "help": "A sample shop: goblin, moogle, hume, elvaan, tarutaru, mithra, galka, quadav, yagudo, orc, tonberry or guild."
+            },
+            {
+              "args": "close",
+              "help": "Closes the shop window."
+            }
+          ]
+        },
+        "timelessshop": {
+          "help": "The same as /storefront.",
           "args": ""
         }
       }

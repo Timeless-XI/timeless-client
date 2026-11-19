@@ -1,0 +1,22 @@
+name = "Timeless Masterworks"
+version = "1.0.0"
+authors = ["TimelessXI"]
+description = "Your crafting ledger (/masterworks): skills and guild ranks, recipe mastery with the Masterwork chance each recipe has reached, Masterworks made, rested synths and Flash of Insight, today's craft orders and your apprentice."
+permissions = ["packets.write"]
+
+[settings.key_masterworks]
+type = "key"
+default = ""
+label = "Masterworks Key"
+help = "A key that opens or closes the crafting ledger."
+
+[commands.masterworks]
+help = "Opens or closes your crafting ledger."
+args = ""
+forms = [
+  { args = "update", help = "Asks the server again now." },
+]
+
+[commands.timelessmasterworks]
+help = "The same as /masterworks."
+args = ""

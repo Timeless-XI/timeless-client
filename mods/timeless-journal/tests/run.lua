@@ -160,5 +160,64 @@ local lines = Canvas.wrap("A very long sentence that keeps going past the edge o
 for _, l in ipairs(lines) do ok(Canvas.measure(l) <= 120, "wrapped line fits: " .. l) end
 ok(#lines > 3, "wrapped into lines")
 
+
+-- The Stories tab: the companions' stories as a book
+do
+  local stories = require("lib.stories")
+  local function stexts()
+    local out = {}
+    for _, d in ipairs(H.windows.journal.el.stories.draw or {}) do if d.type == "text" then out[#out + 1] = d.text end end
+    return table.concat(out, " | ")
+  end
+  ok(J.TABS[4] == "stories", "a fourth tab")
+  H.take_sent()
+  H.command("/ql stories")
+  H.run(0.1)
+  local sent = H.take_sent()
+  local asked = false
+  for _, x in ipairs(sent) do if x == "st data" then asked = true end end
+  ok(asked, "opening the tab asks for the book: " .. table.concat(sent, ","))
+  ok(stexts():find("Opening the book", 1, true), "waiting line")
+  local BOOK = {
+    "ST1|B|n=2",
+    "ST1|K|1|n=Brokk,k=hume,lg=0,ch=2,d=1,a=0,b=900,t=The Letter Home",
+    "ST1|P|1|Family's Strength: +3 to every attribute",
+    "ST1|C|1.1|st=done,need=Trusted,np=600,z=the Konschtat Highlands,t=The Missing Letter",
+    "ST1|X|1.1|i1.1|Raven, can I ask you something? My sister writes me every month, ",
+    "ST1|X|1.1|i1.2|without fail. Nothing's come for two.",
+    "ST1|X|1.1|v1.1|Her letters... he was burning them to keep warm.",
+    "ST1|X|1.1|m1.1|Still have that letter you helped me get back, you know.",
+    "ST1|C|1.2|st=locked,need=Sworn,np=1500,z=Jugner Forest,t=Bring Her Home",
+    "ST1|K|2|n=Trion,k=trion,lg=1,ch=3,d=0,a=1,b=200,t=The Knight's Oath",
+    "ST1|P|2|Legendary Moment: their Legendary Moment, \"For San d'Oria!\"",
+    "ST1|C|2.1|st=active,need=Comrade,np=100,z=Jugner Forest,t=Shadows on the King's Road",
+    "ST1|X|2.1|i1.1|A knight of my own order has turned brigand, Raven.",
+    "ST1|C|2.2|st=locked,need=Trusted,np=600,z=Batallia Downs,t=The Black Banner",
+    "ST1|C|2.3|st=locked,need=Sworn,np=1500,z=Xarcabard,t=The Usurper's Blade",
+    "ST1|E",
+  }
+  for _, l in ipairs(BOOK) do ok(H.line(l) == false, "hidden: " .. l) end
+  local t = stexts()
+  ok(t:find("Brokk", 1, true) and t:find("Trion", 1, true), "a spine for each companion")
+  ok(t:find("The Letter Home", 1, true) and t:find("chapter 1 of 2", 1, true), "the first book: title and progress")
+  ok(t:find("The Missing Letter", 1, true) and t:find("Complete", 1, true), "chapter I done")
+  ok(t:find("My sister writes me every month, without fail.", 1, true), "how it began, pieces joined")
+  ok(t:find("how it ended", 1, true) and t:find("burning them to keep warm", 1, true), "how it ended")
+  ok(t:find("Brokk still says", 1, true), "the memory")
+  ok(not t:find("Bring Her Home", 1, true) and t:find("?", 1, true) and t:find("Opens at Sworn bond (900 / 1500).", 1, true), "chapter II: a secret, and when it opens")
+  ok(t:find("At the end: Family's Strength", 1, true), "the reward waiting")
+  H.check_draws("journal")
+  H.click("journal", "stories", "spine2")
+  t = stexts()
+  ok(t:find("The Knight's Oath", 1, true) and t:find("Legend", 1, true), "the legend's book")
+  ok(t:find("Under way", 1, true) and t:find("Bring Trion to Jugner Forest", 1, true), "a chapter under way: where to go")
+  ok(t:find("turned brigand", 1, true), "how it began")
+  ok(t:find("Opens after the chapter before.", 1, true), "the third chapter waits for the second")
+  H.check_draws("journal")
+  -- No stories yet
+  for _, l in ipairs({ "ST1|B|n=0", "ST1|E" }) do H.line(l) end
+  ok(stexts():find("No stories yet", 1, true), "no companions: how to start")
+end
+
 print(("ok: %d checks"):format(n))
 io.stdout:write(("ok: %d checks\n"):format(n))

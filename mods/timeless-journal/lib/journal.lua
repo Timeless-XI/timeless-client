@@ -6,6 +6,7 @@
 local S = require("lib.style")
 local Canvas = require("lib.canvas")
 local protocol = require("lib.protocol")
+local stories = require("lib.stories")
 
 local J = {}
 
@@ -15,8 +16,9 @@ J.WIDTH = 580
 local CW = 556 -- canvas width
 local TW = 270 -- the tracker's canvas width
 
-J.TABS = { "missions", "quests", "retail" }
-J.TAB_LABELS = { "Missions", "Quests", "Retail" }
+J.TABS = { "missions", "quests", "retail", "stories" }
+J.TAB_LABELS = { "Missions", "Quests", "Retail", "Stories" }
+J.stories = stories
 
 J.model = protocol.new_model()
 J.state = {
@@ -28,6 +30,7 @@ J.state = {
 
 -- Asks the server (set by init.lua: it owns the packet queue and the clock).
 J.ask = function() end
+J.ask_stories = function() end
 
 -- The player's choices, kept per character.
 local function prefs()
@@ -267,6 +270,7 @@ local function elements()
   list[#list + 1] = { type = "canvas", id = "missions", w = CW, h = 100, draw = {}, page = 1 }
   list[#list + 1] = { type = "canvas", id = "quests", w = CW, h = 100, draw = {}, page = 2 }
   list[#list + 1] = { type = "canvas", id = "retail", w = CW, h = 100, draw = {}, page = 3 }
+  list[#list + 1] = { type = "canvas", id = "stories", w = CW, h = 100, draw = {}, page = 4 }
   return list
 end
 
@@ -318,6 +322,7 @@ local function on_event(win, e)
   if Canvas.event(win, e) then return end
   if e.kind == "set" and e.id == "tabs" then
     J.state.tab = e.index
+    if J.TABS[e.index] == "stories" then J.ask_stories() end
     J.render_all()
   end
 end
@@ -330,6 +335,7 @@ function J.setup()
   Canvas.add(J.WIN, "missions", CW, J.draw_missions)
   Canvas.add(J.WIN, "quests", CW, J.draw_quests)
   Canvas.add(J.WIN, "retail", CW, J.draw_retail)
+  Canvas.add(J.WIN, "stories", CW, function(c) stories.draw(c, CW, function() Canvas.render(J.WIN, "stories") end) end)
   Canvas.add(J.TRACKER, "list", TW, J.draw_tracker)
   ui.on(J.WIN, on_event)
   ui.on(J.TRACKER, function(win, e) Canvas.event(win, e) end)
@@ -347,6 +353,7 @@ function J.open(tab)
     ui.show(J.WIN)
     J.ask()
   end
+  if J.TABS[J.state.tab] == "stories" then J.ask_stories() end
   J.render_all()
 end
 
