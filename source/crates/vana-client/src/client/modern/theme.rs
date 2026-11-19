@@ -29,12 +29,14 @@ const ATLASES: [(&str, &[u8]); 13] = [
     ("atlases/actions_2@2x.png", include_bytes!("../../../assets/modern/atlases/actions_2@2x.png")),
     ("atlases/actions_3@2x.png", include_bytes!("../../../assets/modern/atlases/actions_3@2x.png")),
 ];
-const FONTS: [(&str, &[u8]); 5] = [
+const FONTS: [(&str, &[u8]); 6] = [
     ("FiraSans-Regular", include_bytes!("../../../assets/fonts/FiraSans-Regular.ttf")),
     ("FiraSans-SemiBold", include_bytes!("../../../assets/fonts/FiraSans-SemiBold.ttf")),
     ("Inter-SemiBold", include_bytes!("../../../assets/fonts/Inter-SemiBold.ttf")),
     ("Inter-BoldItalic", include_bytes!("../../../assets/fonts/Inter-BoldItalic.ttf")),
     ("JetBrainsMono-Regular", include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf")),
+    // Timeless XI: the Timeless interface's typeface (style D, the user's pick, 2026-11-19), SIL OFL.
+    ("CarroisGothic-Regular", include_bytes!("../../../assets/fonts/CarroisGothic-Regular.ttf")),
 ];
 /// The window frames (80 x 80 logical, 24 insets, NINE_SLICE.md); their border is cut out with the border-only
 /// frame's alpha, which every variant shares.
@@ -534,8 +536,8 @@ pub fn install_fonts(ctx: &Context) {
     install_fonts_with(ctx, None);
 }
 
-/// Timeless XI: the fonts for the Timeless interface (`timeless`) or the modern one. Timeless (style D) sets labels
-/// and names in Fira Sans SemiBold, the classic lettering made crisp, in place of Inter Bold Italic / SemiBold.
+/// Timeless XI: the fonts for the Timeless interface (`timeless`) or the modern one. Timeless (style D) sets all its
+/// text, body, titles, names and labels, in Carrois Gothic (one weight), Fira Sans behind it for any glyph it lacks.
 pub fn install_fonts_for(ctx: &Context, timeless: bool) {
     install_fonts_inner(ctx, None, timeless);
 }
@@ -556,9 +558,13 @@ fn install_fonts_inner(ctx: &Context, body: Option<(Vec<u8>, Vec<u8>)>, timeless
             defs.font_data.insert("body-strong".into(), Arc::new(FontData::from_owned(s)));
             ("body-regular", "body-strong")
         }
+        None if timeless => ("CarroisGothic-Regular", "CarroisGothic-Regular"),
         None => ("FiraSans-Regular", "FiraSans-SemiBold"),
     };
     let mut fallbacks = defs.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+    if timeless {
+        fallbacks.insert(0, "FiraSans-Regular".into());
+    }
     let cjk = cjk_font().map(|f| defs.font_data.insert("cjk".into(), f)).is_some();
     if cjk {
         fallbacks.push("cjk".into());

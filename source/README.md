@@ -261,7 +261,7 @@ no code from the original client. To use it you need the game files from Square 
 
 vana-client is released under the [MIT License](LICENSE).
 
-Bundled third-party files keep their licenses: the Fira Sans, Inter and JetBrains Mono fonts are under the SIL
+Bundled third-party files keep their licenses: the Fira Sans, Inter, JetBrains Mono and Carrois Gothic fonts are under the SIL
 Open Font License (the texts are beside them in `crates/vana-client/assets/fonts`), and SMAA's area and search textures in
 `crates/vana-client/src/render/smaa` are under MIT (Jimenez et al., the text is beside them). The game's files are Square Enix's and are not
 covered by this license.

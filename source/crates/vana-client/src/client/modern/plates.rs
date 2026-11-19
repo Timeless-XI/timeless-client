@@ -34,9 +34,9 @@ fn metrics() -> &'static Mutex<HashMap<String, Raster>> {
 
 /// White text with a soft dark outline (straight alpha), padded for the italic overhang and the outline.
 fn rasterize(text: &str, px: f32) -> Option<(Raster, Vec<u8>)> {
-    // Timeless XI: the Timeless interface (style D) sets names upright in Fira Sans SemiBold, normally spaced.
+    // Timeless XI: the Timeless interface (style D) sets names in Carrois Gothic, normally spaced, leaning 4 degrees.
     let timeless = super::timeless_now();
-    let face = if timeless { "FiraSans-SemiBold" } else { "Inter-BoldItalic" };
+    let face = if timeless { "CarroisGothic-Regular" } else { "Inter-BoldItalic" };
     let tracking = if timeless { 0.015 } else { TRACKING };
     let font = FontRef::try_from_slice(super::theme::font(face)?).ok()?;
     let scale = PxScale::from(px);
