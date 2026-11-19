@@ -947,7 +947,18 @@ fn full(p: &mut Panels, w: &mut World) {
                 .fold(0.0, f32::max)
         })
     };
-    let height = (bottom - sh * 0.107 - riders).max(chrome() + 4.0 * row);
+    // Timeless XI: the riders' room comes from last frame's stack, which follows this window's own top (the location
+    // panel docks on it at a half-point gap, snapped to pixels): the measure swings by a pixel or so frame to frame and
+    // the maximized log bounced with it (owner 2026-11-19). Whole points, and a change under 2 points is ignored.
+    let riders = {
+        let id = egui::Id::unique("modern full log riders");
+        let was = p.ctx.data(|d| d.get_temp::<f32>(id));
+        let now = riders.ceil();
+        let keep = was.filter(|w| (w - now).abs() < 2.0).unwrap_or(now);
+        p.ctx.data_mut(|d| d.insert_temp(id, keep));
+        keep
+    };
+    let height = (bottom - sh * 0.107 - riders).round().max(chrome() + 4.0 * row);
     let lines_h = height - chrome();
     let tab = m.chat_tab.get();
     let battle_in_all = *p.battle_in_all;
