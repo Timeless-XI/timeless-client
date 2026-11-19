@@ -898,15 +898,54 @@ pub fn school_left(done: u32) -> (u32, u32, f32) {
 }
 
 /// "3-9 casts left" / "up to 9 casts left" / "1 cast left" / "last cast".
-pub fn casts_left(lo: u32, hi: u32) -> String {
-    if hi == 0 {
-        "last cast".into()
-    } else if lo == hi {
-        format!("{hi} cast{} left", if hi == 1 { "" } else { "s" })
-    } else if lo == 0 {
-        format!("up to {hi} casts left")
-    } else {
-        format!("{lo}-{hi} casts left")
+/// Timeless XI (owner 2026-11-19): how much of the school may be left, as a count that only goes down: "up to N fish
+/// remain" (every school cast hooks a fish), "last fish of the school" on its final cast. `hi` from `school_left`.
+pub fn fish_left(hi: u32) -> String {
+    match hi {
+        0 => "last fish of the school".into(),
+        1 => "up to 1 fish remains".into(),
+        _ => format!("up to {hi} fish remain"),
+    }
+}
+
+/// The School of Fish window's message after a school ends or the spot wears out (shown with a ring that runs down
+/// for `secs` seconds until `until`).
+#[derive(Clone, Debug, Default)]
+pub struct Notice {
+    pub title: String,
+    /// (fish caught, casts) from the school that ended.
+    pub caught: Option<(u32, u32)>,
+    pub lines: Vec<String>,
+    /// The spot is exhausted (amber).
+    pub exhausted: bool,
+    pub until: u64,
+    pub secs: u64,
+}
+
+impl Notice {
+    fn school(title: &str, last: (u32, u32), lines: &[&str], now: u64, secs: u64) -> Notice {
+        let (casts, fish) = last;
+        Notice {
+            title: title.into(),
+            caught: Some((fish, casts)),
+            lines: lines.iter().map(|l| l.to_string()).collect(),
+            exhausted: false,
+            until: now + secs,
+            secs,
+        }
+    }
+
+    /// The notice as one chat line (when the fishing windows are closed).
+    pub fn text(&self) -> String {
+        let mut out = format!("{}.", self.title);
+        if let Some((fish, casts)) = self.caught {
+            out.push_str(&format!(" You caught {fish} fish in {casts} casts."));
+        }
+        for l in &self.lines {
+            out.push(' ');
+            out.push_str(l);
+        }
+        out
     }
 }
 
@@ -971,8 +1010,8 @@ pub struct Angler {
     prefs_for: String,
     pub hole: Hole,
     pub session: Session,
-    /// A notice under the banner ("The school of fish moved on ...") and until when (unix seconds).
-    pub notice: Option<(String, u64)>,
+    /// The School of Fish window's message after a school ends ("The school of fish moved on ...").
+    pub notice: Option<Notice>,
     /// The catch on the line (s2c 0x115's item id; 0 unknown), and a monster.
     pub hooked: Option<(u16, bool)>,
     /// The status we last saw (a cast = turning 56 from not fishing).
@@ -1150,16 +1189,17 @@ pub fn tick(w: &mut World, dt: f32) {
         on_line(w, &line, now);
     }
     if let Some(why) = w.angler.hole.check(zone, x, z, now) {
-        let (c, n) = w.angler.hole.last_school.unwrap_or_default();
-        let text = format!("The school of fish moved on ({why}).\nYou caught {n} fish in {c} casts.");
+        let last = w.angler.hole.last_school.unwrap_or_default();
+        let because = format!("Because {why}.");
+        let note = Notice::school("The school of fish moved on", last, &[&because], now, 8);
         if w.angler.prefs.banner {
-            w.angler.notice = Some((text, now + 8));
+            w.angler.notice = Some(note);
         } else {
             // The fishing windows are closed: the notice goes to the chat (the server's own lines are there already).
-            chat_note(w, &text.replace('\n', " "));
+            chat_note(w, &note.text());
         }
     }
-    if w.angler.notice.as_ref().is_some_and(|n| now >= n.1) {
+    if w.angler.notice.as_ref().is_some_and(|n| now >= n.until) {
         w.angler.notice = None;
     }
     w.angler.next_view -= dt;
@@ -1220,23 +1260,28 @@ fn on_line(w: &mut World, line: &str, now: u64) {
                 a.session.schools += 1;
             }
             Some(Msg::Gone) => {
-                if let Some((c, n)) = a.hole.last_school {
-                    a.notice = Some((
-                        format!(
-                            "The school of fish moved on. You caught {n} fish in {c} casts.\nThe fish still bite here. Move 20+ \
-                             yalms away for a chance to find another school!"
-                        ),
-                        now + 10,
+                if let Some(last) = a.hole.last_school {
+                    a.notice = Some(Notice::school(
+                        "The school of fish moved on",
+                        last,
+                        &["The fish still bite here. Move 20+ yalms away for a chance to find another school!"],
+                        now,
+                        10,
                     ));
                 }
             }
             Some(Msg::Exhausted) => {
-                a.notice = Some((
-                    "This fishing spot is exhausted: the fish here bite half as often now.\nMove 20+ yalms away to fresh \
-                     waters for full bites and a chance at a school of fish!"
-                        .into(),
-                    now + 10,
-                ));
+                a.notice = Some(Notice {
+                    title: "This fishing spot is exhausted".into(),
+                    caught: None,
+                    lines: vec![
+                        "The fish here bite half as often now.".into(),
+                        "Move 20+ yalms away to fresh waters for full bites and a chance at a school of fish!".into(),
+                    ],
+                    exhausted: true,
+                    until: now + 10,
+                    secs: 10,
+                });
             }
             _ => {}
         }
@@ -1287,8 +1332,8 @@ pub fn let_school_go(w: &mut World) {
     super::super::fishing::send_para(w, 11, 5, 0);
     let now = now_secs();
     w.angler.hole.end_school(now);
-    let (c, n) = w.angler.hole.last_school.unwrap_or_default();
-    w.angler.notice = Some((format!("You let the school of fish go.\nYou caught {n} fish in {c} casts."), now + 6));
+    let last = w.angler.hole.last_school.unwrap_or_default();
+    w.angler.notice = Some(Notice::school("You let the school of fish go", last, &[], now, 6));
 }
 
 pub fn reset_session(w: &mut World) {
@@ -1423,7 +1468,12 @@ mod tests {
         let o = p.odds(174, 50.0, 0.0, 20);
         assert!(o.pond && o.wait > 0 && o.now == 0.0);
         assert_eq!(school_left(1), (6, 12, 1.0));
-        assert_eq!(casts_left(0, 3), "up to 3 casts left");
+        assert_eq!(fish_left(3), "up to 3 fish remain");
+        assert_eq!(fish_left(1), "up to 1 fish remains");
+        assert_eq!(fish_left(0), "last fish of the school");
+        let n = Notice::school("The school of fish moved on", (7, 6), &["Because you changed zones."], 100, 8);
+        assert_eq!(n.until, 108);
+        assert_eq!(n.text(), "The school of fish moved on. You caught 6 fish in 7 casts. Because you changed zones.");
     }
 
     #[test]

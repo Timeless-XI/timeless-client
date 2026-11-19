@@ -2,7 +2,8 @@
 //! player can drag) and the school of fish banner at the top of the screen, in the Timeless palette. The layout is the
 //! add-on's (timelessangler 1.39): zone and fishing pool, rod and bait, the fish they hook here with the chance per
 //! cast, fishing skill, moon and bite time, the Fishing Spot Fatigue Tracker (with End school), the session, and the
-//! Fish / Hide buttons.
+//! Fish / Hide buttons. Owner 2026-11-19 (HUD concepts canvas): the Almanac is an index (skill, time and moon, the
+//! spot's state, the pages) beside the page, and the school banner is the "Ring" School of Fish window.
 
 use super::super::World;
 use super::super::timeless::angler::{self, View};
@@ -45,6 +46,10 @@ impl K {
     }
     fn edge() -> Color32 {
         rgb(77, 66, 117)
+    }
+    /// The darker well behind a ring's centre and the Almanac's index (the fishing bar's track colour).
+    fn well() -> Color32 {
+        rgb(20, 22, 44)
     }
 }
 
@@ -95,6 +100,17 @@ struct Asks {
 }
 
 const TABS: [&str; 7] = ["Current Zone", "Tracker", "Moon Effects", "Zones", "Fish", "Schools", "Settings"];
+
+/// One line under each page's title (and the index entry's tooltip).
+const PAGE_NOTE: [&str; 7] = [
+    "What bites where you are standing, with your rod and bait",
+    "Everything you have caught this session",
+    "The moon, the time of day and how fast fish bite",
+    "Every fishing zone and what lives there",
+    "Look up any fish or bait",
+    "Schools of fish and your current fishing spot",
+    "Which fishing windows show",
+];
 
 impl super::Modern {
     /// The Angler's HUD and the school banner, if they show.
@@ -300,14 +316,14 @@ impl super::Modern {
                             meter(ui, &a.hole, o.fresh);
                         }
                         if school {
-                            let (lo, hi, _) = angler::school_left(a.hole.school_casts);
+                            let (_, hi, _) = angler::school_left(a.hole.school_casts);
                             ui.horizontal(|ui| {
                                 text(
                                     ui,
                                     &format!(
                                         "School of fish! Cast #{}  -  {}",
                                         a.hole.school_casts,
-                                        angler::casts_left(lo, hi)
+                                        angler::fish_left(hi)
                                     ),
                                     K::gold(),
                                 );
@@ -533,12 +549,25 @@ impl super::Modern {
         ctx.request_repaint();
     }
 
+    /// The School of Fish window (owner 2026-11-19, the "Ring" mock). Running: a ring of 13 segments (the cast that
+    /// found the school + up to 12 more: gold done, lilac certain, faint maybe) around "Cast #N", the title, "up to N
+    /// fish remain", the two perks as green pills, then the chance the next cast is still in the school and the fish
+    /// caught from it. Ended: a ring that runs down while the notice shows, around the fish caught (75 when the spot
+    /// is exhausted), the title, the catch and the notice's lines.
     fn tl_angler_banner(&self, ctx: &Context, w: &World, v: &View) {
         let a = &w.angler;
         if !a.prefs.banner || (!a.hole.active && a.notice.is_none()) {
             return;
         }
         let top = pos2(ctx.content_rect().center().x, ctx.content_rect().top() + 80.0);
+        let exhausted = !a.hole.active && a.notice.as_ref().is_some_and(|n| n.exhausted);
+        let edge = if a.hole.active {
+            K::gold()
+        } else if exhausted {
+            K::amber()
+        } else {
+            K::edge()
+        };
         egui::Area::new(Id::unique("tl angler banner"))
             .order(Order::Foreground)
             .interactable(false)
@@ -547,70 +576,146 @@ impl super::Modern {
             .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(K::panel())
-                    .stroke(Stroke::new(2.0, K::gold()))
-                    .corner_radius(CornerRadius::same(8))
-                    .inner_margin(egui::Margin::symmetric(16, 10))
+                    .stroke(Stroke::new(2.0, edge))
+                    .corner_radius(CornerRadius::same(18))
+                    .inner_margin(egui::Margin::symmetric(22, 18))
                     .show(ui, |ui| {
                         let small = FontId::proportional(13.0);
+                        let tau = std::f32::consts::TAU;
+                        let up = -std::f32::consts::FRAC_PI_2;
                         if a.hole.active {
-                            let t = ctx.input(|i| i.time) as f32;
-                            let pulse = 0.75 + 0.25 * (t * 4.0).sin();
-                            ui.label(
-                                RichText::new("SCHOOL OF FISH!")
-                                    .font(FontId::proportional(22.0))
-                                    .strong()
-                                    .color(K::gold().gamma_multiply(pulse)),
-                            );
-                            let (lo, hi, p) = angler::school_left(a.hole.school_casts);
-                            let wait = angler::bite_wait(v.date.moon, v.date.hour, v.waist, true);
-                            ui.label(RichText::new("+ Every cast hooks a fish").font(small.clone()).color(K::green()));
-                            ui.label(
-                                RichText::new(format!("+ Fish bite in half the time (about {wait} s)"))
-                                    .font(small.clone())
-                                    .color(K::green()),
-                            );
-                            ui.label(
-                                RichText::new(format!(
-                                    "School cast #{}  -  {}",
-                                    a.hole.school_casts,
-                                    angler::casts_left(lo, hi)
-                                ))
-                                .font(small.clone())
-                                .color(K::text()),
-                            );
-                            // Pips: the cast that found it + up to 12 more; gold done, blue certain, faint maybe.
-                            let (r, _) = ui.allocate_exact_size(vec2(13.0 * 18.0, 12.0), egui::Sense::hover());
-                            for i in 0..13u32 {
-                                let x = r.min.x + i as f32 * 18.0;
-                                let c = if i < a.hole.school_casts {
-                                    K::gold()
-                                } else if i < 7 {
-                                    K::blue()
-                                } else {
-                                    K::gold().gamma_multiply(0.3)
-                                };
-                                ui.painter().rect_filled(
-                                    egui::Rect::from_min_size(pos2(x, r.min.y), vec2(14.0, 10.0)),
-                                    CornerRadius::same(2),
-                                    c,
+                            ui.horizontal(|ui| {
+                                let (r, _) = ui.allocate_exact_size(vec2(118.0, 118.0), egui::Sense::hover());
+                                let p = ui.painter();
+                                let c = r.center();
+                                let seg = tau / 13.0;
+                                for i in 0..13u32 {
+                                    let col = if i < a.hole.school_casts {
+                                        K::gold()
+                                    } else if i < 7 {
+                                        K::blue()
+                                    } else {
+                                        K::edge()
+                                    };
+                                    let a0 = up + i as f32 * seg + 0.06;
+                                    super::tlfish::arc(p, c, 52.0, a0, a0 + seg - 0.12, Stroke::new(9.0, col));
+                                }
+                                p.circle_filled(c, 30.0, K::well());
+                                p.circle_stroke(c, 30.0, Stroke::new(1.5, K::gold()));
+                                p.text(c - vec2(0.0, 9.0), Align2::CENTER_CENTER, "Cast", FontId::proportional(11.0), K::muted());
+                                p.text(
+                                    c + vec2(0.0, 8.0),
+                                    Align2::CENTER_CENTER,
+                                    format!("#{}", a.hole.school_casts),
+                                    FontId::proportional(20.0),
+                                    K::gold(),
                                 );
-                            }
-                            ui.label(
-                                RichText::new(format!("Chance your next cast is still in the school: {}", pct(p)))
-                                    .font(small.clone())
-                                    .color(K::muted()),
-                            );
-                            ui.label(
-                                RichText::new(format!("Fish caught from this school: {}", a.hole.school_catches))
-                                    .font(small.clone())
-                                    .color(K::muted()),
-                            );
-                        } else if let Some((n, _)) = &a.notice {
-                            ui.label(RichText::new(n).font(small.clone()).color(K::gold()));
+                                ui.add_space(14.0);
+                                ui.vertical(|ui| {
+                                    let t = ctx.input(|i| i.time) as f32;
+                                    let pulse = 0.75 + 0.25 * (t * 4.0).sin();
+                                    ui.label(
+                                        RichText::new("School of Fish!")
+                                            .font(FontId::proportional(24.0))
+                                            .strong()
+                                            .color(K::gold().gamma_multiply(pulse)),
+                                    );
+                                    let (_, hi, chance) = angler::school_left(a.hole.school_casts);
+                                    let wait = angler::bite_wait(v.date.moon, v.date.hour, v.waist, true);
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "School cast #{}  -  {}",
+                                            a.hole.school_casts,
+                                            angler::fish_left(hi)
+                                        ))
+                                        .font(small.clone())
+                                        .color(K::muted()),
+                                    );
+                                    ui.add_space(4.0);
+                                    ui.horizontal(|ui| {
+                                        green_pill(ui, "Every cast hooks a fish");
+                                        green_pill(ui, &format!("Fish bite in half the time (about {wait} s)"));
+                                    });
+                                    ui.add_space(4.0);
+                                    ui.horizontal(|ui| {
+                                        stat(ui, &pct(chance), "Next cast still in the school");
+                                        ui.add_space(18.0);
+                                        stat(ui, &a.hole.school_catches.to_string(), "Fish caught from this school");
+                                    });
+                                });
+                            });
+                        } else if let Some(n) = &a.notice {
+                            ui.horizontal(|ui| {
+                                let (r, _) = ui.allocate_exact_size(vec2(92.0, 92.0), egui::Sense::hover());
+                                let p = ui.painter();
+                                let c = r.center();
+                                let now = angler::now_secs();
+                                let f = if n.secs == 0 { 0.0 } else { n.until.saturating_sub(now) as f32 / n.secs as f32 };
+                                p.circle_stroke(c, 40.0, Stroke::new(6.0, K::edge()));
+                                super::tlfish::arc(
+                                    p,
+                                    c,
+                                    40.0,
+                                    up,
+                                    up + tau * f.clamp(0.0, 1.0),
+                                    Stroke::new(6.0, if n.exhausted { K::amber() } else { K::blue() }),
+                                );
+                                p.circle_filled(c, 27.0, K::well());
+                                match n.caught {
+                                    Some((fish, _)) => {
+                                        p.text(
+                                            c - vec2(0.0, 6.0),
+                                            Align2::CENTER_CENTER,
+                                            fish.to_string(),
+                                            FontId::proportional(20.0),
+                                            K::gold(),
+                                        );
+                                        p.text(c + vec2(0.0, 11.0), Align2::CENTER_CENTER, "caught", FontId::proportional(11.0), K::muted());
+                                    }
+                                    None => {
+                                        p.text(c, Align2::CENTER_CENTER, "75", FontId::proportional(20.0), K::amber());
+                                    }
+                                }
+                                ui.add_space(12.0);
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new(&n.title).font(FontId::proportional(19.0)).strong().color(K::text()));
+                                    if let Some((fish, casts)) = n.caught {
+                                        ui.label(
+                                            RichText::new(format!("You caught {fish} fish in {casts} casts."))
+                                                .font(FontId::proportional(14.0))
+                                                .strong()
+                                                .color(K::gold()),
+                                        );
+                                    }
+                                    for l in &n.lines {
+                                        ui.label(RichText::new(l).font(small.clone()).color(K::muted()));
+                                    }
+                                });
+                            });
                         }
                     });
             });
     }
+}
+
+/// A green pill (a perk of the school of fish).
+fn green_pill(ui: &mut egui::Ui, s: &str) {
+    egui::Frame::new()
+        .fill(Color32::from_rgb(28, 48, 40))
+        .stroke(Stroke::new(1.0, K::green()))
+        .corner_radius(CornerRadius::same(12))
+        .inner_margin(egui::Margin::symmetric(12, 4))
+        .show(ui, |ui| {
+            ui.label(RichText::new(s).font(FontId::proportional(12.0)).strong().color(K::green()));
+        });
+}
+
+/// A big number with its label under it.
+fn stat(ui: &mut egui::Ui, value: &str, label: &str) {
+    ui.vertical(|ui| {
+        ui.label(RichText::new(value).font(FontId::proportional(20.0)).strong().color(K::text()));
+        ui.label(RichText::new(label).font(FontId::proportional(12.0)).color(K::muted()));
+    });
 }
 
 impl super::Modern {
@@ -627,7 +732,7 @@ impl super::Modern {
         egui::Window::new(RichText::new("Angler's Almanac").color(K::gold()))
             .id(Id::unique("tl angler guide"))
             .open(&mut open)
-            .default_size(vec2(720.0, 480.0))
+            .default_size(vec2(900.0, 560.0))
             .resizable(true)
             .collapsible(false)
             .frame(
@@ -638,26 +743,92 @@ impl super::Modern {
                     .inner_margin(egui::Margin::same(12)),
             )
             .show(ctx, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    for (k, t) in TABS.iter().enumerate() {
-                        let on = g.tab == k;
-                        if ui
-                            .selectable_label(on, RichText::new(*t).color(if on { K::gold() } else { K::text() }))
-                            .clicked()
-                        {
-                            g.tab = k;
-                        }
-                    }
-                });
-                ui.separator();
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match g.tab {
-                    0 => self.tab_here(ctx, ui, w, v, g),
-                    1 => self.tab_tracker(ctx, ui, w, asks),
-                    2 => tab_moon(ui, v),
-                    3 => self.tab_zones(ctx, ui, w, v, g),
-                    4 => self.tab_fish(ctx, ui, w, v, g),
-                    5 => tab_schools(ui, w, v, asks),
-                    _ => tab_settings(ui, prefs),
+                // Timeless XI (owner 2026-11-19, the "Field Journal" layout): an index down the left with your skill,
+                // the time and moon, and the fishing spot's state, then one entry per page; the page on the right
+                // under its title and a one-line note. The pages themselves are unchanged.
+                let full = ui.available_height();
+                ui.horizontal_top(|ui| {
+                    egui::Frame::new()
+                        .fill(K::well())
+                        .stroke(Stroke::new(1.0, K::edge()))
+                        .corner_radius(CornerRadius::same(6))
+                        .inner_margin(egui::Margin::symmetric(12, 12))
+                        .show(ui, |ui| {
+                            ui.set_width(186.0);
+                            ui.set_min_height((full - 26.0).max(120.0));
+                            ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
+                            ui.label(RichText::new("Angler's Almanac").font(FontId::proportional(18.0)).strong().color(K::gold()));
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(format!("Fishing skill {}", v.skill()))
+                                        .font(FontId::proportional(13.0))
+                                        .color(K::gold()),
+                                );
+                                if v.gear > 0 {
+                                    ui.label(
+                                        RichText::new(format!("(+{} gear)", v.gear))
+                                            .font(FontId::proportional(13.0))
+                                            .color(K::green()),
+                                    );
+                                }
+                            });
+                            ui.label(
+                                RichText::new(format!(
+                                    "{:02}:00  {} ({}%)",
+                                    v.date.hour,
+                                    angler::MOON_NAMES[(v.date.moon as usize).min(angler::MOON_NAMES.len() - 1)],
+                                    v.date.moon_pct
+                                ))
+                                .font(FontId::proportional(13.0))
+                                .color(K::muted()),
+                            );
+                            let h = &w.angler.hole;
+                            ui.label(
+                                RichText::new(if h.active {
+                                    "School of Fish Active!".to_string()
+                                } else {
+                                    format!("Cast #{}", h.casts)
+                                })
+                                .font(FontId::proportional(13.0))
+                                .color(if h.active { K::gold() } else { K::muted() }),
+                            );
+                            ui.add_space(4.0);
+                            ui.separator();
+                            ui.add_space(2.0);
+                            for (k, t) in TABS.iter().enumerate() {
+                                let on = g.tab == k;
+                                let r = ui
+                                    .add_sized(
+                                        [ui.available_width(), 26.0],
+                                        egui::Button::selectable(
+                                            on,
+                                            RichText::new(*t)
+                                                .font(FontId::proportional(14.0))
+                                                .color(if on { K::gold() } else { K::text() }),
+                                        ),
+                                    )
+                                    .on_hover_text(PAGE_NOTE[k]);
+                                if r.clicked() {
+                                    g.tab = k;
+                                }
+                            }
+                        });
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        let k = g.tab.min(TABS.len() - 1);
+                        ui.label(RichText::new(TABS[k]).font(FontId::proportional(22.0)).strong().color(K::gold()));
+                        ui.label(RichText::new(PAGE_NOTE[k]).font(FontId::proportional(13.0)).color(K::dim()));
+                        ui.separator();
+                        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match g.tab {
+                            0 => self.tab_here(ctx, ui, w, v, g),
+                            1 => self.tab_tracker(ctx, ui, w, asks),
+                            2 => tab_moon(ui, v),
+                            3 => self.tab_zones(ctx, ui, w, v, g),
+                            4 => self.tab_fish(ctx, ui, w, v, g),
+                            5 => tab_schools(ui, w, v, asks),
+                            _ => tab_settings(ui, prefs),
+                        });
+                    });
                 });
             });
         if !open {
