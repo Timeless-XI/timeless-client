@@ -16,10 +16,13 @@ pub enum Style {
     Corners,
     /// No drawn line: a soft shadow under the window and a light top edge.
     Shadow,
+    /// Timeless XI: the Timeless interface's (style D): dusk glass, a one-pixel edge a lighter shade of the glass
+    /// (the palette's bronze), a faint highlight along the top and a soft shadow. Always the Timeless interface's.
+    Glass,
 }
 
 impl Style {
-    pub const ALL: [Style; 5] = [Style::Pack, Style::Hairline, Style::Gilt, Style::Corners, Style::Shadow];
+    pub const ALL: [Style; 6] = [Style::Pack, Style::Hairline, Style::Gilt, Style::Corners, Style::Shadow, Style::Glass];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -28,6 +31,7 @@ impl Style {
             Style::Gilt => "gilt",
             Style::Corners => "corners",
             Style::Shadow => "shadow",
+            Style::Glass => "glass",
         }
     }
 
@@ -156,8 +160,54 @@ fn shapes(m: &Modern, frame: &str, body: Rect, round: CornerRadius, style: Style
                 Stroke::new(1.0, Color32::from_white_alpha(26)),
             ));
         }
+        Style::Glass => {
+            let shadow =
+                egui::epaint::Shadow { offset: [0, 4], blur: 14, spread: 0, color: Color32::from_black_alpha(110) };
+            v.push(Shape::Rect(shadow.as_shape(body, round)));
+            v.push(Shape::Rect(RectShape::filled(body, round, m.bg(m.theme.color("surface")))));
+            // The glass darkens toward the bottom: the lower half under a soft wash of the night colour.
+            let night = m.bg(m.theme.color("charcoal")).gamma_multiply(0.55);
+            let mut wash = Mesh::default();
+            let (top, bottom) = (body.center().y, body.max.y - round.se.max(round.sw) as f32);
+            if bottom > top {
+                for (y, c) in [(top, Color32::TRANSPARENT), (bottom, night)] {
+                    wash.colored_vertex(pos2(body.min.x + 1.0, y), c);
+                    wash.colored_vertex(pos2(body.max.x - 1.0, y), c);
+                }
+                wash.add_triangle(0, 1, 2);
+                wash.add_triangle(1, 3, 2);
+                v.push(Shape::mesh(wash));
+                v.push(Shape::Rect(RectShape::filled(
+                    Rect::from_min_max(pos2(body.min.x, bottom), body.max),
+                    CornerRadius { nw: 0, ne: 0, sw: round.sw, se: round.se },
+                    night,
+                )));
+            }
+            let edge = match frame {
+                "window_focused" => lighter(m.theme.color("bronze"), 0.22),
+                "window_alert" => m.theme.color("hp").gamma_multiply(0.8),
+                "window_inactive" => m.theme.color("bronze").gamma_multiply(0.7),
+                _ => m.theme.color("bronze"),
+            };
+            v.push(Shape::Rect(RectShape::stroke(body, round, Stroke::new(1.0, edge), StrokeKind::Inside)));
+            v.push(Shape::line_segment(
+                [pos2(body.min.x + 6.0, body.min.y + 1.5), pos2(body.max.x - 6.0, body.min.y + 1.5)],
+                Stroke::new(1.0, Color32::from_white_alpha(20)),
+            ));
+        }
     }
     v
+}
+
+/// Timeless XI: `c` moved `t` (0..1) toward white.
+pub fn lighter(c: Color32, t: f32) -> Color32 {
+    let k = |v: u8| (v as f32 + (255.0 - v as f32) * t).round() as u8;
+    Color32::from_rgba_unmultiplied(k(c.r()), k(c.g()), k(c.b()), c.a())
+}
+
+/// The style windows are drawn in: the Timeless interface's own (Glass), else the chosen one.
+fn current(m: &Modern) -> Style {
+    if m.theme.timeless() { Style::Glass } else { m.border_style.get() }
 }
 
 /// A window's frame over `r` in the current style (Modern::border_style); `frame` is the pack's name for it
@@ -165,7 +215,7 @@ fn shapes(m: &Modern, frame: &str, body: Rect, round: CornerRadius, style: Style
 pub fn window(m: &Modern, frame: &str, r: Rect) -> Shape {
     // A frameless panel ("none": the status icons) stays bare in every style.
     let Some(f) = m.art.frame(frame) else { return Shape::Noop };
-    let style = m.border_style.get();
+    let style = current(m);
     if style == Style::Pack {
         return paint::window(&f, r, 1.0, m.opacity.get());
     }
@@ -175,6 +225,6 @@ pub fn window(m: &Modern, frame: &str, r: Rect) -> Shape {
 /// An edge window's frame in the current style: `ext` runs past the screen's edge on the anchored side, whose corners
 /// `round` leaves square. None in the pack style (the edge windows draw theirs there).
 pub fn edge(m: &Modern, ext: Rect, round: CornerRadius) -> Option<Shape> {
-    let style = m.border_style.get();
+    let style = current(m);
     (style != Style::Pack).then(|| Shape::Vec(shapes(m, "window_normal", ext, round, style)))
 }

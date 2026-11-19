@@ -1,16 +1,16 @@
 {
   "name": "Timeless",
-  "note": "The Timeless interface's palette (Settings > Client > Interface > Timeless). Same keys as assets/modern/theme.json; a key left out keeps the modern colour. Colours from the Timeless XI website and launcher: obsidian, steel blue, ice, hourglass gold.",
+  "note": "The Timeless interface's palette (Settings > Client > Interface > Timeless): style D, Dusk Remastered. Same keys as assets/modern/theme.json; a key left out keeps the modern colour. Dusk-violet glass edged by a lighter shade of itself (bronze: every frame, tab and rule), cream text, cream-gold titles, candle gold, lilac focus.",
   "palette": {
-    "charcoal": "#0a0b12",
-    "surface": "#11141d",
-    "bronze": "#5c6b85",
-    "gold": "#d6e1f0",
-    "focus": "#8fb2e6",
-    "hp": "#e0606c",
-    "mp": "#5f9be6",
-    "tp": "#e3c98e",
-    "text": "#e6ecf5",
-    "muted": "#98a3b8"
+    "charcoal": "#14162c",
+    "surface": "#282042",
+    "bronze": "#4d4275",
+    "gold": "#f3dfb2",
+    "focus": "#a995d6",
+    "hp": "#e76f6f",
+    "mp": "#6fa8e7",
+    "tp": "#f0c46e",
+    "text": "#f6efe0",
+    "muted": "#c2b6cf"
   }
 }

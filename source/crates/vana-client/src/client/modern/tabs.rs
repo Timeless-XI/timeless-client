@@ -38,7 +38,13 @@ pub fn baseline(p: &Painter, m: &super::Modern, row: Rect, alpha: f32) {
 pub fn paint(p: &Painter, m: &super::Modern, r: Rect, label: &str, font: &FontId, s: State, alpha: f32) {
     let radius = CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 };
     let (face, edge, text) = if s.open {
-        (m.theme.color("surface"), m.theme.color("gold").gamma_multiply(0.9), m.theme.color("gold"))
+        // Timeless XI: the open tab's box a lighter shade of the glass's edge, not gold.
+        let edge = if m.theme.timeless() {
+            super::borders::lighter(m.theme.color("bronze"), 0.3)
+        } else {
+            m.theme.color("gold").gamma_multiply(0.9)
+        };
+        (m.theme.color("surface"), edge, m.theme.color("gold"))
     } else if s.hover {
         (
             m.theme.color("surface").gamma_multiply(0.85),

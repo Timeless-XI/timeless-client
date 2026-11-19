@@ -126,6 +126,8 @@ pub struct Modern {
     /// Textures made from game files and mods (icons, maps, mod images), with when each was last drawn (egui's
     /// time): one unseen for IMAGE_KEEP seconds goes (Modern::texture).
     images: std::cell::RefCell<std::collections::HashMap<String, (Option<egui::TextureHandle>, f64)>>,
+    /// Timeless XI: this frame's time (egui's) and the milliseconds spent upscaling icons in it (game_icon).
+    hd_budget: std::cell::Cell<(f64, f32)>,
     images_pruned: std::cell::Cell<f64>,
     /// The full log's find: its key (the log's span and edits, the text, the tab) and the lines it found.
     log_found: std::cell::RefCell<Option<((usize, usize, u64, String, u8, bool), std::rc::Rc<Vec<usize>>)>>,
@@ -226,6 +228,7 @@ impl Modern {
             row_style: Default::default(),
             border_style: Default::default(),
             images: Default::default(),
+            hd_budget: Default::default(),
             images_pruned: Default::default(),
             log_found: Default::default(),
             status_tips: Default::default(),
@@ -1576,11 +1579,53 @@ impl Modern {
         self.images.borrow_mut().retain(|_, e| now - e.1 <= IMAGE_KEEP);
     }
 
+    /// Timeless XI: a game icon (`make`: its width, height and RGBA from the game's files) as an egui texture. In the
+    /// Timeless interface it goes through the HD upscaler (timeless::hdicon) at about the screen's pixel density; a
+    /// few milliseconds of upscaling a frame at most, so a full bag opening shows the plain icons for a frame or two
+    /// rather than stalling, each turning HD on a following frame.
+    fn game_icon(
+        &self,
+        ctx: &Context,
+        key: &str,
+        make: impl FnOnce() -> Option<(usize, usize, Vec<u8>)>,
+    ) -> Option<egui::TextureId> {
+        use super::timeless::hdicon;
+        let plain = |make: Box<dyn FnOnce() -> Option<(usize, usize, Vec<u8>)> + '_>| {
+            self.texture(ctx, key, || {
+                let (w, h, rgba) = make()?;
+                Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba))
+            })
+        };
+        if !self.theme.timeless() {
+            return plain(Box::new(make));
+        }
+        let scale = hdicon::scale_for(ctx.pixels_per_point());
+        let hd_key = format!("{key} hd{scale}");
+        let now = ctx.input(|i| i.time);
+        if !self.images.borrow().contains_key(&hd_key) {
+            let (frame, spent) = self.hd_budget.get();
+            let spent = if frame == now { spent } else { 0.0 };
+            if spent > HD_BUDGET_MS {
+                self.hd_budget.set((now, spent));
+                return plain(Box::new(make));
+            }
+            let t0 = std::time::Instant::now();
+            let id = self.texture(ctx, &hd_key, || {
+                let (w, h, rgba) = make()?;
+                let (w, h, out) = hdicon::upscale(w, h, &rgba, scale)?;
+                Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &out))
+            });
+            self.hd_budget.set((now, spent + t0.elapsed().as_secs_f32() * 1000.0));
+            return id;
+        }
+        self.texture(ctx, &hd_key, || None)
+    }
+
     /// A menu sprite from the game's files (a list's spell or ability icon) as an egui texture.
     fn sprite_icon(&self, ctx: &Context, gu: &GameUi, lib: &str, index: usize) -> Option<egui::TextureId> {
-        self.texture(ctx, &format!("sprite {lib}:{index}"), || {
+        self.game_icon(ctx, &format!("sprite {lib}:{index}"), || {
             let (w, h, rgba) = gu.sprite_rgba(lib, index)?;
-            Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba))
+            Some((w as usize, h as usize, rgba))
         })
     }
 
@@ -1604,9 +1649,7 @@ impl Modern {
     /// An item's icon from the game's files (32 x 32) as an egui texture.
     fn item_icon(&self, ctx: &Context, info: &super::items::ItemCache, id: u16) -> Option<egui::TextureId> {
         use crate::inventory::ItemInfo;
-        self.texture(ctx, &format!("item {id}"), || {
-            Some(egui::ColorImage::from_rgba_unmultiplied([32, 32], &info.icon(id)?))
-        })
+        self.game_icon(ctx, &format!("item {id}"), || Some((32, 32, info.icon(id)?)))
     }
 
     /// Ours: no line of the macro that names a spell or ability (/ma, /ja, /pet, /ws) can be used now; one with none
@@ -1642,9 +1685,11 @@ impl Modern {
         {
             return Some((s.tex, s.uv));
         }
-        let t = self.texture(ctx, &format!("status {}:{id}", small as u8), || {
+        // Timeless XI: the Timeless interface upscales the large set whatever the setting (more to scale from).
+        let small = small && !self.theme.timeless();
+        let t = self.game_icon(ctx, &format!("status {}:{id}", small as u8), || {
             let (w, h, rgba) = gu.status_rgba(small, id)?;
-            Some(egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba))
+            Some((w as usize, h as usize, rgba))
         });
         t.map(|t| (t, FULL_UV))
     }
@@ -1658,7 +1703,10 @@ impl Modern {
         index: usize,
         picture: Option<u16>,
     ) -> Option<(egui::TextureId, Rect)> {
-        if let Some(s) = picture.and_then(action_art).and_then(|id| self.art.sprite(id)) {
+        // Timeless XI: the Timeless interface shows the game's own (classic) icons, upscaled.
+        if !self.theme.timeless()
+            && let Some(s) = picture.and_then(action_art).and_then(|id| self.art.sprite(id))
+        {
             return Some((s.tex, s.uv));
         }
         self.sprite_icon(ctx, gu, lib, index).map(|t| (t, FULL_UV))
@@ -1677,6 +1725,9 @@ impl Modern {
         self.list_icon(ctx, gu, lib, k, super::magic::picture(w, kind, id))
     }
 }
+
+/// Timeless XI: the most milliseconds a frame spends upscaling icons (game_icon).
+const HD_BUDGET_MS: f32 = 6.0;
 
 /// A whole texture's uv.
 const FULL_UV: Rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
