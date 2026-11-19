@@ -602,7 +602,13 @@ impl super::Modern {
                                 }
                                 p.circle_filled(c, 30.0, K::well());
                                 p.circle_stroke(c, 30.0, Stroke::new(1.5, K::gold()));
-                                p.text(c - vec2(0.0, 9.0), Align2::CENTER_CENTER, "Cast", FontId::proportional(11.0), K::muted());
+                                p.text(
+                                    c - vec2(0.0, 9.0),
+                                    Align2::CENTER_CENTER,
+                                    "Cast",
+                                    FontId::proportional(11.0),
+                                    K::muted(),
+                                );
                                 p.text(
                                     c + vec2(0.0, 8.0),
                                     Align2::CENTER_CENTER,
@@ -650,7 +656,8 @@ impl super::Modern {
                                 let p = ui.painter();
                                 let c = r.center();
                                 let now = angler::now_secs();
-                                let f = if n.secs == 0 { 0.0 } else { n.until.saturating_sub(now) as f32 / n.secs as f32 };
+                                let f =
+                                    if n.secs == 0 { 0.0 } else { n.until.saturating_sub(now) as f32 / n.secs as f32 };
                                 p.circle_stroke(c, 40.0, Stroke::new(6.0, K::edge()));
                                 super::tlfish::arc(
                                     p,
@@ -670,7 +677,13 @@ impl super::Modern {
                                             FontId::proportional(20.0),
                                             K::gold(),
                                         );
-                                        p.text(c + vec2(0.0, 11.0), Align2::CENTER_CENTER, "caught", FontId::proportional(11.0), K::muted());
+                                        p.text(
+                                            c + vec2(0.0, 11.0),
+                                            Align2::CENTER_CENTER,
+                                            "caught",
+                                            FontId::proportional(11.0),
+                                            K::muted(),
+                                        );
                                     }
                                     None => {
                                         p.text(c, Align2::CENTER_CENTER, "75", FontId::proportional(20.0), K::amber());
@@ -678,7 +691,12 @@ impl super::Modern {
                                 }
                                 ui.add_space(12.0);
                                 ui.vertical(|ui| {
-                                    ui.label(RichText::new(&n.title).font(FontId::proportional(19.0)).strong().color(K::text()));
+                                    ui.label(
+                                        RichText::new(&n.title)
+                                            .font(FontId::proportional(19.0))
+                                            .strong()
+                                            .color(K::text()),
+                                    );
                                     if let Some((fish, casts)) = n.caught {
                                         ui.label(
                                             RichText::new(format!("You caught {fish} fish in {casts} casts."))
@@ -754,64 +772,78 @@ impl super::Modern {
                         .corner_radius(CornerRadius::same(6))
                         .inner_margin(egui::Margin::symmetric(12, 12))
                         .show(ui, |ui| {
-                            ui.set_width(186.0);
-                            ui.set_min_height((full - 26.0).max(120.0));
-                            ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
-                            ui.label(RichText::new("Angler's Almanac").font(FontId::proportional(18.0)).strong().color(K::gold()));
-                            ui.horizontal(|ui| {
+                            // The frame inherits the row's layout: stack the index top to bottom.
+                            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                                ui.set_width(186.0);
+                                ui.set_min_height((full - 26.0).max(120.0));
+                                ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
                                 ui.label(
-                                    RichText::new(format!("Fishing skill {}", v.skill()))
-                                        .font(FontId::proportional(13.0))
+                                    RichText::new("Angler's Almanac")
+                                        .font(FontId::proportional(18.0))
+                                        .strong()
                                         .color(K::gold()),
                                 );
-                                if v.gear > 0 {
+                                ui.horizontal(|ui| {
                                     ui.label(
-                                        RichText::new(format!("(+{} gear)", v.gear))
+                                        RichText::new(format!("Fishing skill {}", v.skill()))
                                             .font(FontId::proportional(13.0))
-                                            .color(K::green()),
+                                            .color(K::gold()),
                                     );
+                                    if v.gear > 0 {
+                                        ui.label(
+                                            RichText::new(format!("(+{} gear)", v.gear))
+                                                .font(FontId::proportional(13.0))
+                                                .color(K::green()),
+                                        );
+                                    }
+                                });
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{:02}:00  {} ({}%)",
+                                        v.date.hour,
+                                        angler::MOON_NAMES[(v.date.moon as usize).min(angler::MOON_NAMES.len() - 1)],
+                                        v.date.moon_pct
+                                    ))
+                                    .font(FontId::proportional(13.0))
+                                    .color(K::muted()),
+                                );
+                                let h = &w.angler.hole;
+                                ui.label(
+                                    RichText::new(if h.active {
+                                        "School of Fish Active!".to_string()
+                                    } else {
+                                        format!("Cast #{}", h.casts)
+                                    })
+                                    .font(FontId::proportional(13.0))
+                                    .color(if h.active {
+                                        K::gold()
+                                    } else {
+                                        K::muted()
+                                    }),
+                                );
+                                ui.add_space(4.0);
+                                ui.separator();
+                                ui.add_space(2.0);
+                                for (k, t) in TABS.iter().enumerate() {
+                                    let on = g.tab == k;
+                                    let r = ui
+                                        .add_sized(
+                                            [ui.available_width(), 26.0],
+                                            egui::Button::selectable(
+                                                on,
+                                                RichText::new(*t).font(FontId::proportional(14.0)).color(if on {
+                                                    K::gold()
+                                                } else {
+                                                    K::text()
+                                                }),
+                                            ),
+                                        )
+                                        .on_hover_text(PAGE_NOTE[k]);
+                                    if r.clicked() {
+                                        g.tab = k;
+                                    }
                                 }
                             });
-                            ui.label(
-                                RichText::new(format!(
-                                    "{:02}:00  {} ({}%)",
-                                    v.date.hour,
-                                    angler::MOON_NAMES[(v.date.moon as usize).min(angler::MOON_NAMES.len() - 1)],
-                                    v.date.moon_pct
-                                ))
-                                .font(FontId::proportional(13.0))
-                                .color(K::muted()),
-                            );
-                            let h = &w.angler.hole;
-                            ui.label(
-                                RichText::new(if h.active {
-                                    "School of Fish Active!".to_string()
-                                } else {
-                                    format!("Cast #{}", h.casts)
-                                })
-                                .font(FontId::proportional(13.0))
-                                .color(if h.active { K::gold() } else { K::muted() }),
-                            );
-                            ui.add_space(4.0);
-                            ui.separator();
-                            ui.add_space(2.0);
-                            for (k, t) in TABS.iter().enumerate() {
-                                let on = g.tab == k;
-                                let r = ui
-                                    .add_sized(
-                                        [ui.available_width(), 26.0],
-                                        egui::Button::selectable(
-                                            on,
-                                            RichText::new(*t)
-                                                .font(FontId::proportional(14.0))
-                                                .color(if on { K::gold() } else { K::text() }),
-                                        ),
-                                    )
-                                    .on_hover_text(PAGE_NOTE[k]);
-                                if r.clicked() {
-                                    g.tab = k;
-                                }
-                            }
                         });
                     ui.add_space(8.0);
                     ui.vertical(|ui| {

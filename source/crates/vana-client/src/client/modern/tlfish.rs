@@ -69,7 +69,17 @@ impl super::Modern {
             Play::Bar(r) => self.tl_fish_bar(ctx, w, &painter, screen, r),
             Play::Item(p) => {
                 let left = (p.time_limit() - p.t).max(0.0);
-                self.tl_fish_item(ctx, w, &painter, screen, p.bite.item, p.bite.chest(), p.t, left / p.time_limit(), left);
+                self.tl_fish_item(
+                    ctx,
+                    w,
+                    &painter,
+                    screen,
+                    p.bite.item,
+                    p.bite.chest(),
+                    p.t,
+                    left / p.time_limit(),
+                    left,
+                );
             }
         }
     }
@@ -112,9 +122,10 @@ impl super::Modern {
         let name = if g.bite.monster() {
             "Monster!".to_string()
         } else {
-            w.item_info.as_ref().and_then(|i| i.name(g.bite.item)).unwrap_or_else(|| {
-                if g.practice { "Practice".to_string() } else { "Fish on the line".to_string() }
-            })
+            w.item_info
+                .as_ref()
+                .and_then(|i| i.name(g.bite.item))
+                .unwrap_or_else(|| if g.practice { "Practice".to_string() } else { "Fish on the line".to_string() })
         };
         let nx = slot.max.x + 12.0;
         gp.text(
@@ -124,7 +135,8 @@ impl super::Modern {
             FontId::proportional(16.0),
             if g.bite.monster() { Pal::red() } else { Pal::gold() },
         );
-        let mut sub = if g.bite.monster() { "Something big is fighting back" } else { swimmer(g.bite.behaviour) }.to_string();
+        let mut sub =
+            if g.bite.monster() { "Something big is fighting back" } else { swimmer(g.bite.behaviour) }.to_string();
         if g.bite.legendary() {
             sub.push_str("  -  Legendary");
         }
@@ -216,10 +228,16 @@ impl super::Modern {
 
         // Footer: the keys, and the round's status on the right.
         let fy = panel.max.y - 30.0;
-        gp.line_segment([pos2(panel.min.x + 1.0, fy), pos2(panel.max.x - 1.0, fy)], Stroke::new(1.0, rgba(58, 48, 92, 1.0)));
+        gp.line_segment(
+            [pos2(panel.min.x + 1.0, fy), pos2(panel.max.x - 1.0, fy)],
+            Stroke::new(1.0, rgba(58, 48, 92, 1.0)),
+        );
         let ky = fy + 6.0;
         let mut x = keycap(gp, pos2(panel.min.x + 18.0, ky), "LEFT / RIGHT");
-        x = gp.text(pos2(x + 6.0, ky + 9.0), Align2::LEFT_CENTER, "Steer", FontId::proportional(13.0), Pal::muted()).max.x;
+        x = gp
+            .text(pos2(x + 6.0, ky + 9.0), Align2::LEFT_CENTER, "Steer", FontId::proportional(13.0), Pal::muted())
+            .max
+            .x;
         x = keycap(gp, pos2(x + 12.0, ky), "ESC");
         gp.text(pos2(x + 6.0, ky + 9.0), Align2::LEFT_CENTER, "Give up", FontId::proportional(13.0), Pal::muted());
         let status = match g.done {
@@ -275,7 +293,14 @@ impl super::Modern {
         let c = pos2(panel.min.x + 22.0 + 46.0, panel.center().y);
         let r = 44.0;
         gp.circle_stroke(c, r, Stroke::new(6.0, rgba(58, 48, 92, 1.0)));
-        arc(gp, c, r, -std::f32::consts::FRAC_PI_2, -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * f, Stroke::new(6.0, ring));
+        arc(
+            gp,
+            c,
+            r,
+            -std::f32::consts::FRAC_PI_2,
+            -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * f,
+            Stroke::new(6.0, ring),
+        );
         // The icon disc with a soft pulsing gold edge.
         let pulse = 0.5 + 0.5 * (t * std::f32::consts::PI * 1.25).sin();
         gp.circle_filled(c, 30.0, Pal::track());
