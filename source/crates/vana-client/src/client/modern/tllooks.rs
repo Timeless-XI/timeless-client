@@ -2,7 +2,7 @@
 //! two-tone hair, eye colour, face markings, lip tint, and a grey-to-black nose slider. Every interface.
 
 use super::super::World;
-use super::super::timeless::looks::{BOTH, LEFT, MARKS, RIGHT, SIDED, Settings};
+use super::super::timeless::looks::{self, BOTH, LEFT, MARKS, RIGHT, SIDED, Settings};
 use egui::{Color32, Context, CornerRadius, Id, RichText, Stroke, vec2};
 
 fn gold() -> Color32 {
@@ -103,16 +103,18 @@ impl super::Modern {
             )
             .show(ctx, |ui| {
                 ui.checkbox(&mut s.on, RichText::new("Use my custom look").color(text()));
-                if !fits {
+                let face = w.looks.face;
+                if fits {
+                    ui.label(RichText::new(format!("Mithra face style {}", w.looks.style)).small().color(muted()));
+                } else if face.is_some_and(|(race, _)| race == 7) {
                     ui.label(
-                        RichText::new(
-                            "Custom looks are being tested on Mithra face 6. Tick the box below to try it on (only \
-                             you see it).",
-                        )
-                        .color(muted()),
+                        RichText::new("Your face has no custom look yet. Try one on face 6A (only you see it):")
+                            .color(muted()),
                     );
+                    ui.checkbox(&mut s.try_on, RichText::new("Try on face 6A").color(text()));
+                } else {
+                    ui.label(RichText::new("Custom looks are made for Mithra faces for now.").color(muted()));
                 }
-                ui.checkbox(&mut s.try_on, RichText::new("Try on face 6 (Mithra)").color(text()));
                 ui.label(RichText::new("Only you can see your custom look for now.").small().color(muted()));
                 ui.separator();
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -120,8 +122,12 @@ impl super::Modern {
                 });
                 ui.separator();
                 ui.horizontal(|ui| {
-                    if ui.button("Reset to default").clicked() {
-                        s = Settings { try_on: s.try_on, ..Settings::default() };
+                    if ui.button("Reset to my face").on_hover_text("Your face's own colours and markings").clicked() {
+                        s = face.and_then(|(_, f)| looks::seed(f, &s)).unwrap_or(Settings {
+                            on: s.on,
+                            try_on: s.try_on,
+                            ..Settings::default()
+                        });
                     }
                 });
             });
