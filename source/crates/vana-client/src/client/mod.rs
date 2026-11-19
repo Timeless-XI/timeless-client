@@ -7830,6 +7830,8 @@ struct World {
     tl_labels: u32,
     tl_chime: bool,
     tl_bar: timeless::hotbar::Hotbar,
+    /// Timeless XI: the Timeless Fishing bar game (timeless/fishing.rs), in every interface.
+    tl_fish: timeless::fishing::TlFish,
     /// Config `modern_condense` (with `modern`): an action's battle lines merge (combat::condense).
     condense: bool,
     /// The lines later records of their action merge into, and the last action's serial.
@@ -10471,6 +10473,7 @@ impl App {
                             tl_labels: self.cfg.timeless_key_labels,
                             tl_chime: self.cfg.timeless_ready_chime,
                             tl_bar: Default::default(),
+                            tl_fish: Default::default(),
                             condense: self.cfg.modern_condense,
                             condensed: Vec::new(),
                             condensed_targets: Vec::new(),
@@ -12494,6 +12497,7 @@ impl App {
                 NetEvent::EventStrings(s) => event::strings(world, s),
                 NetEvent::EventRelease { mode, event: e } => event::release(world, mode, e),
                 NetEvent::Fish(p) => fishing::on_fish(world, p),
+                NetEvent::TimelessFish(b) => fishing::on_timeless(world, b),
                 NetEvent::Wpos { id, pos, dir, mode } => {
                     // POSMODE (LSB): 0 normal, 1 event, 3 pop, 5 reset, 6 materialize, 7; 0x0a rotate.
                     // FUN_1009ee60: mode 7 about us unloads the sub-area.
@@ -17177,6 +17181,11 @@ impl App {
                     if let Some(gu) = self.game_ui.as_ref() {
                         gu.modern_order.borrow_mut().clear();
                     }
+                }
+                // Timeless XI: the Timeless Fishing bar game, in every interface (not hidden with the UI: a round
+                // that can't be seen can't be played).
+                if !event::cinema(world) {
+                    self.modern.get_or_insert_with(|| modern::Modern::new(ctx)).tl_fishing(ctx, world);
                 }
                 // What the Config windows and the settings screen hand to the app.
                 let keys = [world.cam_keys[1] as u32, world.cam_keys[0] as u32];

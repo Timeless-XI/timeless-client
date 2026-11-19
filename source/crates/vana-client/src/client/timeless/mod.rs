@@ -2,4 +2,5 @@
 //! their own files so upstream merges stay small.
 
 pub mod book;
+pub mod fishing;
 pub mod hotbar;

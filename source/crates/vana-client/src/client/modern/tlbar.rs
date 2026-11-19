@@ -1210,7 +1210,7 @@ fn puffs(ctx: &egui::Context, m: &super::Modern, puffs: &[(Pos2, Instant)]) {
 /// The recast inside an icon: the Timeless XI hourglass (the logo's glass and tiered caps) that starts the slot's
 /// size and shrinks to nothing as the recast runs out, its sand draining from the top bulb into a pile below. The
 /// icon underneath darkens more the longer is left. `left` of the whole `total`, `t` the clock (the falling grains).
-fn hourglass(painter: &egui::Painter, m: &super::Modern, r: Rect, left: f32, total: f32, t: f32) {
+pub(super) fn hourglass(painter: &egui::Painter, m: &super::Modern, r: Rect, left: f32, total: f32, t: f32) {
     let rem = if total > 0.0 { (left / total).clamp(0.0, 1.0) } else { 0.0 };
     painter.rect_filled(r, CornerRadius::ZERO, Color32::from_black_alpha((64.0 + 100.0 * rem) as u8));
     // The logo's units: the glass from y -78 to 78, the caps out to 89, 104 wide.

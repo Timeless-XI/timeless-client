@@ -59,6 +59,8 @@ mod theme;
 /// Timeless XI: the Timeless interface's hotbars and their Actions window.
 mod tlbar;
 mod tlbook;
+// Timeless XI: the Timeless Fishing bar game on screen (every interface).
+mod tlfish;
 
 /// The pack's names for mods (lua/skin.rs).
 pub(in crate::client) mod pack {

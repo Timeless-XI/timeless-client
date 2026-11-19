@@ -765,6 +765,8 @@ pub enum NetEvent {
     },
     /// s2c 0x115: the hooked fish.
     Fish(super::fishing::FishParams),
+    /// Timeless XI: s2c 0x115 rewritten by a Timeless server into the bar game's settings.
+    TimelessFish(super::timeless::fishing::Bite),
     /// s2c 0x076: party members' status icons (UniqueNo, 32 icons), five rows (ourselves not included).
     PartyEffects(Vec<(u32, [u16; 32])>),
     /// s2c 0x075 (GP_SERV_COMMAND_BATTLEFIELD): the whole packet (client/objective.rs).
@@ -2343,17 +2345,21 @@ impl Session<'_> {
                 name: text(&p, 0x10, 16),
                 index: p.u8(0x20),
             })?,
-            0x115 => self.tx.send(NetEvent::Fish(super::fishing::FishParams {
-                stamina: p.u16(4),
-                delay: p.u16(6),
-                regen: p.u16(8),
-                moves: p.u16(0xa),
-                damage: p.u16(0xc),
-                heal: p.u16(0xe),
-                time: p.u16(0x10),
-                sense: p.u8(0x12),
-                special: p.u32(0x14),
-            }))?,
+            // Timeless XI: a Timeless server's bar-game bite (magic 0x5855), else retail's arrow game.
+            0x115 => match super::timeless::fishing::parse(&p.data) {
+                Some(b) => self.tx.send(NetEvent::TimelessFish(b))?,
+                None => self.tx.send(NetEvent::Fish(super::fishing::FishParams {
+                    stamina: p.u16(4),
+                    delay: p.u16(6),
+                    regen: p.u16(8),
+                    moves: p.u16(0xa),
+                    damage: p.u16(0xc),
+                    heal: p.u16(0xe),
+                    time: p.u16(0x10),
+                    sense: p.u8(0x12),
+                    special: p.u32(0x14),
+                }))?,
+            },
             0x116 => self
                 .tx
                 .send(NetEvent::EquipSetValid(std::array::from_fn(|i| std::array::from_fn(|k| p.u8(4 + 4 * i + k)))))?,

@@ -685,6 +685,15 @@ pub(super) fn run_unfiltered(w: &mut World, line: &str, mode: Mode) {
         w.uimodes_open = !w.uimodes_open;
         return;
     }
+    // Timeless XI: /tfish practice [0-100] [mixed|smooth|sinker|floater|dart] [monster] plays a practice round of the
+    // Timeless Fishing bar game (no fish, nothing sent).
+    if first.eq_ignore_ascii_case("/tfish") {
+        let args: Vec<&str> = line.split_whitespace().skip(1).collect();
+        if args.first().is_some_and(|a| a.eq_ignore_ascii_case("practice")) {
+            super::fishing::practice(w, &args[1..]);
+        }
+        return;
+    }
     // Ours (not retail; modern favourites): /favs [on | off] shows or hides the favourites strip.
     if first.eq_ignore_ascii_case("/favs") && w.modern {
         super::favs::command(w, line.split_whitespace().nth(1));

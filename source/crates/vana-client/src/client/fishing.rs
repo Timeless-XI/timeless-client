@@ -8,6 +8,8 @@ use super::input::{Input, mode};
 use super::net::NetCommand;
 use crate::fx::sched::Who;
 
+use super::timeless::fishing::{self as tl, Done, Pending, Play, Round};
+
 /// NewFishingStart (0x38) .. NewFishingStop (0x3e).
 pub fn fishing_status(s: u8) -> bool {
     (0x38..=0x3e).contains(&s)
@@ -122,7 +124,10 @@ fn send(w: &mut World, para: i32, mode: u8, para2: u32) -> bool {
 
 /// The fishing statuses and the request latch keep us in place (FUN_100964f0).
 pub fn locked(w: &World) -> bool {
-    w.fish_pending || fishing_status(w.my_motion.status) || fishing_status(w.server_status)
+    w.fish_pending
+        || fishing_status(w.my_motion.status)
+        || fishing_status(w.server_status)
+        || matches!(&w.tl_fish.play, Some(Play::Bar(r)) if r.practice && r.done.is_none())
 }
 
 /// /fish (FUN_1007abf0) after the status gate: "You cannot fish here." (group 7 0x49) without water ahead or in the
@@ -135,6 +140,15 @@ pub fn command(w: &mut World) {
     }
     if w.fish_pending || fishing_status(w.my_motion.status) {
         return;
+    }
+    // Timeless XI: a practice round gives way to the real thing.
+    if matches!(&w.tl_fish.play, Some(Play::Bar(r)) if r.practice) {
+        w.tl_fish.play = None;
+    }
+    // Timeless XI: say this client plays the bar game right before the cast (a Timeless server refuses casts from
+    // clients that never said it; any other server ignores it with no fish on the line).
+    if send(w, super::timeless::fishing::HELLO, 5, 0) {
+        w.tl_fish.hello_zone = w.zone;
     }
     super::textcmd::act(w, (w.my_id, w.my_index), 0x0e, 0);
     w.fish_pending = true;
@@ -175,6 +189,115 @@ pub fn on_fish(w: &mut World, p: FishParams) {
     }
 }
 
+/// Timeless XI: s2c 0x115 from a Timeless server: the bar game (a fight) or the item box (an item or chest) instead
+/// of the arrow game.
+pub fn on_timeless(w: &mut World, b: tl::Bite) {
+    log::info!("fishing: Timeless bite {b:?}");
+    if w.tl_fish.active() {
+        return;
+    }
+    w.tl_fish.end_due = None;
+    w.tl_fish.pose = tl::POSE_CENTER;
+    w.tl_fish.pose_at = 0.0;
+    w.tl_fish.play = Some(if b.kind == 1 {
+        Play::Item(Pending { bite: b, t: 0.0, warned: false })
+    } else {
+        let seed = w.started.elapsed().as_nanos() as u64 ^ (w.my_id as u64) << 32;
+        Play::Bar(Round::new(b, false, seed))
+    });
+}
+
+/// Timeless XI: `/tfish practice [0-100] [mixed|smooth|sinker|floater|dart] [monster]`: a practice round (no fish, no
+/// packets) at that difficulty; ESC ends it.
+pub fn practice(w: &mut World, args: &[&str]) {
+    if w.tl_fish.active() || fishing_status(w.my_motion.status) {
+        return;
+    }
+    let d = args.first().and_then(|a| a.parse::<u16>().ok()).unwrap_or(40);
+    let beh = args.iter().find_map(|a| tl::BEHAVIOURS.iter().position(|b| a.eq_ignore_ascii_case(b))).unwrap_or(0);
+    let monster = args.iter().any(|a| a.eq_ignore_ascii_case("monster"));
+    let seed = w.started.elapsed().as_nanos() as u64 | 1;
+    w.tl_fish.play = Some(Play::Bar(Round::practice(d, beh as u8, monster, seed)));
+}
+
+/// Timeless XI: one frame of the bar game or item box (the native game's frames don't run meanwhile). Steering is
+/// the movement axis (the fishing statuses already hold the character in place); Escape gives up; Enter reels an
+/// item in.
+fn timeless_frame(w: &mut World, enter: bool, escape: bool, dir: f32, dt: f32) {
+    let dt = dt.clamp(0.0, 0.05);
+    let Some(play) = w.tl_fish.play.as_mut() else { return };
+    let mut out: Vec<(i32, u8, u32)> = Vec::new();
+    let mut end: Option<(i32, u32)> = None;
+    let mut clear = false;
+    match play {
+        Play::Bar(r) => {
+            if r.done.is_none() && escape {
+                if r.practice {
+                    clear = true;
+                } else {
+                    r.finish(Done::GiveUp);
+                }
+            }
+            let steer = if dir == 0.0 { 0.0 } else { dir.signum() };
+            r.advance(dt, steer);
+            if std::mem::take(&mut r.warn_now) {
+                out.push((tl::WARN, 5, 0));
+            }
+            if r.practice {
+                clear |= r.done.is_some() && r.t - r.done_t > tl::SHOW_AFTER;
+            } else if r.done.is_some() && !r.reported {
+                r.reported = true;
+                end = r.end_para().map(|p| (p, r.bite.special));
+            } else if r.done.is_none() {
+                let pose = r.pose(w.tl_fish.pose);
+                let now = r.t;
+                if pose != w.tl_fish.pose && now - w.tl_fish.pose_at >= 0.25 {
+                    out.push((pose, 5, 0));
+                    (w.tl_fish.pose, w.tl_fish.pose_at) = (pose, now);
+                }
+            }
+        }
+        Play::Item(p) => {
+            p.t += dt;
+            let left = p.time_limit() - p.t;
+            if enter {
+                end = Some((tl::END_WIN, p.bite.special));
+            } else if escape {
+                end = Some((tl::END_GIVE_UP, p.bite.special));
+            } else if left <= 0.0 {
+                end = Some((tl::END_LOST, p.bite.special));
+            } else if left <= 10.0 && !p.warned {
+                p.warned = true;
+                out.push((tl::WARN, 5, 0));
+            }
+            if end.is_some() {
+                clear = true;
+            }
+        }
+    }
+    if clear {
+        w.tl_fish.play = None;
+    }
+    for (para, m, para2) in out {
+        // A pose or warning the send gate refuses is simply skipped (the next change sends again).
+        let _ = send(w, para, m, para2);
+    }
+    if let Some(e) = end {
+        w.tl_fish.end_due = Some(e);
+    }
+}
+
+/// Timeless XI: sends a due end report (again each frame until the send gate lets it through); then the native
+/// game's sub-states take over (the result, then the release).
+fn timeless_end(w: &mut World, f: &mut Fishing) {
+    let Some((para, special)) = w.tl_fish.end_due else { return };
+    if send(w, para, 3, special) {
+        w.tl_fish.end_due = None;
+        super::event::cancel_queues(w);
+        f.sub = 2;
+    }
+}
+
 /// A mouse release in the field (key functions 0x8b / 0x8c mode 5).
 pub fn click(w: &mut World) {
     if let Some(f) = w.fishing.as_mut() {
@@ -189,7 +312,18 @@ pub fn update(w: &mut World, input: &mut Input, dt: f32, window: bool) {
     if matches!(status, 1..=4) || fishing_status(status) {
         w.fish_pending = false;
     }
+    // Timeless XI: the bar game's hello on each zone-in (and the practice round, which needs no fishing).
+    if w.zone.is_some() && w.tl_fish.hello_zone != w.zone && send(w, tl::HELLO, 5, 0) {
+        w.tl_fish.hello_zone = w.zone;
+    }
     if !fishing_status(status) {
+        if matches!(&w.tl_fish.play, Some(Play::Bar(r)) if r.practice) {
+            let escape = !window && input.test(0x0f, mode::PRESS);
+            timeless_frame(w, false, escape, input.axis(4), dt);
+        } else {
+            w.tl_fish.play = None;
+            w.tl_fish.end_due = None;
+        }
         if let Some(mut f) = w.fishing.take() {
             clear_arrows(w, &mut f, false);
             w.fish_gauge = None;
@@ -231,12 +365,27 @@ pub fn update(w: &mut World, input: &mut Input, dt: f32, window: bool) {
         }
     };
     // Key function 0x0e (Enter, mode 1) any time, with no window for the wait; 0x0f (Escape) with no window.
-    if input.test(0x0e, mode::PRESS) {
+    let enter = input.test(0x0e, mode::PRESS);
+    let escape = !window && input.test(0x0f, mode::PRESS);
+    // Timeless XI: the bar game or item box replaces the arrow game's frames until its end report is sent.
+    if w.tl_fish.active() || w.tl_fish.end_due.is_some() {
+        timeless_frame(w, enter, escape, input.axis(4), dt);
+        timeless_end(w, &mut f);
+        f.step = 0.0;
+        w.fishing = Some(f);
+        return;
+    }
+    if enter {
         f.enter = true;
         f.enter_free |= !window;
     }
-    if !window && input.test(0x0f, mode::PRESS) {
-        f.escape = true;
+    f.escape |= escape;
+    if let Some(Play::Bar(r)) = w.tl_fish.play.as_mut() {
+        // A finished round stays on screen a moment ("Caught!").
+        r.t += dt;
+        if r.t - r.done_t > tl::SHOW_AFTER {
+            w.tl_fish.play = None;
+        }
     }
     let a = input.axis(4);
     if a != 0.0 {
