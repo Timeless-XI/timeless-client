@@ -3651,7 +3651,7 @@
       "id": "timeless-shop",
       "name": "Timeless Shop",
       "kind": "lua",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "authors": [
         "TimelessXI"
       ],
@@ -3660,8 +3660,8 @@
         {
           "path": "init.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/init.lua",
-          "sha256": "2b7eab4ec163c93814b005f464cab87931fe17a85a6c23a59ea809e5573a0392",
-          "size": 7458
+          "sha256": "b268d51adb7e9a789aaef90a5e34e43cec13cbff5a1131024f2146d436568d42",
+          "size": 7435
         },
         {
           "path": "lib/action.lua",
@@ -3678,8 +3678,8 @@
         {
           "path": "lib/flavor.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/lib/flavor.lua",
-          "sha256": "c3c9eb304fac931549628973f9ee0f92686b407a42b43b0cd77075c10dc734d6",
-          "size": 17406
+          "sha256": "a55b3b249f699585483fb6c9849bbe383a04b972b2d1f54fde09969439431139",
+          "size": 16391
         },
         {
           "path": "lib/protocol.lua",
@@ -3702,13 +3702,13 @@
         {
           "path": "lib/window.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/lib/window.lua",
-          "sha256": "f616f021e648d05108ac8c50242e53ec3ad762025bf9c780bfedaefee9efd961",
-          "size": 21213
+          "sha256": "40543e8f308401c44bc2f8324358c7332868a632fc5dabae1d1fc8a98e00004d",
+          "size": 20475
         },
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/mod.toml",
-          "sha256": "66e221be85b86a292bfa0481fc96a0bb9d8e93065a3d9cab3816feeb66f139ea",
+          "sha256": "caac5fc73ae002f3525f7c3e1dc9d2840c5584d7ce7dba4448af3ff5000b38c3",
           "size": 861
         },
         {

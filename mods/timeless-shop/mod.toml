@@ -1,5 +1,5 @@
 name = "Timeless Shop"
-version = "1.1.0"
+version = "1.1.1"
 authors = ["TimelessXI"]
 description = "The Goblin Bazaar, the Wandering Merchant and the Everglass Shop as real shop windows with item previews, dressed for the shopkeeper's race: a goblin's patched sack, a moogle's pom-pom, Elvaan gilt, Tarutaru stars... Each keeper has their own voice, sounds and remarks, and remembers their regulars."
 permissions = ["packets.write"]

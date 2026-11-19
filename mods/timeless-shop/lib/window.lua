@@ -221,13 +221,7 @@ function W.draw_grid(c, t)
   W.state.page = math.max(1, math.min(W.state.page, pages))
   local cw = (W.GRID_W - 6) / 2
   local first = (W.state.page - 1) * per + 1
-  local stamps = (flavor[t.key] or flavor.guild).stamps
-  local cheapest
-  if #sec.items >= 3 then
-    for _, it in ipairs(sec.items) do
-      if it.can and (not cheapest or it.price < cheapest.price) then cheapest = it end
-    end
-  end
+
   for n = first, math.min(#sec.items, first + per - 1) do
     local item = sec.items[n]
     local k = n - first
@@ -247,16 +241,9 @@ function W.draw_grid(c, t)
     local fade = item.can and 1 or 0.5
     c:text(x + 44, y + 7, item.label, { size = 0.82, bold = true, colour = S.fade(col.text, fade), w = cw - 50 })
     c:text(x + 44, y + 24, t.money(item.price, shop.currency, true), { size = 0.76, colour = okbuy and col.price or S.fade(col.price, 0.55), w = cw - 84 })
-    if item.left > 0 then
-      c:text(x + cw - 6, y + 25, item.left .. " left", { size = 0.7, align = "right", colour = col.muted })
-    end
-    local stamp = item.left == 0 and stamps.sold or (item.left == 1 and stamps.last or (item == cheapest and stamps.bargain or nil))
-    if stamp then
-      local sw = Canvas.measure(stamp, 0.62, true) + 10
-      local scol = item.left == 0 and col.bad or col.accent
-      c:rect(x + cw - sw - 4, y - 5, sw, 13, scol, { round = 3 })
-      themes.helpers.tri(c, x + cw - sw - 4, y - 5, x + cw - sw - 4, y + 8, x + cw - sw - 9, y + 1.5, scol)
-      c:text(x + cw - 4 - sw / 2, y - 5, stamp, { size = 0.62, bold = true, align = "center", colour = { 20, 16, 10, 255 } })
+    if item.left >= 0 then
+      c:text(x + cw - 6, y + 25, item.left == 0 and "sold out" or (item.left .. " left"), { size = 0.7, align = "right",
+        colour = item.left == 0 and col.bad or col.muted })
     end
     if not item.can and item.why then c:tip(x, y, cw, W.CARD_H, item.label, item.why) end
   end

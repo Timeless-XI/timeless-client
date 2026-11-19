@@ -73,8 +73,8 @@ local t = texts()
 ok(t:find("Grizznix's Sack o' Stuff", 1, true) and t:find("Goblin merchant", 1, true), "a goblin's shop name: " .. t)
 ok(t:find("Hee hee! Youuu find Grizznix camp!", 1, true), "what he said, in the bubble")
 ok(t:find("50 shinies", 1, true), "money as a goblin says it")
-ok(t:find("Moon Orb", 1, true) and t:find("2 left", 1, true) and t:find("All gone!", 1, true), "cards with stock; sold out in the goblin's words")
-ok(t:find("Grab fast!", 1, true), "the last one stamped in the goblin's words")
+ok(t:find("Moon Orb", 1, true) and t:find("2 left", 1, true) and t:find("sold out", 1, true), "cards with stock")
+ok(not t:find("Grab fast!", 1, true) and not t:find("Cheap-cheap!", 1, true), "no stamps on the cards")
 ok(H.sounds[#H.sounds] == "sounds/coins_open.wav", "the goblin's stall jingles as it opens: " .. tostring(H.sounds[#H.sounds]))
 ok(t:find("A mysterious orb", 1, true), "the first item's preview: the game's description")
 ok(has_tip("Sold out! Grizznix sells fast"), "a sold-out card says why")
@@ -191,10 +191,10 @@ ok(not ui.is_open("shop"), "/storefront close")
 -- More flavour: remarks, regulars, the time of day, the burst, goodbyes, sounds
 do
   local flavor = require("lib.flavor")
-  -- Every race has its sound files, a burst, stamps, a goodbye and regulars' tiers
+  -- Every race has its sound files, a burst, a goodbye and regulars' tiers
   for _, race in ipairs(themes.ORDER) do
     local fl = flavor[race]
-    ok(fl and fl.sound and fl.burst and fl.stamps and fl.stamps.bargain and fl.stamps.last and fl.stamps.sold and #fl.bye > 0, race .. ": flavour")
+    ok(fl and fl.sound and fl.burst and #fl.bye > 0, race .. ": flavour")
     ok(#fl.regulars == 3 and fl.regulars[1][1] == 3 and fl.regulars[3][1] == 25, race .. ": three regulars' tiers")
     for _, which in ipairs({ "open", "buy" }) do
       audio.play(("sounds/%s_%s.wav"):format(fl.sound, which))

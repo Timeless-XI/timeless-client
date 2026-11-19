@@ -10,7 +10,7 @@
 -- trading post, a Hume's honest counter (and Quadav, Yagudo, Orc and Tonberry, should one ever open a stall). The
 -- server names the race, or the client reads it off the shopkeeper. Each keeper has a voice of their own: a remark
 -- about whatever you look at, greetings for the time of day and for their regulars (they remember how often you buy,
--- and give you a title), stamps on their cards, a little burst and a sound when you buy, and a word when you leave.
+-- and give you a title), a little burst and a sound when you buy, and a word when you leave.
 --
 -- The mod tells the server it's here ("sh on", every two minutes, as a packet, not chat); without it the server
 -- uses the old menus. Shop lines are taken out of the chat log. Needs the server's grub_shop storefronts.

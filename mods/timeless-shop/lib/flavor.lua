@@ -2,7 +2,6 @@
 --   quips      what they say about the item you're looking at, by what kind of item it is
 --   regulars   how they greet you once you've bought from them 3, 10 and 25 times, and the title they give you
 --   night / morning   greetings by the Vana'diel hour
---   stamps     the little tags on item cards: a bargain, the last one, sold out
 --   bye        what they say when you leave (in chat)
 --   burst      the little celebration when you buy something (coins, sparkles, feathers...)
 --   sound      the sounds the shop makes when it opens and when you buy (sounds/<sound>_open.wav, _buy.wav)
@@ -43,7 +42,6 @@ F.goblin = {
   },
   night = { "Moon high, prices fair! Goblin prices always fair at night.", "Shhh! Night time trading. Very secret. Very good." },
   morning = { "Too bright! Grizznix sleepy. You buy, Grizznix go nap." },
-  stamps = { bargain = "Cheap-cheap!", last = "Grab fast!", sold = "All gone!" },
   bye = { "Come back with more shinies!", "Bye bye! No tell guards about Grizznix!", "Hee hee! Good trade, good trade." },
   anim = function(c, w, h, t)
     -- a coin that catches the light now and then
@@ -73,7 +71,6 @@ F.moogle = {
   },
   night = { "Kupo... Mog was napping. Welcome anyway, kupo!" },
   morning = { "Good morning, kupo! Fresh stock, kupo!" },
-  stamps = { bargain = "Kupo deal!", last = "Last one, kupo!", sold = "Gone, kupo!" },
   bye = { "Come back soon, kupo!", "Kupopo! Take care out there!" },
   anim = function(c, w, h, t)
     -- the pom-pom bobs
@@ -99,7 +96,6 @@ F.hume = {
   },
   night = { "Late one, isn't it? I keep the lamp lit for travellers." },
   morning = { "Morning! Coffee's on, prices are fair." },
-  stamps = { bargain = "Good price", last = "Last one", sold = "Sold out" },
   bye = { "Safe travels, friend.", "Come back any time." },
   anim = function(c, w, h, t)
     -- the lamp in the corner flickers
@@ -126,7 +122,6 @@ F.elvaan = {
   },
   night = { "The Cathedral bells have long rung. Still, the house serves you." },
   morning = { "Good morning. The finest wares are set out for the day." },
-  stamps = { bargain = "Fair price", last = "The last", sold = "Unavailable" },
   bye = { "May the Goddess watch over you.", "The house thanks you. Go with honour." },
   anim = function(c, w, h, t)
     -- a slow glint travels along the gilt line
@@ -152,7 +147,6 @@ F.tarutaru = {
   },
   night = { "Ooh, stargazing time! Look-look, the stars match my shop!" },
   morning = { "Good morning-worning! Fresh sparkles today!" },
-  stamps = { bargain = "Cheap-cheap!", last = "Last-last!", sold = "Gone-gone!" },
   bye = { "Bye-bye! Come back soon-soon!", "Toodle-oo! Mind the sparkles!" },
   anim = function(c, w, h, t)
     -- the stars twinkle
@@ -180,7 +174,6 @@ F.mithra = {
   },
   night = { "Night is the best time to hunt, meow. And to shop!" },
   morning = { "Mmm, sleepy... the sun is too warm. Buy something, meow!" },
-  stamps = { bargain = "Good catch!", last = "Last one!", sold = "Too slow!" },
   bye = { "Happy hunting!", "Ehehe, come back soon!" },
   anim = function(c, w, h, t)
     -- the tail flicks
@@ -207,7 +200,6 @@ F.galka = {
   },
   night = { "Late. The forges are cooling. Still open." },
   morning = { "Morning. Mines are loud today." },
-  stamps = { bargain = "Fair", last = "Last", sold = "None" },
   bye = { "Hm. Take care.", "Come back." },
   anim = function(c, w, h, t)
     -- an ember drifts up from the forge
@@ -224,7 +216,6 @@ F.quadav = {
   regulars = { { 3, "Shiny-giver", { "Hrrn! Shiny-giver back." } }, { 10, "Shell-friend", { "Shell-friend. Trade, trade." } },
     { 25, "Hoard-friend", { "Hoard-friend! Hrrn, hrrn!" } } },
   night = { "Hrrn. Dark. Good for hoarding." }, morning = { "Hrrn. Light. Bad. Buy fast." },
-  stamps = { bargain = "Cheap shiny", last = "Last shiny", sold = "No shiny" },
   bye = { "Hrrn. Go.", "Bring more shiny." },
   anim = function() end,
 }
@@ -235,7 +226,6 @@ F.yagudo = {
   regulars = { { 3, "Faithful", { "The faithful return! Praise!" } }, { 10, "Devoted", { "Devoted one! The Kindred smile on you!" } },
     { 25, "Blessed", { "Blessed one! Take, take, with the Kindred's favour!" } } },
   night = { "Night prayers! Buy, and be blessed!" }, morning = { "Morning prayers! The Kindred provide!" },
-  stamps = { bargain = "Blessed price", last = "Last relic", sold = "Taken" },
   bye = { "Go with the Kindred!", "Praise be! Return, return!" },
   anim = function(c, w, h, t)
     local p = (t * 0.35) % 1
@@ -249,7 +239,6 @@ F.orc = {
   regulars = { { 3, "Not-enemy", { "Hah! You again. Not enemy today." } }, { 10, "War-friend", { "War-friend! Orc give best loot." } },
     { 25, "Honorary orc", { "You fight like orc now! Hah! Take loot!" } } },
   night = { "Night raid loot! Fresh! Hah!" }, morning = { "Morning. Orc tired from raid. Pay fast." },
-  stamps = { bargain = "Cheap loot!", last = "Last loot!", sold = "Gone! Hah!" },
   bye = { "Go! Before orc change mind!", "Hah! Come back with more shinies!" },
   anim = function(c, w, h, t)
     local k = 0.5 + 0.5 * math.sin(t * 4)
@@ -262,7 +251,6 @@ F.tonberry = {
   quips = { thing = { "...", "......" } },
   regulars = { { 3, "Noticed", { "..." } }, { 10, "Remembered", { "...!" } }, { 25, "Grudge-free", { "...♪" } } },
   night = { "..." }, morning = { "..." },
-  stamps = { bargain = "...", last = "...!", sold = "......" },
   bye = { "...", "......" },
   anim = function(c, w, h, t)
     local f = 0.7 + 0.3 * math.sin(t * 7) * math.sin(t * 3.1)
@@ -288,7 +276,6 @@ F.guild = {
   regulars = { { 3, "Guild member", { "Welcome back. The guild appreciates it." } }, { 10, "Patron", { "A patron of the guild. Thank you for your support." } },
     { 25, "Pillar of the guild", { "One of the guild's pillars. Everything you need is here." } } },
   night = { "The guild hall never closes." }, morning = { "Good morning. The guild's stock is fresh." },
-  stamps = { bargain = "Best value", last = "Last one", sold = "Sold out" },
   bye = { "The guild thanks you.", "Good luck out there." },
   anim = function(c, w, h, t)
     -- sand trickles through the hourglass
