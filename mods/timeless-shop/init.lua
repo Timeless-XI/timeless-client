@@ -8,7 +8,9 @@
 -- The window takes after whoever runs the shop: a goblin's patched sack and "shinies", a moogle's pom-pom and
 -- kupos, the House of an Elvaan purveyor, a Tarutaru's starry emporium, a Mithra's Hunt & Haul, a Galka's stone
 -- trading post, a Hume's honest counter (and Quadav, Yagudo, Orc and Tonberry, should one ever open a stall). The
--- server names the race, or the client reads it off the shopkeeper.
+-- server names the race, or the client reads it off the shopkeeper. Each keeper has a voice of their own: a remark
+-- about whatever you look at, greetings for the time of day and for their regulars (they remember how often you buy,
+-- and give you a title), stamps on their cards, a little burst and a sound when you buy, and a word when you leave.
 --
 -- The mod tells the server it's here ("sh on", every two minutes, as a packet, not chat); without it the server
 -- uses the old menus. Shop lines are taken out of the chat log. Needs the server's grub_shop storefronts.
@@ -21,6 +23,7 @@ local action = require("lib.action")
 local protocol = require("lib.protocol")
 local window = require("lib.window")
 local themes = require("lib.themes")
+local flavor = require("lib.flavor")
 
 local BEAT = 120
 local st = { next_beat = os.clock() + 1, queue = {} }
@@ -43,6 +46,19 @@ window.send = function(words)
     return
   end
   send(words)
+end
+
+-- The shop's sounds: sounds/<style>_open.wav and _buy.wav, the style by the shopkeeper's race
+local function prefs()
+  storage.character.shop = storage.character.shop or {}
+  local p = storage.character.shop
+  if p.sound == nil then p.sound = true end
+  return p
+end
+window.play = function(which)
+  if not prefs().sound then return end
+  local fl = flavor[themes.for_shop(window.model.shop).key] or flavor.guild
+  pcall(audio.play, ("sounds/%s_%s.wav"):format(fl.sound, which), 0.6)
 end
 
 window.setup()
@@ -118,9 +134,14 @@ local function storefront_command(sub, value)
     local race = demo(value and value:lower() or nil)
     print(("Shop: a sample %s shop. /storefront demo again for the next race."):format(themes[race].label))
   elseif sub == "close" then
-    window.close()
+    window.close(true)
+  elseif sub == "sound" then
+    local p = prefs()
+    p.sound = not p.sound
+    pcall(storage.save)
+    print(p.sound and "Shop: shop sounds on." or "Shop: shop sounds off.")
   else
-    print("Shop: /storefront demo [race] | close")
+    print("Shop: /storefront demo [race] | sound | close")
   end
 end
 commands.register("storefront", storefront_command)
@@ -139,8 +160,14 @@ mods.provide("timeless_menu", function()
   }
 end)
 
+local last_frame = 0
 timer.every(0.1, function()
   local t = os.clock()
+  -- What moves (ornaments, a purchase's burst) redraws about eight times a second while the shop is open
+  if ui.is_open(window.WIN) and window.animated() and t - last_frame >= 0.12 then
+    last_frame = t
+    window.render()
+  end
   if t >= st.next_beat then
     st.next_beat = t + BEAT
     send("sh on")

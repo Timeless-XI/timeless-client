@@ -11,7 +11,7 @@ H.mod_id = "timeless-shop"
 local ITEMS = {
   [1130] = { name = "Moon Orb", description = "A mysterious orb used to enter certain battlefields." },
   [1131] = { name = "Star Orb", description = "Another orb." },
-  [16594] = { name = "Bastokan Axe", description = "DMG:24 Delay:276\nSTR+2", level = 30, jobs = (1 << 1) | (1 << 8) },
+  [16594] = { name = "Bastokan Axe", kind = "weapon", description = "DMG:24 Delay:276\nSTR+2", level = 30, jobs = (1 << 1) | (1 << 8) },
 }
 res.item = function(id) return ITEMS[id] end
 H.entities[17000300] = { id = 17000300, index = 300, name = "Gaudierre", kind = "npc", race = 3 }
@@ -73,7 +73,9 @@ local t = texts()
 ok(t:find("Grizznix's Sack o' Stuff", 1, true) and t:find("Goblin merchant", 1, true), "a goblin's shop name: " .. t)
 ok(t:find("Hee hee! Youuu find Grizznix camp!", 1, true), "what he said, in the bubble")
 ok(t:find("50 shinies", 1, true), "money as a goblin says it")
-ok(t:find("Moon Orb", 1, true) and t:find("2 left", 1, true) and t:find("sold out", 1, true), "cards with stock")
+ok(t:find("Moon Orb", 1, true) and t:find("2 left", 1, true) and t:find("All gone!", 1, true), "cards with stock; sold out in the goblin's words")
+ok(t:find("Grab fast!", 1, true), "the last one stamped in the goblin's words")
+ok(H.sounds[#H.sounds] == "sounds/coins_open.wav", "the goblin's stall jingles as it opens: " .. tostring(H.sounds[#H.sounds]))
 ok(t:find("A mysterious orb", 1, true), "the first item's preview: the game's description")
 ok(has_tip("Sold out! Grizznix sells fast"), "a sold-out card says why")
 H.check_draws("shop")
@@ -185,6 +187,80 @@ H.run(0.1)
 ok(#H.take_sent() == 0 and texts():find("52 shinies", 1, true), "the demo buys from itself")
 H.command("/storefront close")
 ok(not ui.is_open("shop"), "/storefront close")
+
+-- More flavour: remarks, regulars, the time of day, the burst, goodbyes, sounds
+do
+  local flavor = require("lib.flavor")
+  -- Every race has its sound files, a burst, stamps, a goodbye and regulars' tiers
+  for _, race in ipairs(themes.ORDER) do
+    local fl = flavor[race]
+    ok(fl and fl.sound and fl.burst and fl.stamps and fl.stamps.bargain and fl.stamps.last and fl.stamps.sold and #fl.bye > 0, race .. ": flavour")
+    ok(#fl.regulars == 3 and fl.regulars[1][1] == 3 and fl.regulars[3][1] == 25, race .. ": three regulars' tiers")
+    for _, which in ipairs({ "open", "buy" }) do
+      audio.play(("sounds/%s_%s.wav"):format(fl.sound, which))
+    end
+    ok(fl.quips.thing ~= nil or race ~= "guild", race .. ": a remark for anything")
+  end
+  -- Kinds of items
+  ok(flavor.kind({ label = "Moon Orb" }, { name = "Moon Orb", kind = "general" }) == "orb", "an orb")
+  ok(flavor.kind({ label = "x" }, { name = "Bastokan Axe", kind = "weapon" }) == "weapon", "a weapon")
+  ok(flavor.kind({ label = "Goblin Pie" }, nil) == "food", "food")
+  ok(flavor.kind({ label = "Mystery sack", glyph = "sack" }, nil) == "sack", "a glyph is its own kind")
+  ok(flavor.quip("goblin", { label = "Moon Orb" }, { name = "Moon Orb" }, 2):find("Moon Orb", 1, true), "a remark names the item")
+  ok(flavor.quip("tonberry", { label = "x" }, nil, 1) == "...", "a Tonberry says nothing much")
+
+  -- Picking an item: the keeper remarks on it
+  feed(GOBLIN)
+  H.click("shop", "shop", "item1")
+  local said = W.speech()
+  local okq = false
+  for _, q in ipairs(flavor.goblin.quips.orb) do if said == q:gsub("{item}", "Moon Orb") then okq = true end end
+  ok(okq, "a goblin's remark about the orb: " .. said)
+  H.click("shop", "shop", "item3")
+  ok(W.speech():find("Pointy", 1, true) or W.speech():find("stabber", 1, true), "about the axe: " .. W.speech())
+
+  -- Regulars: buying counts; at 3 the goblin greets you as a good customer and gives you a title
+  storage.character.shop_regulars = { Grizznix = 2 }
+  W.close(true)
+  ok(H.printed[#H.printed]:find("^Grizznix: ") ~= nil, "a goodbye in chat: " .. tostring(H.printed[#H.printed]))
+  feed(GOBLIN)
+  ok(not texts():find("Good customer", 1, true), "no title yet")
+  feed({ "SH1|R|1|You obtain Moon Orb. (12 Everglass; 38 left)" })
+  ok(storage.character.shop_regulars.Grizznix == 3, "a purchase counts")
+  ok(W.state.burst ~= nil, "a burst of coins")
+  ok(H.sounds[#H.sounds] == "sounds/coins_buy.wav", "and the coins jingle")
+  H.check_draws("shop")
+  W.close(true)
+  feed(GOBLIN)
+  local t = texts()
+  ok(t:find("★ Good customer", 1, true), "the title in the header: " .. t)
+  ok(t:find("You come back! Grizznix knew you would.", 1, true), "a regular's welcome beats the server greeting")
+  storage.character.shop_regulars.Grizznix = 30
+  W.close(true)
+  feed(GOBLIN)
+  ok(texts():find("★ Grizznix's favourite", 1, true), "25 and up: the favourite")
+
+  -- The burst fades; the window keeps moving only while something does
+  H.run(1.5)
+  ok(W.state.burst == nil, "the burst is over after a moment")
+  ok(W.animated(), "the goblin's coin keeps glinting")
+
+  -- The time of day, for a keeper without a server greeting
+  game.time = function() return { hour = 22, weekday = 0, moon_phase = 1, moon = 30 } end
+  W.close(true)
+  feed({ "SH1|B|t=40,k=Bargrudd,i=0,r=galka,c=Everglass,b=50,n=1", "SH1|S|1|Gear", "SH1|I|1.1|id=1130,ic=0,g=,p=12,q=2,a=1,l=Moon Orb", "SH1|E|t=40" })
+  ok(W.speech() == flavor.galka.night[1], "a Galka at night: " .. W.speech())
+  game.time = nil
+
+  -- Sounds off
+  H.command("/storefront sound")
+  local n0 = #H.sounds
+  W.close(true)
+  feed(GOBLIN)
+  ok(#H.sounds == n0, "sounds off: silent")
+  H.command("/storefront sound")
+  W.close(true)
+end
 
 -- Zoning closes it; unloading tells the server
 feed(GOBLIN)

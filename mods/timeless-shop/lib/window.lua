@@ -7,6 +7,7 @@ local S = require("lib.style")
 local Canvas = require("lib.canvas")
 local protocol = require("lib.protocol")
 local themes = require("lib.themes")
+local flavor = require("lib.flavor")
 
 local W = {}
 
@@ -19,9 +20,10 @@ W.PREV_X = 436
 W.CARD_H = 44
 
 W.model = protocol.new_model()
-W.state = { section = 1, item = nil, page = 1, confirm = nil, voice = nil, waiting = false, token = nil, demo = false }
+W.state = { section = 1, item = nil, page = 1, confirm = nil, voice = nil, waiting = false, token = nil, demo = false, burst = nil }
 
 W.send = function() end -- set by init.lua: sends a "sh ..." request
+W.play = function() end -- set by init.lua: plays one of the shop's sounds ("open" or "buy")
 
 local function theme() return themes.for_shop(W.model.shop) end
 
@@ -105,8 +107,49 @@ end
 function W.speech()
   local shop, t, v = W.model.shop, theme(), W.state.voice
   if v and v.kind == "server" then return shop and shop.greeting or themes.say(t, "greet", v.n) end
-  if v then return themes.say(t, v.kind, v.n) end
+  if v and v.kind == "quip" then
+    local item = selected_item()
+    if item then return flavor.quip(t.key, item, W.item_info(item), v.n) end
+  end
+  if v and v.kind == "regular" then
+    local tier = flavor.regular(t.key, W.regular_count())
+    if tier then return tier[3][(v.n - 1) % #tier[3] + 1] end
+  end
+  if v and (v.kind == "night" or v.kind == "morning") then
+    local list = (flavor[t.key] or flavor.guild)[v.kind]
+    if list then return list[(v.n - 1) % #list + 1] end
+  end
+  if v and t.voice[v.kind] then return themes.say(t, v.kind, v.n) end
   return themes.say(t, "greet", 1)
+end
+
+-- How often you've bought from this shopkeeper (kept per character)
+function W.regular_count()
+  local shop = W.model.shop
+  if not shop then return 0 end
+  if W.state.demo then return W.state.demo_buys or 0 end
+  storage.character.shop_regulars = storage.character.shop_regulars or {}
+  return storage.character.shop_regulars[shop.keeper] or 0
+end
+
+function W.count_purchase()
+  local shop = W.model.shop
+  if not shop then return end
+  if W.state.demo then
+    W.state.demo_buys = (W.state.demo_buys or 0) + 1
+    return
+  end
+  storage.character.shop_regulars = storage.character.shop_regulars or {}
+  storage.character.shop_regulars[shop.keeper] = (storage.character.shop_regulars[shop.keeper] or 0) + 1
+  pcall(storage.save)
+end
+
+-- What the shopkeeper says when you leave
+function W.farewell()
+  local shop = W.model.shop
+  if not shop then return nil end
+  local fl = flavor[theme().key] or flavor.guild
+  return ("%s: %s"):format(shop.keeper, fl.bye[math.random(1, #fl.bye)])
 end
 
 function W.draw_head(c, t)
@@ -114,9 +157,21 @@ function W.draw_head(c, t)
   local col = t.colours
   c:rect(0, 0, W.CW, W.HEAD, col.bg, { to = col.bg2 })
   t.deco(c, W.CW, W.HEAD)
+  local fl = flavor[t.key] or flavor.guild
+  if fl.anim then fl.anim(c, W.CW, W.HEAD, os.clock()) end
   local title = (shop and shop.title and t.key == "guild") and shop.title or t.shop(shop and shop.keeper)
   c:text(16, 10, title, { size = 1.35, bold = true, colour = col.title, outline = t.title_on_light and nil or { 0, 0, 0, 160 }, w = W.CW - 230 })
-  c:text(16, 34, ("%s  ·  %s"):format(shop and shop.keeper or "", t.label), { size = 0.85, colour = t.title_on_light and col.title or col.muted, w = W.CW - 230 })
+  local who = ("%s  ·  %s"):format(shop and shop.keeper or "", t.label)
+  local ww = c:text(16, 34, who, { size = 0.85, colour = t.title_on_light and col.title or col.muted, w = W.CW - 330 })
+  local tier = flavor.regular(t.key, W.regular_count())
+  if tier then
+    local label = "★ " .. tier[2]
+    local bw = Canvas.measure(label, 0.72, true) + 14
+    c:rect(16 + ww + 10, 33, bw, 16, { 0, 0, 0, 90 }, { round = 8 })
+    c:rect(16 + ww + 10, 33, bw, 16, col.accent, { round = 8, line = 1 })
+    c:text(16 + ww + 10 + bw / 2, 34, label, { size = 0.72, bold = true, align = "center", colour = col.accent })
+    c:tip(16 + ww + 10, 33, bw, 16, tier[2], ("You've bought from %s %d times."):format(shop.keeper, W.regular_count()))
+  end
 end
 
 function W.draw_bubble(c, t)
@@ -166,6 +221,13 @@ function W.draw_grid(c, t)
   W.state.page = math.max(1, math.min(W.state.page, pages))
   local cw = (W.GRID_W - 6) / 2
   local first = (W.state.page - 1) * per + 1
+  local stamps = (flavor[t.key] or flavor.guild).stamps
+  local cheapest
+  if #sec.items >= 3 then
+    for _, it in ipairs(sec.items) do
+      if it.can and (not cheapest or it.price < cheapest.price) then cheapest = it end
+    end
+  end
   for n = first, math.min(#sec.items, first + per - 1) do
     local item = sec.items[n]
     local k = n - first
@@ -175,6 +237,7 @@ function W.draw_grid(c, t)
     local okbuy = protocol.affordable(shop, item)
     local hot = c:region(x, y, cw, W.CARD_H, { key = "item" .. n, on = function()
       W.state.item, W.state.confirm = n, nil
+      W.state.voice = { kind = "quip", n = math.random(1, 4) }
       W.render()
     end })
     c:rect(x, y, cw, W.CARD_H, sel and col.card_hi or (hot and col.card_hi or col.card), { round = 6 })
@@ -184,9 +247,16 @@ function W.draw_grid(c, t)
     local fade = item.can and 1 or 0.5
     c:text(x + 44, y + 7, item.label, { size = 0.82, bold = true, colour = S.fade(col.text, fade), w = cw - 50 })
     c:text(x + 44, y + 24, t.money(item.price, shop.currency, true), { size = 0.76, colour = okbuy and col.price or S.fade(col.price, 0.55), w = cw - 84 })
-    if item.left >= 0 then
-      c:text(x + cw - 6, y + 25, item.left == 0 and "sold out" or (item.left .. " left"), { size = 0.7, align = "right",
-        colour = item.left == 0 and col.bad or col.muted })
+    if item.left > 0 then
+      c:text(x + cw - 6, y + 25, item.left .. " left", { size = 0.7, align = "right", colour = col.muted })
+    end
+    local stamp = item.left == 0 and stamps.sold or (item.left == 1 and stamps.last or (item == cheapest and stamps.bargain or nil))
+    if stamp then
+      local sw = Canvas.measure(stamp, 0.62, true) + 10
+      local scol = item.left == 0 and col.bad or col.accent
+      c:rect(x + cw - sw - 4, y - 5, sw, 13, scol, { round = 3 })
+      themes.helpers.tri(c, x + cw - sw - 4, y - 5, x + cw - sw - 4, y + 8, x + cw - sw - 9, y + 1.5, scol)
+      c:text(x + cw - 4 - sw / 2, y - 5, stamp, { size = 0.62, bold = true, align = "center", colour = { 20, 16, 10, 255 } })
     end
     if not item.can and item.why then c:tip(x, y, cw, W.CARD_H, item.label, item.why) end
   end
@@ -297,6 +367,58 @@ function W.draw(c)
   W.draw_grid(c, t)
   W.draw_preview(c, t)
   W.draw_footer(c, t)
+  W.draw_burst(c, t)
+end
+
+-- The little celebration when you buy something, in the shopkeeper's style
+W.BURST_TIME = 1.2
+function W.draw_burst(c, t)
+  local b = W.state.burst
+  if not b then return end
+  local age = os.clock() - b.at
+  if age > W.BURST_TIME then
+    W.state.burst = nil
+    return
+  end
+  local style = (flavor[t.key] or flavor.guild).burst
+  local k = age / W.BURST_TIME
+  local fade = math.floor(255 * (1 - k))
+  for i = 1, 14 do
+    local ang = (i / 14) * math.pi * 2 + i * 0.37
+    local speed = 50 + (i * 37) % 60
+    local px = b.x + math.cos(ang) * speed * age
+    local py = b.y + math.sin(ang) * speed * age
+    if style == "coins" then
+      py = py + 160 * age * age
+      c:circle(px, py, 4, { 230, 186, 70, fade })
+      c:circle(px, py, 4, { 140, 100, 30, fade }, 1)
+    elseif style == "hearts" then
+      py = py - 30 * age
+      c:circle(px - 2, py, 3, { 240, 110, 150, fade })
+      c:circle(px + 2, py, 3, { 240, 110, 150, fade })
+      themes.helpers.tri(c, px - 5, py + 1, px + 5, py + 1, px, py + 7, { 240, 110, 150, fade })
+    elseif style == "stars" then
+      themes.helpers.star(c, px, py, 5 + 3 * (1 - k), { 255, 240, 160, fade })
+    elseif style == "leaves" then
+      py = py + 40 * age
+      c:circle(px, py, 3, { 120, 200, 110, fade })
+      c:circle(px + 2, py - 2, 2, { 160, 220, 120, fade })
+    elseif style == "feathers" then
+      py = py + 30 * age
+      themes.helpers.tri(c, px, py - 6, px - 2, py + 4, px + 2, py + 4, { 230, 190, 80, fade })
+    elseif style == "embers" then
+      py = py - 50 * age
+      c:circle(px, py, 2.2, { 255, 140, 60, fade })
+    else -- sparks
+      local ex, ey = px + math.cos(ang) * 6, py + math.sin(ang) * 6
+      c:line(px, py, ex, ey, { 255, 236, 180, fade }, 1.5)
+    end
+  end
+end
+
+-- Whether anything on the window moves right now (it redraws often then)
+function W.animated()
+  return W.state.burst ~= nil or (flavor[theme().key] or flavor.guild).anim ~= nil
 end
 
 function W.render()
@@ -314,6 +436,11 @@ function W.setup()
   ui.on(W.WIN, function(win, e)
     if e.kind == "close" then
       if not W.state.demo then W.send("close") end
+      if W.state.open then
+        local bye = W.farewell()
+        if bye then print(bye) end
+      end
+      W.state.open = false
       return
     end
     Canvas.event(win, e)
@@ -329,14 +456,27 @@ function W.opened()
   W.state.waiting = false
   if not same then
     W.state.section, W.state.item, W.state.page, W.state.confirm = 1, 1, 1, nil
-    W.state.voice = shop.greeting and { kind = "server" } or { kind = "greet", n = math.random(1, 3) }
+    W.state.voice = W.greeting()
     W.model.result = nil
+    W.play("open")
   end
   local sec = shop.sections[W.state.section]
   if not sec then W.state.section, W.state.item = 1, 1 end
   if not ui.is_open(W.WIN) then ui.open(W.WIN) end
   W.state.open = true
   W.render()
+end
+
+-- What the keeper says as you come in: a regular's welcome, else what the server says they said, else a word for
+-- the time of day, else their usual greeting
+function W.greeting()
+  local shop, t = W.model.shop, theme()
+  local n = math.random(1, 3)
+  if flavor.regular(t.key, W.regular_count()) then return { kind = "regular", n = n } end
+  if shop.greeting then return { kind = "server" } end
+  local tod = flavor.time_of_day()
+  if tod and (flavor[t.key] or flavor.guild)[tod] then return { kind = tod, n = n } end
+  return { kind = "greet", n = n }
 end
 
 -- A purchase's answer: what the keeper says about it
@@ -349,12 +489,21 @@ function W.answered()
     kind = (m:find("costs") or m:find("everglass; you have")) and "poor" or ((m:find("sold") or m:find("gone")) and "sold" or nil)
   end
   W.state.voice = kind and { kind = kind, n = math.random(1, 3) } or W.state.voice
+  if r.ok then
+    W.count_purchase()
+    W.state.burst = { at = os.clock(), x = W.PREV_X + (W.CW - W.PREV_X - 8) / 2, y = W.CH - 70 }
+    W.play("buy")
+  end
   W.render()
 end
 
 -- Closes the window; tell: let the server forget the shop (not after "Old menu", which already did)
 function W.close(tell)
   if tell and W.state.open and not W.state.demo then W.send("close") end
+  if tell and W.state.open then
+    local bye = W.farewell()
+    if bye then print(bye) end
+  end
   W.state.open = false
   if ui.is_open(W.WIN) then ui.close(W.WIN) end
 end

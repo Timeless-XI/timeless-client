@@ -209,6 +209,19 @@ draw = {
 }
 render = { entity = function(id, look) H.looks[id] = copy(look) end }
 
+-- Sounds: checks the file is there and is a 16-bit PCM WAV
+H.sounds = {}
+audio = {
+  play = function(path, volume)
+    assert(type(path) == "string" and not path:find("%.%.") and not path:find(":"), "sound path inside the mod")
+    local f = assert(io.open(path, "rb"), "no sound file " .. path)
+    local head = f:read(44)
+    f:close()
+    assert(head:sub(1, 4) == "RIFF" and head:sub(9, 12) == "WAVE", path .. " is a WAV")
+    assert(head:byte(21) == 1 and head:byte(35) == 16, path .. " is 16-bit PCM")
+    H.sounds[#H.sounds + 1] = path
+  end,
+}
 H.binds = {}
 binds = { set = function(k, f) H.binds[k] = f end, unset = function(k) H.binds[k] = nil end }
 storage = { character = {}, account = {}, save = function() H.saved = (H.saved or 0) + 1 end }
