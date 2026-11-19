@@ -4,7 +4,8 @@
 --   NA1|D|<id>|<zone>|<lv1>|<lv2>|<model>|<hp>|<flags>|<element>|<jobs>|<name>
 --   NA1|K|<ecosystem>|<family>|<species>|<detects>
 --   NA1|W|el|fire=0,...  NA1|W|st|...  NA1|W|ph|slashing=-12,...  NA1|W|mg|all=50  NA1|W|im|stun,silence
---   NA1|S|<types>|<respawn s>|<window>|<lottery chance>|<cooldown s>|<placeholders>
+--   NA1|S|<types>|<respawn s>|<window>|<lottery chance>|<cooldown s>|<placeholders>|<timer min-max s>
+--        (types has "timed" for a former lottery NM the server spawns on a timer; the timer field is newer: may be absent)
 --   NA1|P|<???>|<item ids>   NA1|X|<state>|<minutes>|<minutes since defeated>
 --   NA1|G|<rate>|<item>   NA1|O|<rate>|<item>:<w>,...   NA1|T|<item>   NA1|Z
 -- States: 0 unknown, 1 up, 2 a timer (minutes to go), 3 can pop now. No game or UI code here.
@@ -78,7 +79,10 @@ function P.feed(m, line, now)
       end
     elseif kind == "S" then
       i.spawn = { types = f[1] ~= "" and split(f[1], ",") or {}, respawn = tonumber(f[2]) or 0, window = f[3] ~= "" and f[3] or nil,
-        chance = tonumber(f[4]) or 0, cooldown = tonumber(f[5]) or 0, ph = f[6] ~= "" and split(f[6], ",") or {} }
+        chance = tonumber(f[4]) or 0, cooldown = tonumber(f[5]) or 0, ph = (f[6] or "") ~= "" and split(f[6], ",") or {} }
+      local lo, hi = (f[7] or ""):match("^(%d+)%-(%d+)$")
+      if lo then i.spawn.timer = { tonumber(lo), tonumber(hi) } end
+      for _, t in ipairs(i.spawn.types) do if t == "timed" then i.spawn.timed = true end end
     elseif kind == "P" then
       i.pops[#i.pops + 1] = { npc = f[1], items = ids(f[2]) }
     elseif kind == "X" then

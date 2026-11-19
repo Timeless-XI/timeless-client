@@ -25,6 +25,7 @@ A.STATE = {
   [1] = { "Up now", { 120, 214, 140, 255 } },
   [2] = { "Timer", { 240, 190, 90, 255 } },
   [3] = { "Can pop", { 92, 196, 200, 255 } },
+  [4] = { "Due", { 150, 220, 120, 255 } },
 }
 
 A.ELEMENTS = {
@@ -131,7 +132,7 @@ local function list(c, y0)
     if r.state == 2 then
       local left = P.left(r.mins, l.at, now())
       c:text(A.LIST_W - 6, y + 13, P.span(left), { size = 0.68, colour = st[2], align = "right" })
-    elseif r.state == 1 or r.state == 3 then
+    elseif r.state == 1 or r.state == 3 or r.state == 4 then
       c:text(A.LIST_W - 6, y + 13, st[1], { size = 0.68, colour = st[2], align = "right" })
     end
     y = y + A.ROW_H
@@ -173,15 +174,26 @@ local function spawn_text(i)
   if i.flags:find("k", 1, true) then
     lines[#lines + 1] = "A Land King: it appears on its zone's own timer (a window of about a day), or is popped with the items below."
   end
-  if sp.chance > 0 then
+  local function span_text(t)
+    local a, b = math.floor(t[1] / 60), math.floor(t[2] / 60)
+    if b - a < 5 then return "about " .. P.span(a) end
+    return P.span(a) .. " to " .. P.span(b)
+  end
+  if sp.timed then
+    local every = sp.timer and span_text(sp.timer) or "a set time"
+    local ph = #sp.ph > 0 and (", taking the place of " .. table.concat(sp.ph, " or ")) or ""
+    lines[#lines + 1] = ("On a timer: it appears on its own %s after it was last defeated%s. No placeholder hunting needed."):format(every, ph)
+  elseif sp.chance > 0 then
     local ph = #sp.ph > 0 and table.concat(sp.ph, " or ") or "a placeholder"
     local cd = sp.cooldown > 0 and (", at most once every " .. P.span(math.floor(sp.cooldown / 60))) or ""
     lines[#lines + 1] = ("Lottery: when %s is defeated, a %d%% chance it appears in its place%s."):format(ph, sp.chance, cd)
+  elseif sp.timer and not i.flags:find("k", 1, true) then
+    lines[#lines + 1] = ("Respawns %s after it's defeated."):format(span_text(sp.timer))
   elseif sp.respawn > 0 then
     lines[#lines + 1] = ("Respawns about %s after it's defeated."):format(P.span(math.floor(sp.respawn / 60)))
   end
   for _, t in ipairs(sp.types or {}) do
-    if t ~= "lottery" and TYPES[t] and not (t == "scripted" and (#i.pops > 0 or i.flags:find("k", 1, true))) then
+    if t ~= "lottery" and TYPES[t] and not (t == "scripted" and (#i.pops > 0 or sp.timer or i.flags:find("k", 1, true))) then
       lines[#lines + 1] = "Spawns " .. TYPES[t] .. "."
     end
   end
@@ -202,6 +214,8 @@ local function state_line(i)
     text = left > 0 and ("Can spawn in " .. P.span(left)) or "Can spawn any time now"
   elseif i.state == 3 then
     text = "Can pop now: hunt its placeholders"
+  elseif i.state == 4 then
+    text = "Due: its timer is up, it appears within a few minutes (when its hour and weather allow)"
   else
     text = (#i.pops > 0) and "Pop it at the ??? when you're ready" or "Not seen since the server started"
   end

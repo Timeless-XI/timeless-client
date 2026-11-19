@@ -142,6 +142,34 @@ H.run(0.2)
 A.render()
 ok(texts():find("Update your TimelessXI client", 1, true), "an older client: a note in place of the model")
 
+-- A former lottery NM the server now spawns on a timer (modules/timed_nms), and a scripted window (Roc)
+mod.model_portraits = true
+local function detail(lines)
+  for _, l in ipairs(lines) do ok(H.line(l) == false, "hidden: " .. l:sub(1, 10)) end
+  A.render()
+  return texts()
+end
+H.line("NA1|H|1|1|1")
+H.line("NA1|R|17187111|100|9|10|4|0|Jaggedy-Eared Jack")
+H.line("NA1|E")
+A.state.selected = 17187111
+t = detail({ "NA1|D|17187111|100|9|10|26|200||||Jaggedy-Eared Jack", "NA1|K|beast|rabbit|forest hare|",
+  "NA1|S|timed|180||0|0|Forest Hare|2400-2400", "NA1|X|4|0|-1", "NA1|G|100|926", "NA1|Z" })
+ok(A.model.info.spawn.timed and A.model.info.spawn.timer[1] == 2400, "timed and its timer read")
+ok(t:find("On a timer: it appears on its own about 40m after it was last defeated", 1, true) and t:find("place of Forest Hare", 1, true),
+  "how a timed NM spawns: " .. t)
+ok(not t:find("Lottery", 1, true), "no lottery text for it")
+ok(t:find("Due: its timer is up", 1, true), "due")
+ok(t:find("Due", 1, true) and A.model.list.rows[1].state == 4, "the row says due")
+H.check_draws("atlas")
+t = detail({ "NA1|D|17268851|120|80|82|300|9000|a||wind||Roc", "NA1|K|bird|roc|roc|sight",
+  "NA1|S|scripted|0||0|0||75600-86400", "NA1|X|2|600|-1", "NA1|Z" })
+ok(t:find("Respawns 21h 00m to 24h 00m after it", 1, true), "Roc: his window: " .. t)
+ok(not t:find("by its own rules", 1, true), "not 'by its own rules' when the timer is known")
+-- an older server: no timer field
+t = detail({ "NA1|D|17215868|107|10|11|328|230|lc|fire||Leaping Lizzy", "NA1|S||300||8|3600|Rock Lizard", "NA1|X|3|0|-1", "NA1|Z" })
+ok(t:find("Lottery: when Rock Lizard is defeated", 1, true), "an older server's line still reads")
+
 -- The protocol
 ok(P.percent(240) == "24%" and P.percent(5) == "0.5%" and P.percent(1000) == "100%", "percents")
 ok(P.span(1200) == "20h 00m" and P.span(45) == "45m" and P.span(3000) == "2d 2h", "spans")

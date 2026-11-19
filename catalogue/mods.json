@@ -3123,11 +3123,11 @@
       "id": "timeless-atlas",
       "name": "Timeless NM Atlas",
       "kind": "lua",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "authors": [
         "TimelessXI"
       ],
-      "description": "Every notorious monster of the open world, searchable by name, drop or placeholder: whether it's up or how long until it can spawn, how it spawns (lottery, timer, the items for its ???), what it's weak to and what it drops with each chance, and its model turning slowly (TimelessXI client build 6). Open it from the Timeless menu. Needs the server's nm_atlas module.",
+      "description": "Every notorious monster of the open world, searchable by name, drop or placeholder: whether it's up or how long until it can spawn, how it spawns (its timer, a lottery, the items for its ???), what it's weak to and what it drops with each chance, and its model turning slowly (TimelessXI client build 6). Open it from the Timeless menu. Needs the server's nm_atlas module.",
       "files": [
         {
           "path": "init.lua",
@@ -3144,8 +3144,8 @@
         {
           "path": "lib/atlas.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-atlas/lib/atlas.lua",
-          "sha256": "741c5e0d294bfd2586a56e9aabf89aebe846a5ce28be87503b81d78ebe761112",
-          "size": 18602
+          "sha256": "3ab60fc5907eede9415fe762e977a6e164f6ac6a52f757332dfb985e75253994",
+          "size": 19473
         },
         {
           "path": "lib/canvas.lua",
@@ -3156,8 +3156,8 @@
         {
           "path": "lib/protocol.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-atlas/lib/protocol.lua",
-          "sha256": "afd607fd9d63af4d3416b8ccce3e804d422daecda5b924f12c576cb5d476c81a",
-          "size": 5223
+          "sha256": "bd86269346e350f816f878ed676fcff6632377de7a977cb23478869945d85b9b",
+          "size": 5592
         },
         {
           "path": "lib/style.lua",
@@ -3168,8 +3168,8 @@
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-atlas/mod.toml",
-          "sha256": "579f5351facaf5ad9be3b4f1cb243381634f68322ba47616a815d08b700a4278",
-          "size": 756
+          "sha256": "7349e18f4f16842c7d973191c043cdcc7d04df168d0e406b6745f680d4dbf05c",
+          "size": 762
         }
       ],
       "required": true,
