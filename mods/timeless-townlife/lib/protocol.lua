@@ -3,6 +3,7 @@
 --   TL1|B|<target index>|<text>              a speech bubble over that townsperson
 --   TL1|L|<lamp>|<x>,<y>,<z>|<1 lit, 0 out>  a street lamp
 --   TL1|S|<n>|<kind>|<x>,<y>,<z>|<range>     scenery: smoke, hammer, crowd, gulls
+--   TL1|A|<target index>|<lantern, torch, ->  what a townsperson carries that gives light (- nothing)
 --   TL1|T|<section>|<text>                   a Town window row
 --   TL1|E                                    the end of a snapshot
 -- No game or UI code here, so it can be tested on its own.
@@ -12,7 +13,7 @@ local P = {}
 P.VERSION = "TL1"
 
 function P.new_model()
-  return { zone = 0, zone_name = "", lamps = {}, scenery = {}, rows = {}, pending = nil, bubbles = {}, version = 0 }
+  return { zone = 0, zone_name = "", lamps = {}, scenery = {}, rows = {}, pending = nil, bubbles = {}, carry = {}, all_lamps = {}, version = 0 }
 end
 
 function P.extract(message)
@@ -37,7 +38,7 @@ function P.feed(m, line, now)
   if kind == "C" then
     local id, name = rest:match("^(%d+)|?(.*)$")
     m.zone, m.zone_name = tonumber(id) or 0, name or ""
-    m.lamps, m.scenery, m.bubbles = {}, {}, {}
+    m.lamps, m.scenery, m.bubbles, m.carry, m.all_lamps = {}, {}, {}, {}, {}
     m.pending = {}
     return "zone"
   elseif kind == "B" then
@@ -49,8 +50,20 @@ function P.feed(m, line, now)
     local i, p, lit = rest:match("^(%d+)|([^|]+)|([01])$")
     local pos = point(p)
     if not i or not pos then return true end
-    if lit == "1" then m.lamps[tonumber(i)] = pos else m.lamps[tonumber(i)] = nil end
+    local n = tonumber(i)
+    -- Lit just now (not in a snapshot): when, for the fade in
+    m.lit_at = m.lit_at or {}
+    if lit == "1" and not m.lamps[n] and m.pending == nil then m.lit_at[n] = now end
+    if lit ~= "1" then m.lit_at[n] = nil end
+    if lit == "1" then m.lamps[n] = pos else m.lamps[n] = nil end
+    m.all_lamps = m.all_lamps or {}
+    m.all_lamps[tonumber(i)] = pos
     return "lamp"
+  elseif kind == "A" then
+    local index, what = rest:match("^(%d+)|([%a%-]+)$")
+    if not index then return true end
+    m.carry[tonumber(index)] = what ~= "-" and what or nil
+    return "carry"
   elseif kind == "S" then
     local i, what, p, range = rest:match("^(%d+)|(%a+)|([^|]+)|(%d+)$")
     local pos = point(p)

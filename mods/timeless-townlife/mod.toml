@@ -1,5 +1,5 @@
 name = "Timeless Town Life"
-version = "1.0.0"
+version = "1.1.0"
 authors = ["TimelessXI"]
 description = "Bastok, lived in: speech bubbles over the townsfolk, street lamps that glow once the lamplighter has been round, chimney smoke, sounds by place (hammering, crowds, gulls) and a Town window (/town) with the headlines, the caravan, market day and the gossip. Needs the server's townlife module."
 permissions = ["packets.write"]
@@ -14,7 +14,7 @@ help = "What townsfolk say shows in a bubble over their head."
 type = "bool"
 default = true
 label = "Lamp Glow"
-help = "Street lamps glow once the lamplighter has lit them."
+help = "Street lamps glow once the lamplighter has lit them. With Night Lighting set to Modern (TimelessXI client build 7), they really light the street, and the lamplighter's lantern and the guards' torches give light after dark."
 
 [settings.smoke]
 type = "bool"

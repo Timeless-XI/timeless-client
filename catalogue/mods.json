@@ -4182,7 +4182,7 @@
       "id": "timeless-townlife",
       "name": "Timeless Town Life",
       "kind": "lua",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "authors": [
         "TimelessXI"
       ],
@@ -4203,8 +4203,8 @@
         {
           "path": "init.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/init.lua",
-          "sha256": "3db34443d089d46d80899f4eecf1ec591a91c555269cad6c4283770f3c5ca126",
-          "size": 2960
+          "sha256": "6a0ba6a7093c68a11cfac176f4141a9fe0ae4975da877cd0e51daaf42898613b",
+          "size": 3000
         },
         {
           "path": "lib/action.lua",
@@ -4221,8 +4221,8 @@
         {
           "path": "lib/protocol.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/lib/protocol.lua",
-          "sha256": "6957958870312eaf1521a24bfa5d2abd4b8a15c562d85f33eeb6acb420ab8e5f",
-          "size": 2812
+          "sha256": "651fec51142062e1e3e9fb56e128c6de99515e1588c2d120d4f96e4c1f54f6a3",
+          "size": 3471
         },
         {
           "path": "lib/style.lua",
@@ -4239,14 +4239,14 @@
         {
           "path": "lib/world.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/lib/world.lua",
-          "sha256": "b1b91dc9d0c877173362668538f37affee0666ff1fdfd657b0dcedf49e35cd23",
-          "size": 5406
+          "sha256": "b57ffb793f5dadf12a35cae48622b0488a5fa8099c95ea6d063189908cf27ca4",
+          "size": 8221
         },
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/mod.toml",
-          "sha256": "7cb00c2e9b5154c9c4c7808aaf0e38306ec27bf10977c54bf319616600ebfe03",
-          "size": 1169
+          "sha256": "cc2690a8cfc68b5e214f491ec86d223c5f782f3e2b506f15d48ae02eaa96cf3b",
+          "size": 1339
         },
         {
           "path": "sounds/crowd.wav",

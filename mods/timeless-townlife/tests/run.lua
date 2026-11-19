@@ -106,10 +106,42 @@ ok(H.take_sent()[1] == "tl town", "Refresh asks again")
 H.command("/town")
 ok(not ui.is_open("town"), "/town closes it")
 
+-- Real lights (TimelessXI's Night Lighting Modern): the lamps light up for real, the lantern and torches give light
+local L, Z = {}, {}
+render.light = function(id, spec) L[id] = spec end
+render.lamp_zone = function(id, spec) Z[id] = spec end
+local modern = true
+render.night = function() return { modern = modern, amount = 1, darkness = 0.6 } end
+H.line("TL1|L|2|-147.6,-4.0,-103.7|0")
+H.line("TL1|A|301|lantern")
+H.line("TL1|A|302|torch")
+H.run(0.3)
+ok(L.tll1 and L.tll1.y < -4 and L.tll1.intensity > 0, "a lit lamp is a real light above it")
+ok(H.draws.lamp1 == nil, "and no sprite glow then")
+ok(Z.tlz1 and Z.tlz1.level == 1 and Z.tlz2 and Z.tlz2.level == 0, "the zone's own lamps beside them follow: lit, out")
+ok(L.tll2 == nil, "an unlit lamp gives no light")
+ok(L.tlc301 and L.tlc301.entity == 301 and L.tlc301.night_only, "the lamplighter's lantern")
+ok(L.tlc302 and L.tlc302.range > L.tlc301.range, "a guard's torch")
+H.line("TL1|L|2|-147.6,-4.0,-103.7|1")
+H.run(0.3)
+ok(L.tll2 and L.tll2.intensity < L.tll1.intensity, "a lamp just lit fades in")
+H.run(2)
+ok(math.abs(L.tll2.intensity - L.tll1.intensity) < 1e-6 and Z.tlz2.level == 1, "then shines as the others")
+H.line("TL1|A|301|-")
+H.run(0.3)
+ok(L.tlc301 == nil, "his lantern goes home with him")
+modern = false
+H.run(0.3)
+ok(next(L) == nil and next(Z) == nil, "Original lighting: the real lights go")
+ok(H.draws.lamp1 and H.draws.lamp1.kind == "image", "and the sprite glows come back")
+modern = true
+H.run(0.3)
+
 -- A new zone: everything forgotten, a fresh snapshot asked for
 H.fire("zone_change")
 H.run(0.3)
 ok(H.draws.lamp1 == nil and #town.model.rows == 0, "zone change clears the town")
+ok(next(L) == nil and next(Z) == nil, "and its lights")
 H.run(3)
 ok(H.take_sent()[1] == "tl on", "and asks again in the new zone")
 

@@ -8,7 +8,19 @@ W.SMOKE_RANGE = 80
 W.SOUND_EVERY = { hammer = 5, crowd = 4.5, gulls = 6 } -- seconds between plays (about the sound's length)
 W.SOUND_VOLUME = { hammer = 0.45, crowd = 0.35, gulls = 0.4 }
 
+-- Real lights (TimelessXI's Night Lighting Modern: render.light / render.lamp_zone): the lamplighter's lamps light up
+-- one by one and the native lamps beside them follow, his lantern and the guards' torches give light. Without them
+-- (Original lighting, an older client) the lamps glow as drawn sprites.
+W.LAMP_LIGHT = { colour = { 255, 186, 110 }, range = 10, intensity = 16, halo = 0.9, height = 2.6, fade = 1.5 }
+W.CARRY = {
+  lantern = { colour = { 255, 196, 120 }, range = 7, intensity = 7, halo = 0.45, height = 1.3 },
+  torch = { colour = { 255, 150, 70 }, range = 9, intensity = 10, halo = 0.6, height = 2.0 },
+}
+W.ZONE_RADIUS = 6 -- yalms round a lamplighter's lamp in which the zone's own lamps follow it
+
 local drawn = {}    -- draw id -> true
+local lights = {}   -- render.light id -> true
+local zones = {}    -- render.lamp_zone id -> true
 local bubbled = {}  -- index -> true
 local next_sound = {} -- scenery n -> clock
 
@@ -84,11 +96,57 @@ function W.bubbles(model, now)
   end
 end
 
+-- Real lights to use: the client has them and Night Lighting is Modern
+function W.real_lights()
+  if type(render) ~= "table" or type(render.light) ~= "function" or type(render.night) ~= "function" then return false end
+  local ok, n = pcall(render.night)
+  return ok and type(n) == "table" and n.modern == true
+end
+
+-- The lamplighter's lamps and the carried lights as real lights; drops the ones gone
+function W.lights(model, now)
+  local keep_l, keep_z = {}, {}
+  if W.real_lights() and setting("lamps") then
+    local L = W.LAMP_LIGHT
+    for i, pos in pairs(model.all_lamps or {}) do
+      local lit = model.lamps[i] ~= nil
+      local zid = "tlz" .. i
+      pcall(render.lamp_zone, zid, { x = pos.x, y = pos.y, z = pos.z, radius = W.ZONE_RADIUS, level = lit and 1 or 0, fade = L.fade })
+      keep_z[zid] = true
+      if lit then
+        local at = model.lit_at and model.lit_at[i]
+        local k = at and math.min(1, math.max(0, now - at) / L.fade) or 1
+        local id = "tll" .. i
+        pcall(render.light, id, { x = pos.x, y = pos.y - L.height, z = pos.z, colour = L.colour, range = L.range,
+          intensity = L.intensity * k, halo = L.halo * k })
+        keep_l[id] = true
+      end
+    end
+    for index, kind in pairs(model.carry or {}) do
+      local c = W.CARRY[kind]
+      if c then
+        local id = "tlc" .. index
+        pcall(render.light, id, { entity = index, height = c.height, colour = c.colour, range = c.range,
+          intensity = c.intensity, halo = c.halo, night_only = true })
+        keep_l[id] = true
+      end
+    end
+  end
+  for id in pairs(lights) do
+    if not keep_l[id] then pcall(render.light, id, nil) end
+  end
+  for id in pairs(zones) do
+    if not keep_z[id] then pcall(render.lamp_zone, id, nil) end
+  end
+  lights, zones = keep_l, keep_z
+end
+
 -- Lamps and smoke: redrawn a few times a second (the smoke drifts up)
 function W.scene(model, now, me)
   local keep = {}
+  W.lights(model, now)
   if me and me.pos then
-    if setting("lamps") then
+    if setting("lamps") and not W.real_lights() then
       local flicker = 0.9 + 0.1 * math.sin(now * 7.3)
       for i, pos in pairs(model.lamps) do
         if dist(pos, me.pos) <= W.LAMP_RANGE then
@@ -140,6 +198,9 @@ function W.sounds(model, now, me)
 end
 
 function W.clear()
+  for id in pairs(lights) do pcall(render.light, id, nil) end
+  for id in pairs(zones) do pcall(render.lamp_zone, id, nil) end
+  lights, zones = {}, {}
   for id in pairs(drawn) do draw.remove(id) end
   for index in pairs(bubbled) do clear_bubble(index) end
   drawn, bubbled, next_sound = {}, {}, {}

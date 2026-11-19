@@ -38,7 +38,8 @@ end)
 
 events.on("zone_change", function()
   world.clear()
-  model.lamps, model.scenery, model.bubbles, model.rows = {}, {}, {}, {}
+  model.lamps, model.scenery, model.bubbles, model.rows, model.carry = {}, {}, {}, {}, {}
+  model.all_lamps = {}
   model.zone, model.zone_name = 0, ""
   town.render()
   st.next_beat = os.clock() + 3 -- the server sends this zone's snapshot when it hears from us in it
