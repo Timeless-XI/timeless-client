@@ -122,12 +122,19 @@ fn send(w: &mut World, para: i32, mode: u8, para2: u32) -> bool {
     true
 }
 
+/// Timeless XI: a Timeless server's rod poses (status 52 / 53, from an older client's pose reports) while our bar
+/// game is up still count as fishing.
+fn timeless_pose(w: &World, s: u8) -> bool {
+    matches!(s, 0x34 | 0x35) && w.tl_fish.play.as_ref().is_some_and(|p| !matches!(p, Play::Bar(r) if r.practice))
+}
+
 /// The fishing statuses and the request latch keep us in place (FUN_100964f0).
 pub fn locked(w: &World) -> bool {
     w.fish_pending
         || fishing_status(w.my_motion.status)
         || fishing_status(w.server_status)
-        || matches!(&w.tl_fish.play, Some(Play::Bar(r)) if r.practice && r.done.is_none())
+        || w.tl_fish.active()
+        || timeless_pose(w, w.my_motion.status)
 }
 
 /// /fish (FUN_1007abf0) after the status gate: "You cannot fish here." (group 7 0x49) without water ahead or in the
@@ -248,14 +255,10 @@ fn timeless_frame(w: &mut World, enter: bool, escape: bool, dir: f32, dt: f32) {
             } else if r.done.is_some() && !r.reported {
                 r.reported = true;
                 end = r.end_para().map(|p| (p, r.bite.special));
-            } else if r.done.is_none() {
-                let pose = r.pose(w.tl_fish.pose);
-                let now = r.t;
-                if pose != w.tl_fish.pose && now - w.tl_fish.pose_at >= 0.25 {
-                    out.push((pose, 5, 0));
-                    (w.tl_fish.pose, w.tl_fish.pose_at) = (pose, now);
-                }
             }
+            // The rod pose (mode 5 para 6/7/8) is not sent: the server shows it by rewriting our status to 52 / 53,
+            // which this client reads as the end of fishing (the round vanished, the character could walk off).
+            // Bring it back once the client plays those statuses as a fishing pose.
         }
         Play::Item(p) => {
             p.t += dt;
@@ -316,7 +319,7 @@ pub fn update(w: &mut World, input: &mut Input, dt: f32, window: bool) {
     if w.zone.is_some() && w.tl_fish.hello_zone != w.zone && send(w, tl::HELLO, 5, 0) {
         w.tl_fish.hello_zone = w.zone;
     }
-    if !fishing_status(status) {
+    if !fishing_status(status) && !timeless_pose(w, status) {
         if matches!(&w.tl_fish.play, Some(Play::Bar(r)) if r.practice) {
             let escape = !window && input.test(0x0f, mode::PRESS);
             timeless_frame(w, false, escape, input.axis(4), dt);

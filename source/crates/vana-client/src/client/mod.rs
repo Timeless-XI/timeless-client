@@ -13982,6 +13982,10 @@ impl App {
         if resting || move_locked {
             (ax, ay) = (0.0, 0.0);
         }
+        // Timeless XI: the movement keys steer the Timeless Fishing bar game; none of it reaches the character.
+        if world.tl_fish.active() {
+            (ax, ay) = (0.0, 0.0);
+        }
         // Camera axes 6 / 7: the arrows (with Shift in a window) or the compact I / J / K / L stick.
         let (mut cx, mut cy) = (self.input.axis(6), self.input.axis(7));
         // The controller's camera stick, apart: Camera Keys (ours) is for the keys alone.

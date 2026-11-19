@@ -29,7 +29,9 @@ pub const MAGIC_V3: u16 = 0x5855;
 pub const HELLO: i32 = 10;
 pub const WARN: i32 = 5;
 pub const POSE_CENTER: i32 = 6;
+#[allow(dead_code)] // the rod pose is not sent for now (client/fishing.rs)
 pub const POSE_LEFT: i32 = 7;
+#[allow(dead_code)]
 pub const POSE_RIGHT: i32 = 8;
 
 /// c2s 0x110 mode 3 paras.
@@ -334,6 +336,7 @@ impl Round {
     /// The rod pose for the fish's place, pulling against it: fish on the right -> para 8, on the left -> para 7,
     /// the middle 10 % neutral (a side from 5 % off centre, back to neutral inside 4 %). In game para 7 shows the
     /// rod held to the right and 8 to the left (owner, 2026-11-07), hence the swap.
+    #[allow(dead_code)]
     pub fn pose(&self, current: i32) -> i32 {
         let off = self.fish_x - 0.5;
         if off > 0.05 {
