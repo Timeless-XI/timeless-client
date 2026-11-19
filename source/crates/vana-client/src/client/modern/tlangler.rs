@@ -320,7 +320,7 @@ impl super::Modern {
                                 .on_hover_text("Your next cast starts a fresh fishing spot.");
                         } else if o.used {
                             text(ui, &format!("Cast #{} - No school remaining", a.hole.casts), K::muted());
-                            text(ui, "Move 20+ yalms away for a fresh fishing spot.", K::muted());
+                            text(ui, "Move 20+ yalms away for a chance to find another school!", K::muted());
                         } else if o.next >= angler::EXHAUSTED_AT {
                             text(ui, &format!("Cast #{} - this fishing spot is exhausted. Move on!", a.hole.casts), K::red());
                         } else {
@@ -1176,26 +1176,27 @@ fn meter(ui: &mut egui::Ui, h: &angler::Hole, fresh: bool) {
 /// The moon as a disc lit from the right while waxing, the left while waning.
 fn moon(p: &egui::Painter, c: egui::Pos2, r: f32, pct: i32, dir: i32) {
     p.circle_filled(c, r, rgb(40, 44, 60));
-    let f = pct as f32 / 100.0;
-    let n = 24;
-    let lit: Vec<egui::Pos2> = (0..=n)
-        .map(|k| {
-            let a = std::f32::consts::PI * (k as f32 / n as f32 - 0.5);
-            pos2(c.x + r * a.cos(), c.y + r * a.sin())
-        })
-        .chain((0..=n).rev().map(|k| {
-            let a = std::f32::consts::PI * (k as f32 / n as f32 - 0.5);
-            pos2(c.x + r * (1.0 - 2.0 * f) * a.cos(), c.y + r * a.sin())
-        }))
-        .map(|q| if dir == 1 { pos2(2.0 * c.x - q.x, q.y) } else { q })
-        .collect();
+    // The lit part, row by row: from the terminator (an ellipse, x = w (1 - 2f)) to the limb (x = w), w the disc's
+    // half width at that row; lit on the right while waxing, on the left while waning. A strip of quads between the
+    // two edges, so a crescent (not convex) fills cleanly.
+    let f = (pct as f32 / 100.0).clamp(0.0, 1.0);
     if f > 0.02 {
-        p.add(egui::Shape::Path(egui::epaint::PathShape {
-            points: lit,
-            closed: true,
-            fill: K::gold(),
-            stroke: egui::epaint::PathStroke::NONE,
-        }));
+        let n = 24;
+        let side = if dir == 1 { -1.0 } else { 1.0 };
+        let mut mesh = egui::Mesh::default();
+        for k in 0..=n {
+            let y = -r + 2.0 * r * k as f32 / n as f32;
+            let w = (r * r - y * y).max(0.0).sqrt();
+            let (inner, outer) = (w * (1.0 - 2.0 * f), w);
+            mesh.colored_vertex(pos2(c.x + side * inner, c.y + y), K::gold());
+            mesh.colored_vertex(pos2(c.x + side * outer, c.y + y), K::gold());
+            if k > 0 {
+                let b = 2 * k as u32;
+                mesh.add_triangle(b - 2, b - 1, b);
+                mesh.add_triangle(b - 1, b + 1, b);
+            }
+        }
+        p.add(egui::Shape::mesh(mesh));
     }
     p.circle_stroke(c, r, Stroke::new(1.0, K::muted()));
 }

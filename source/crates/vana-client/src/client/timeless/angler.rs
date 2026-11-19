@@ -1191,8 +1191,8 @@ fn on_line(w: &mut World, line: &str, now: u64) {
                 if let Some((c, n)) = a.hole.last_school {
                     a.notice = Some((
                         format!(
-                            "The school of fish moved on. You caught {n} fish in {c} casts.\nMove 20 or more yalms away to \
-                             start a new fishing spot."
+                            "The school of fish moved on. You caught {n} fish in {c} casts.\nThe fish still bite here. Move 20+ \
+                             yalms away for a chance to find another school!"
                         ),
                         now + 10,
                     ));
@@ -1200,7 +1200,9 @@ fn on_line(w: &mut World, line: &str, now: u64) {
             }
             Some(Msg::Exhausted) => {
                 a.notice = Some((
-                    "This fishing spot is exhausted (75 casts).\nMove 20 or more yalms away to start a new one.".into(),
+                    "This fishing spot is exhausted (75 casts): only half your casts get a bite now.\nMove 20+ yalms away for \
+                     a chance to find another school!"
+                        .into(),
                     now + 10,
                 ));
             }
