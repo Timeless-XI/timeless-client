@@ -534,8 +534,18 @@ pub fn install_fonts(ctx: &Context) {
     install_fonts_with(ctx, None);
 }
 
+/// Timeless XI: the fonts for the Timeless interface (`timeless`) or the modern one. Timeless (style D) sets labels
+/// and names in Fira Sans SemiBold, the classic lettering made crisp, in place of Inter Bold Italic / SemiBold.
+pub fn install_fonts_for(ctx: &Context, timeless: bool) {
+    install_fonts_inner(ctx, None, timeless);
+}
+
 /// `install_fonts` with another body and title face (`modern-shot --font`, for comparing typefaces).
 pub fn install_fonts_with(ctx: &Context, body: Option<(Vec<u8>, Vec<u8>)>) {
+    install_fonts_inner(ctx, body, false);
+}
+
+fn install_fonts_inner(ctx: &Context, body: Option<(Vec<u8>, Vec<u8>)>, timeless: bool) {
     let mut defs = FontDefinitions::default();
     for (name, bytes) in FONTS {
         defs.font_data.insert(name.to_string(), Arc::new(FontData::from_static(bytes)));
@@ -557,8 +567,9 @@ pub fn install_fonts_with(ctx: &Context, body: Option<(Vec<u8>, Vec<u8>)>) {
         |first: &str| -> Vec<String> { std::iter::once(first.to_string()).chain(fallbacks.iter().cloned()).collect() };
     defs.families.insert(FontFamily::Proportional, with(regular));
     defs.families.insert(FontFamily::Name(STRONG.into()), with(strong));
-    defs.families.insert(FontFamily::Name(NAME.into()), with("Inter-SemiBold"));
-    defs.families.insert(FontFamily::Name(LABEL.into()), with("Inter-BoldItalic"));
+    let (name, label) = if timeless { (strong, strong) } else { ("Inter-SemiBold", "Inter-BoldItalic") };
+    defs.families.insert(FontFamily::Name(NAME.into()), with(name));
+    defs.families.insert(FontFamily::Name(LABEL.into()), with(label));
     let mono = defs.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
     defs.families.insert(
         FontFamily::Monospace,

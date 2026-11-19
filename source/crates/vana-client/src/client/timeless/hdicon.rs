@@ -9,9 +9,9 @@
 //! 2. A smooth pass: Catmull-Rom bicubic at 4x, for the painted gradients inside the icons.
 //! 3. A per-pixel blend of the two by the source's local edge strength (outlines from 1, insides from 2).
 //! 4. A light unsharp mask, so the result reads sharp rather than soft.
-//! 5. An area resample from that 4x master to `scale` (2..4), about the screen's pixel density: egui makes no
-//!    mipmaps, so a texture far larger than its drawn size would shimmer; at this size the GPU's linear filter only
-//!    ever shrinks it by 2:1 or less.
+//! 5. An area (box) resample from that 4x master straight to the icon's size on screen (its size times the screen's
+//!    pixels per point): egui makes no mipmaps, so the GPU's linear filter shrinking a large texture would throw most
+//!    of the detail away and shimmer; done here, every master pixel counts and the GPU draws about 1:1.
 
 /// The master's scale over the source.
 const MASTER: usize = 4;
@@ -19,17 +19,24 @@ const MASTER: usize = 4;
 /// A premultiplied pixel, channels in 0..=1.
 type Px = [f32; 4];
 
-/// `scale` (2..=4) for a screen of `pixels_per_point` (egui's, the interface size included).
-pub fn scale_for(pixels_per_point: f32) -> usize {
-    (pixels_per_point.ceil() as usize).clamp(2, MASTER)
+/// The factor (the icon's size over its source's) for a screen of `pixels_per_point` (egui's, the interface size
+/// included): the icon drawn at its own size in points, rounded to a twentieth so a few textures serve every size.
+pub fn factor_for(pixels_per_point: f32) -> f32 {
+    ((pixels_per_point * 20.0).round() / 20.0).clamp(0.5, MASTER as f32)
 }
 
-/// The icon `w` x `h` (straight RGBA) at `scale` (2..=4) times its size: (w, h, straight RGBA).
+/// The icon `w` x `h` (straight RGBA) at `scale` (1..=4) times its size: (w, h, straight RGBA).
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn upscale(w: usize, h: usize, rgba: &[u8], scale: usize) -> Option<(usize, usize, Vec<u8>)> {
+    upscale_by(w, h, rgba, scale as f32)
+}
+
+/// The icon `w` x `h` (straight RGBA) at `factor` (0.5..=4) times its size, through the 4x master: (w, h, RGBA).
+pub fn upscale_by(w: usize, h: usize, rgba: &[u8], factor: f32) -> Option<(usize, usize, Vec<u8>)> {
     if w == 0 || h == 0 || rgba.len() < w * h * 4 {
         return None;
     }
-    let scale = scale.clamp(1, MASTER);
+    let factor = factor.clamp(0.5, MASTER as f32);
     let src: Vec<Px> = rgba.chunks_exact(4).take(w * h).map(premultiply).collect();
     let (mw, mh) = (w * MASTER, h * MASTER);
 
@@ -47,8 +54,8 @@ pub fn upscale(w: usize, h: usize, rgba: &[u8], scale: usize) -> Option<(usize, 
         }
     }
     let master = unsharp(&master, mw, mh, 0.45);
-    let (ow, oh) = (w * scale, h * scale);
-    let out = if scale == MASTER { master } else { area_resample(&master, mw, mh, ow, oh) };
+    let (ow, oh) = (((w as f32 * factor).round() as usize).max(1), ((h as f32 * factor).round() as usize).max(1));
+    let out = if (ow, oh) == (mw, mh) { master } else { area_resample(&master, mw, mh, ow, oh) };
     Some((ow, oh, out.iter().flat_map(|p| unpremultiply(*p)).collect()))
 }
 
@@ -281,9 +288,10 @@ mod tests {
             let (w, h, out) = upscale(32, 32, &src, s).unwrap();
             assert_eq!((w, h, out.len()), (32 * s, 32 * s, 32 * s * 32 * s * 4));
         }
-        assert_eq!(scale_for(1.0), 2);
-        assert_eq!(scale_for(2.5), 3);
-        assert_eq!(scale_for(9.0), 4);
+        assert_eq!(factor_for(0.72), 0.7);
+        assert_eq!(factor_for(9.0), 4.0);
+        let (w, h, _) = upscale_by(32, 32, &src, 0.7).unwrap();
+        assert_eq!((w, h), (22, 22));
         assert!(upscale(0, 4, &[], 2).is_none());
         assert!(upscale(4, 4, &[0; 10], 2).is_none());
     }

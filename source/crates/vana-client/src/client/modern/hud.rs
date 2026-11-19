@@ -207,12 +207,43 @@ pub struct CompassView {
 
 /// The pack's gauge pair (`kind`_empty, `kind`_full) cut at `f` over `r`.
 fn bar(ui: &Ui, m: &Modern, kind: &str, r: Rect, f: f32) {
+    if m.theme.timeless() {
+        flat_bar(ui.painter(), m, kind, r, f);
+        return;
+    }
     if let (Some(e), Some(full)) =
         (m.art.sprite(&format!("gauges/{kind}_empty")), m.art.sprite(&format!("gauges/{kind}_full")))
     {
         paint::gauge(ui.painter(), &e, &full, r, f);
     }
 }
+
+/// Timeless XI: the Timeless interface's (style D) bar: a flat rounded track with the gauge's colour along it, a faint
+/// light along its top, at most `FLAT_BAR` tall at the bottom of `r`.
+pub(super) fn flat_bar(p: &Painter, m: &Modern, kind: &str, r: Rect, f: f32) {
+    let h = r.height().min(FLAT_BAR);
+    let r = Rect::from_min_max(pos2(r.min.x, r.max.y - h), r.max);
+    let round = h / 2.0;
+    p.rect_filled(r, round, Color32::from_black_alpha(120));
+    let f = f.clamp(0.0, 1.0);
+    if f > 0.0 {
+        let c = match kind {
+            "hp" => m.theme.color("hp"),
+            "mp" | "cast" => m.theme.color("mp"),
+            "tp" => m.theme.color("tp"),
+            "experience" => m.theme.color("focus"),
+            _ => m.theme.color("gold"),
+        };
+        let fill = Rect::from_min_size(r.min, vec2((r.width() * f).max(h), h));
+        p.rect_filled(fill, round, c);
+        p.line_segment(
+            [pos2(fill.min.x + round, fill.min.y + 1.0), pos2(fill.max.x - round, fill.min.y + 1.0)],
+            egui::Stroke::new(1.0, Color32::from_white_alpha(45)),
+        );
+    }
+}
+/// Timeless XI: the flat bar's most height.
+const FLAT_BAR: f32 = 7.0;
 
 /// A bar `BAR` high under the row's text; the labels over bars at `LABEL_SIZE`.
 pub(super) const BAR: f32 = 14.0;
@@ -230,9 +261,14 @@ pub(super) fn labelled_bar(
 ) {
     bar(ui, m, kind, r, f);
     let p = ui.painter();
-    let font = FontId::new(LABEL_SIZE, FontFamily::Name(super::LABEL.into()));
-    // The text's bottom (its descender room) half way down the bar.
-    let y = r.min.y + BAR * 0.5;
+    // Timeless XI: smaller upright labels just over the thin flat bar.
+    let (size, y) = if m.theme.timeless() {
+        (m.theme.small + 0.5, r.max.y - r.height().min(FLAT_BAR) - 1.0)
+    } else {
+        // The text's bottom (its descender room) half way down the bar.
+        (LABEL_SIZE, r.min.y + BAR * 0.5)
+    };
+    let font = FontId::new(size, FontFamily::Name(super::LABEL.into()));
     paint::outlined(p, pos2(r.min.x + 6.0, y), Align2::LEFT_BOTTOM, label.0, font.clone(), label.1);
     if !value.0.is_empty() {
         paint::outlined(p, pos2(r.max.x - 6.0, y), Align2::RIGHT_BOTTOM, value.0, font, value.1);
@@ -801,6 +837,10 @@ pub fn target_panel(p: &mut Panels, v: &TargetView) {
     let frame = if v.locked { "window_alert" } else { "window_normal" };
     let dist = v.distance.map(|d| format!("{d:.1}"));
     let title = Title { icon: Some(v.ring), text: &v.name, note: dist.as_deref(), name: false };
+    if m.theme.timeless() {
+        tl_target(p, v, frame, dist.as_deref());
+        return;
+    }
     let r = p.framed("target", None, 340.0, frame, |ui| {
         super::title_row_in(ui, m, &title, v.colour.unwrap_or(m.theme.color("gold")));
         ui.add_space(6.0);
@@ -811,6 +851,57 @@ pub fn target_panel(p: &mut Panels, v: &TargetView) {
             Some((name, Some(f))) => gauge_row(ui, m, name, "mp", *f, ""),
             Some((name, None)) => {
                 ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(format!("Readying {name}")).size(m.theme.small).color(m.theme.color("tp")),
+                );
+            }
+            None => {}
+        }
+    });
+    if let Some(r) = r.filter(|_| v.locked) {
+        locked(&p.over("target"), m, r);
+        if let Some(at) = p.ctx.input(|i| i.pointer.hover_pos()).filter(|at| r.contains(*at)) {
+            m.tip_at(p.ctx, at, "Locked on", "You keep facing the target. Lock on again to let go.");
+        }
+    }
+}
+
+/// Timeless XI: the target window in the Timeless interface (style D): a "Target" title with the distance over a rule,
+/// the name large in its retail colour with the HP percent at the right, the thin flat bar, what it is casting.
+fn tl_target(p: &mut Panels, v: &TargetView, frame: &str, dist: Option<&str>) {
+    let m = p.m;
+    let yalms = dist.map(|d| format!("{d} yalms"));
+    let title = Title { icon: Some(v.ring), text: "Target", note: yalms.as_deref(), name: false };
+    let r = p.framed("target", None, 340.0, frame, |ui| {
+        super::title_row(ui, m, &title);
+        super::title_rule(ui, m, super::panel_margin(m));
+        let width = ui.available_width();
+        let (row, _) = ui.allocate_exact_size(vec2(width, 26.0), Sense::hover());
+        let painter = ui.painter();
+        let pct = v.hp.map(|(pct, _)| format!("{pct}%"));
+        let small = FontId::proportional(m.theme.ui);
+        let pct_w = pct.as_ref().map_or(0.0, |s| painter.layout_no_wrap(s.clone(), small.clone(), m.theme.color("muted")).size().x);
+        let name_font = FontId::new(m.theme.title + 3.0, FontFamily::Name(super::STRONG.into()));
+        let colour = v.colour.unwrap_or(m.theme.color("text"));
+        let g = super::one_line(painter, &v.name, name_font, colour, (width - pct_w - 12.0).max(0.0));
+        let at = pos2(row.min.x, row.center().y - g.size().y / 2.0);
+        painter.galley(at + vec2(1.0, 1.0), g.clone(), Color32::from_black_alpha(200));
+        painter.galley(at, g, colour);
+        if let Some(s) = pct {
+            painter.text(pos2(row.max.x, row.center().y + 1.0), Align2::RIGHT_CENTER, s, small, m.theme.color("muted"));
+        }
+        if let Some((_, f)) = v.hp {
+            ui.add_space(4.0);
+            let (b, _) = ui.allocate_exact_size(vec2(width, 9.0), Sense::hover());
+            flat_bar(ui.painter(), m, "hp", b, f);
+        }
+        match &v.cast {
+            Some((name, Some(f))) => {
+                ui.add_space(6.0);
+                gauge_row(ui, m, name, "mp", *f, "");
+            }
+            Some((name, None)) => {
+                ui.add_space(6.0);
                 ui.label(
                     egui::RichText::new(format!("Readying {name}")).size(m.theme.small).color(m.theme.color("tp")),
                 );

@@ -17,10 +17,13 @@ pub enum Style {
     Gilt,
     /// Raised rows (a light top, a dark bottom), the cursor blue with a soft glow.
     Bevel,
+    /// Timeless XI: the Timeless interface's (style D): the cursor's row lilac glass with a candle-gold mark, a soft
+    /// gold light under the pointer. Always the Timeless interface's.
+    Dusk,
 }
 
 impl Style {
-    pub const ALL: [Style; 5] = [Style::Framed, Style::Hairline, Style::Soft, Style::Gilt, Style::Bevel];
+    pub const ALL: [Style; 6] = [Style::Framed, Style::Hairline, Style::Soft, Style::Gilt, Style::Bevel, Style::Dusk];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -29,6 +32,7 @@ impl Style {
             Style::Soft => "soft",
             Style::Gilt => "gilt",
             Style::Bevel => "bevel",
+            Style::Dusk => "dusk",
         }
     }
 
@@ -66,9 +70,28 @@ fn rule(p: &Painter, r: Rect, y: f32, c: Color32) {
 }
 
 /// The row's background.
+/// The row style drawn: the Timeless interface's own (Dusk), else the chosen one.
+fn current(m: &Modern) -> Style {
+    if m.theme.timeless() { Style::Dusk } else { m.row_style.get() }
+}
+
 fn back(p: &Painter, m: &Modern, r: Rect, s: State, style: Style) {
     let (gold, focus, bronze) = (m.theme.color("gold"), m.theme.color("focus"), m.theme.color("bronze"));
     match style {
+        Style::Dusk => {
+            let r = r.shrink2(vec2(1.0, 1.0));
+            if s.on {
+                p.rect_filled(r, 3.0, focus.gamma_multiply(0.30));
+                let c = pos2(r.min.x + 6.0, r.center().y);
+                p.add(Shape::convex_polygon(
+                    vec![pos2(c.x - 2.5, c.y - 4.0), pos2(c.x + 3.0, c.y), pos2(c.x - 2.5, c.y + 4.0)],
+                    m.theme.color("tp"),
+                    Stroke::NONE,
+                ));
+            } else if s.hover {
+                p.rect_filled(r, 3.0, m.theme.color("tp").gamma_multiply(0.13));
+            }
+        }
         Style::Framed => {
             let sprite = match () {
                 _ if s.off => "controls/list_row_disabled",
@@ -208,7 +231,7 @@ fn ink(m: &Modern, s: State, style: Style) -> Color32 {
 /// A row's background from its face in the pack's names ("controls/list_row_selected", "_hover", "_disabled",
 /// "_normal") in the current style: the framed art, else the style's look; a tint other than white dims it.
 pub fn face(p: &Painter, m: &Modern, r: Rect, face: &str, tint: Color32) {
-    let style = m.row_style.get();
+    let style = current(m);
     if style == Style::Framed || !face.starts_with("controls/list_row_") {
         if let Some(s) = m.art.sprite(face) {
             p.add(paint::nine_slice(&s, r, (r.height() / s.size.y).min(1.0), tint));
@@ -226,12 +249,12 @@ pub fn face(p: &Painter, m: &Modern, r: Rect, face: &str, tint: Color32) {
 
 /// The label colour of a row (gold on the cursor in the Hairline and Gilt styles).
 pub fn label_colour(m: &Modern, on: bool, off: bool) -> Color32 {
-    ink(m, State { on, off, hover: false }, m.row_style.get())
+    ink(m, State { on, off, hover: false }, current(m))
 }
 
 /// The submenu mark at a row's right in the current style; the rect it takes (a click there opens the submenu).
 pub fn more_mark(p: &Painter, m: &Modern, r: Rect, on: bool) -> Rect {
-    more(p, m, r, State { on, ..Default::default() }, m.row_style.get(), false);
+    more(p, m, r, State { on, ..Default::default() }, current(m), false);
     Rect::from_center_size(pos2(r.max.x - 18.0, r.center().y), vec2(22.0, 22.0))
 }
 
@@ -248,7 +271,7 @@ pub fn menu_row(
     left: bool,
     hover: bool,
 ) -> egui::Response {
-    let style = m.row_style.get();
+    let style = current(m);
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
     let s = State { on, off, hover: hover || resp.hovered() };
     let p = ui.painter();

@@ -128,6 +128,8 @@ pub struct Modern {
     images: std::cell::RefCell<std::collections::HashMap<String, (Option<egui::TextureHandle>, f64)>>,
     /// Timeless XI: this frame's time (egui's) and the milliseconds spent upscaling icons in it (game_icon).
     hd_budget: std::cell::Cell<(f64, f32)>,
+    /// Timeless XI: the fonts installed are the Timeless interface's (theme::install_fonts_for).
+    fonts_timeless: std::cell::Cell<bool>,
     images_pruned: std::cell::Cell<f64>,
     /// The full log's find: its key (the log's span and edits, the text, the tab) and the lines it found.
     log_found: std::cell::RefCell<Option<((usize, usize, u64, String, u8, bool), std::rc::Rc<Vec<usize>>)>>,
@@ -229,6 +231,7 @@ impl Modern {
             border_style: Default::default(),
             images: Default::default(),
             hd_budget: Default::default(),
+            fonts_timeless: Default::default(),
             images_pruned: Default::default(),
             log_found: Default::default(),
             status_tips: Default::default(),
@@ -298,6 +301,11 @@ impl Modern {
         window: [u32; 2],
         cfg: &mut crate::config::Config,
     ) -> bool {
+        // Timeless XI: the fonts follow the interface (the Timeless one sets labels and names in Fira Sans).
+        if self.fonts_timeless.get() != self.theme.timeless() {
+            self.fonts_timeless.set(self.theme.timeless());
+            theme::install_fonts_for(ctx, self.theme.timeless());
+        }
         let zoom = self.theme.zoom(window[1] as f32, cfg.modern_scale);
         if (zoom - self.zoom).abs() > 0.001 {
             ctx.set_zoom_factor(zoom);
@@ -697,6 +705,25 @@ pub(super) fn focus_panel(w: &World) -> Option<&'static str> {
 /// The panel margins inside the frame; the resizable one keeps a taller strip below for its glyph.
 const MARGIN: egui::Margin = egui::Margin { left: 22, right: 22, top: 16, bottom: 18 };
 const ROOM_MARGIN: egui::Margin = egui::Margin { bottom: 26, ..MARGIN };
+/// Timeless XI: the Timeless interface's (style D) tighter padding: its glass frame has no ornament to clear.
+const TL_MARGIN: egui::Margin = egui::Margin { left: 14, right: 14, top: 9, bottom: 12 };
+const TL_ROOM_MARGIN: egui::Margin = egui::Margin { bottom: 24, ..TL_MARGIN };
+
+/// Timeless XI: the rule under a Timeless window's title, across the whole window (out through `margin` to the
+/// frame), and the room under it.
+pub(super) fn title_rule(ui: &mut Ui, m: &Modern, margin: egui::Margin) {
+    let y = ui.cursor().top() + 3.5;
+    let r = ui.max_rect();
+    let (x0, x1) = (r.left() - margin.left as f32 + 1.0, r.right() + margin.right as f32 - 1.0);
+    let c = borders::lighter(m.theme.color("bronze"), 0.12).gamma_multiply(0.75);
+    ui.painter().line_segment([pos2(x0, y), pos2(x1, y)], egui::Stroke::new(1.0, c));
+    ui.add_space(10.0);
+}
+
+/// Timeless XI: the margin a framed panel has (for drawing out to its frame).
+pub(super) fn panel_margin(m: &Modern) -> egui::Margin {
+    if m.theme.timeless() { TL_MARGIN } else { MARGIN }
+}
 
 /// The panels placed by their bottom, growing upward (the chat window, the party window).
 const BOTTOM: [&str; 2] = ["chat", "party"];
@@ -1315,7 +1342,12 @@ impl<'a> Panels<'a> {
             let w = if o.resizable { room.x } else { m.rects.borrow().get(id).map_or(o.size.x, |r| r.width()) };
             pos = on_screen(Rect::from_min_size(pos, vec2(w, h)), screen);
         }
-        let margin = if o.resizable { ROOM_MARGIN } else { MARGIN };
+        let margin = match (o.resizable, m.theme.timeless()) {
+            (true, true) => TL_ROOM_MARGIN,
+            (false, true) => TL_MARGIN,
+            (true, false) => ROOM_MARGIN,
+            (false, false) => MARGIN,
+        };
         let (title, frame, alpha, fold) = (o.title, o.frame, o.alpha, o.fold.clamp(0.0, 1.0));
         // The panel with the keys in the focused frame.
         let frame = if frame == "window_normal" && self.focus == Some(id) { "window_focused" } else { frame };
@@ -1352,7 +1384,11 @@ impl<'a> Panels<'a> {
                     ui.visuals_mut().override_text_color = Some(m.theme.color("text"));
                     if let Some(t) = &title {
                         title_row(ui, m, t);
-                        ui.add_space(6.0);
+                        if m.theme.timeless() {
+                            title_rule(ui, m, margin);
+                        } else {
+                            ui.add_space(6.0);
+                        }
                     }
                     add(ui, room);
                 });
@@ -1580,7 +1616,8 @@ impl Modern {
     }
 
     /// Timeless XI: a game icon (`make`: its width, height and RGBA from the game's files) as an egui texture. In the
-    /// Timeless interface it goes through the HD upscaler (timeless::hdicon) at about the screen's pixel density; a
+    /// Timeless interface it goes through the HD upscaler (timeless::hdicon): a 4x master shrunk with care to the
+    /// icon's size on screen (pixels per point); a
     /// few milliseconds of upscaling a frame at most, so a full bag opening shows the plain icons for a frame or two
     /// rather than stalling, each turning HD on a following frame.
     fn game_icon(
@@ -1599,8 +1636,8 @@ impl Modern {
         if !self.theme.timeless() {
             return plain(Box::new(make));
         }
-        let scale = hdicon::scale_for(ctx.pixels_per_point());
-        let hd_key = format!("{key} hd{scale}");
+        let factor = hdicon::factor_for(ctx.pixels_per_point());
+        let hd_key = format!("{key} hd{factor:.2}");
         let now = ctx.input(|i| i.time);
         if !self.images.borrow().contains_key(&hd_key) {
             let (frame, spent) = self.hd_budget.get();
@@ -1612,7 +1649,7 @@ impl Modern {
             let t0 = std::time::Instant::now();
             let id = self.texture(ctx, &hd_key, || {
                 let (w, h, rgba) = make()?;
-                let (w, h, out) = hdicon::upscale(w, h, &rgba, scale)?;
+                let (w, h, out) = hdicon::upscale_by(w, h, &rgba, factor)?;
                 Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &out))
             });
             self.hd_budget.set((now, spent + t0.elapsed().as_secs_f32() * 1000.0));
