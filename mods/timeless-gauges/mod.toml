@@ -1,0 +1,26 @@
+name = "Timeless Gauges"
+version = "1.0.0"
+authors = ["TimelessXI"]
+description = "TimelessXI's Job Gauges (/gauges): your main job's own meters from the TimelessXI job perks (Faith, Essence, Ki, Hot Streak...) on the screen's edge. Full or ready gauges glow; point at one to see what it does."
+permissions = ["packets.write"]
+
+[settings.key_gauges]
+type = "key"
+default = ""
+label = "Job Gauges Key"
+help = "A key that shows or hides the gauge bar."
+
+[commands.gauges]
+help = "Shows or hides your job gauges."
+args = ""
+forms = [
+  { args = "labels|job", help = "Shows or hides the labels, or the job name." },
+  { args = "width <100-400>", help = "The gauges' width." },
+  { args = "opacity <0-1>", help = "The bar's opacity." },
+  { args = "demo", help = "Sample gauges, to place the bar without a fight." },
+  { args = "update", help = "Asks the server for your gauges again." },
+]
+
+[commands.timelessgauges]
+help = "The same as /gauges."
+args = ""

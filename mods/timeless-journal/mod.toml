@@ -1,0 +1,29 @@
+name = "Timeless Journal"
+version = "1.0.0"
+authors = ["TimelessXI"]
+description = "TimelessXI's Journal (/ql): your missions and quests and what to do next, without spoilers unless you want them, and a tracker with your current missions on the screen's edge."
+permissions = ["packets.write"]
+
+[settings.key_journal]
+type = "key"
+default = ""
+label = "Journal Key"
+help = "A key that shows or hides the Journal."
+
+[commands.ql]
+help = "Shows or hides the Journal: your missions and quests, and what to do next."
+args = ""
+forms = [
+  { args = "missions|quests|retail", help = "Opens it on that tab." },
+  { args = "tracker", help = "Shows or hides your current missions on the screen's edge." },
+  { args = "spoilers", help = "Shows or hides full mission steps." },
+  { args = "update", help = "Asks the server for fresh data now." },
+]
+
+[commands.journal]
+help = "The same as /ql."
+args = ""
+
+[commands.questlog]
+help = "The same as /ql."
+args = ""

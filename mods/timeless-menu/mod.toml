@@ -1,0 +1,23 @@
+name = "TimelessMenu"
+version = "1.0.0"
+authors = ["TimelessXI"]
+description = "Every TimelessXI mod in one menu (/tm or the hourglass button): open Companion Manager, Companion View, the Journal and Job Gauges and jump to their tabs, start a mod that isn't running, and say the server's commands."
+permissions = ["actions", "mods"]
+
+[settings.key_menu]
+type = "key"
+default = ""
+label = "TimelessMenu Key"
+help = "A key that shows or hides TimelessMenu."
+
+[commands.tm]
+help = "Shows or hides TimelessMenu: every TimelessXI mod and the server's commands."
+args = ""
+forms = [
+  { args = "button", help = "Shows or hides the hourglass button." },
+  { args = "reset", help = "Puts the button back in its first place." },
+]
+
+[commands.timeless]
+help = "The same as /tm."
+args = ""

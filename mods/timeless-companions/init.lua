@@ -59,6 +59,25 @@ end
 commands.register("cmgr", cm_command)
 commands.register("companionmanager", cm_command)
 
+-- TimelessMenu's cards (/tm): one per window.
+if mods and mods.provide then
+  mods.provide("timeless_menu", function()
+    return {
+      cards = {
+        { title = "Companion Manager", order = 10, open = "//cmgr", command = "/cmgr",
+          desc = "Call, keep, save and set up your companions.",
+          buttons = {
+            { label = "Party", command = "//cmgr party" }, { label = "Call", command = "//cmgr call" },
+            { label = "Kept", command = "//cmgr kept" }, { label = "Presets", command = "//cmgr presets" },
+            { label = "Tactics", command = "//cmgr tactics" }, { label = "Settings", command = "//cmgr settings" },
+          } },
+        { title = "Companion View", order = 11, open = "//cv", command = "/cv",
+          desc = "Your companions' gear, stats and role, live HP/MP/TP and what each is doing." },
+      },
+    }
+  end)
+end
+
 -- Keys from the settings
 local bound = {}
 local function apply_keys()

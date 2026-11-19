@@ -1,5 +1,5 @@
 name = "Timeless Companions"
-version = "1.4.0"
+version = "1.5.0"
 authors = ["TimelessXI"]
 description = "TimelessXI companions, live: Companion View (/cv) for gear, stats and role, Companion Manager (/cmgr) to call, keep, save and set them up; role-coloured name plates, rings and speech bubbles in the world."
 permissions = ["packets.write", "actions"]

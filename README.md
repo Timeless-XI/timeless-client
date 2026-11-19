@@ -7,6 +7,7 @@ the TimelessXI server. This repository holds no client source, only what players
   at start, and installs a newer one only when its signature matches TimelessXI's release key built into the client.
 - **`catalogue/mods.json`:** the mod list (Settings > Mods > Download Standard Mods): vana-client's standard mods,
   pinned to the source commit the client is built from, plus TimelessXI's own mods in `mods/`.
+- **`catalogue/game.json`:** the newest Square Enix game version players may update to (`{"version": "30261102_0"}`). The client holds back retail game updates past it. Try a new retail update on the test server first, then raise this and push.
 - **`mods/`:** TimelessXI's mods. After changing one, raise its `version` in `mod.toml`, run
   `tools/make_catalogue.py <client source folder>`, and commit `mods/` and `catalogue/` together.
 
