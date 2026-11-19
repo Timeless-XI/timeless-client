@@ -18747,7 +18747,10 @@ impl App {
             }
         }
         gfx.egui_state.handle_platform_output(&gfx.window, platform);
-        let jobs = ctx.tessellate(output.shapes, output.pixels_per_point);
+        // Timeless XI: the Timeless interface's soft shadow under its text.
+        let shapes =
+            if modern::timeless_now() { modern::text_shadows(output.shapes) } else { output.shapes };
+        let jobs = ctx.tessellate(shapes, output.pixels_per_point);
         // egui-wgpu writes its meshes too (update_buffers): counted with ours.
         let egui_bytes: usize = jobs
             .iter()

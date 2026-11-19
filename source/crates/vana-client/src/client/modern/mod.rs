@@ -302,6 +302,7 @@ impl Modern {
         cfg: &mut crate::config::Config,
     ) -> bool {
         TL_PADDING.with(|c| c.set(self.theme.timeless()));
+        TIMELESS_NOW.store(self.theme.timeless(), std::sync::atomic::Ordering::Relaxed);
         // Timeless XI: the fonts follow the interface (the Timeless one sets labels and names in Fira Sans).
         if self.fonts_timeless.get() != self.theme.timeless() {
             self.fonts_timeless.set(self.theme.timeless());
@@ -721,9 +722,56 @@ pub(super) fn title_rule(ui: &mut Ui, m: &Modern, margin: egui::Margin) {
     ui.add_space(10.0);
 }
 
+/// Timeless XI: the Timeless interface's (style D) soft drop shadow under every piece of interface text, added to the
+/// frame's finished shapes before they are tessellated (egui has no text shadow of its own): a copy a point lower, in
+/// translucent black, keeping the text's own fade. Text already black (an outline's copies) gets none.
+pub fn text_shadows(shapes: Vec<egui::epaint::ClippedShape>) -> Vec<egui::epaint::ClippedShape> {
+    let mut out = Vec::with_capacity(shapes.len() + shapes.len() / 2);
+    for cs in shapes {
+        if let Some(shadow) = shadow_of(&cs.shape) {
+            out.push(egui::epaint::ClippedShape {
+                clip_rect: cs.clip_rect,
+                shape: shadow,
+                transform_after_tessellation: cs.transform_after_tessellation,
+            });
+        }
+        out.push(cs);
+    }
+    out
+}
+
+fn shadow_of(shape: &Shape) -> Option<Shape> {
+    match shape {
+        Shape::Text(t) => {
+            if t.galley.is_empty() || t.override_text_color.is_some_and(|c| c.r() < 40 && c.g() < 40 && c.b() < 40) {
+                return None;
+            }
+            let mut s = t.clone();
+            let (sin, cos) = t.angle.sin_cos();
+            s.pos += vec2(-sin, cos) * 1.0;
+            s.override_text_color = Some(Color32::from_black_alpha(185));
+            s.underline = egui::Stroke::NONE;
+            Some(Shape::Text(s))
+        }
+        Shape::Vec(v) => {
+            let v: Vec<Shape> = v.iter().filter_map(shadow_of).collect();
+            (!v.is_empty()).then_some(Shape::Vec(v))
+        }
+        _ => None,
+    }
+}
+
 /// Timeless XI: the margin a framed panel has (for drawing out to its frame).
 pub(super) fn panel_margin(_m: &Modern) -> egui::Margin {
     margin()
+}
+
+/// Timeless XI: the Timeless interface is on this frame (for drawing outside the panels: the name plates).
+static TIMELESS_NOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Timeless XI: the Timeless interface is on (set at the start of Modern::ui each frame).
+pub fn timeless_now() -> bool {
+    TIMELESS_NOW.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 thread_local! {

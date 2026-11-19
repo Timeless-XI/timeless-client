@@ -34,7 +34,11 @@ fn metrics() -> &'static Mutex<HashMap<String, Raster>> {
 
 /// White text with a soft dark outline (straight alpha), padded for the italic overhang and the outline.
 fn rasterize(text: &str, px: f32) -> Option<(Raster, Vec<u8>)> {
-    let font = FontRef::try_from_slice(super::theme::font("Inter-BoldItalic")?).ok()?;
+    // Timeless XI: the Timeless interface (style D) sets names upright in Fira Sans SemiBold, normally spaced.
+    let timeless = super::timeless_now();
+    let face = if timeless { "FiraSans-SemiBold" } else { "Inter-BoldItalic" };
+    let tracking = if timeless { 0.015 } else { TRACKING };
+    let font = FontRef::try_from_slice(super::theme::font(face)?).ok()?;
     let scale = PxScale::from(px);
     let sf = font.as_scaled(scale);
     let r = (px / 10.0).max(1.5);
@@ -48,7 +52,7 @@ fn rasterize(text: &str, px: f32) -> Option<(Raster, Vec<u8>)> {
             caret += sf.kern(p, id);
         }
         glyphs.push(id.with_scale_and_position(scale, point(pad + caret, pad + sf.ascent())));
-        caret += sf.h_advance(id) + TRACKING * px;
+        caret += sf.h_advance(id) + tracking * px;
         prev = Some(id);
     }
     let (w, h) = ((caret + 2.0 * pad).ceil() as usize, (sf.ascent() - sf.descent() + 2.0 * pad).ceil() as usize);
@@ -124,7 +128,7 @@ pub fn draw(
     }
     let em = EM * scale[1];
     let px = BUCKETS.iter().copied().find(|&b| b >= em).unwrap_or(BUCKETS[3]);
-    let key = format!("plate {px} {name}");
+    let key = format!("plate {px}{} {name}", if super::timeless_now() { " tl" } else { "" });
     gu.touch_image(&key);
     let raster = {
         let mut m = metrics().lock().unwrap();

@@ -942,7 +942,7 @@ pub fn target_panel(p: &mut Panels, v: &TargetView) {
 fn tl_target(p: &mut Panels, v: &TargetView, frame: &str, dist: Option<&str>) {
     let m = p.m;
     let yalms = dist.map(|d| format!("{d} yalms"));
-    let title = Title { icon: Some(v.ring), text: "Target", note: yalms.as_deref(), name: false };
+    let title = Title { icon: None, text: "Target", note: yalms.as_deref(), name: false };
     let r = p.framed("target", None, 340.0, frame, |ui| {
         super::title_row(ui, m, &title);
         super::title_rule(ui, m, super::panel_margin(m));
