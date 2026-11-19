@@ -16,8 +16,9 @@ pub enum Style {
     Corners,
     /// No drawn line: a soft shadow under the window and a light top edge.
     Shadow,
-    /// Timeless XI: the Timeless interface's (style D): dusk glass, a one-pixel edge a lighter shade of the glass
-    /// (the palette's bronze), a faint highlight along the top and a soft shadow. Always the Timeless interface's.
+    /// Timeless XI: the Timeless interface's (Timeless View, Pewter Hairline, 2026-11-19): charcoal glass darkening
+    /// toward the bottom, a one-pixel pewter edge (the palette's bronze) with a faint inner hairline, a stepped
+    /// two-tier bar with a diamond on the top edge of the larger windows (the logo's frame), a soft shadow. Always the Timeless interface's.
     Glass,
 }
 
@@ -86,6 +87,36 @@ fn rule(v: &mut Vec<Shape>, a: f32, b: f32, y: f32, c: Color32) {
     v.push(Shape::mesh(m));
 }
 
+/// Timeless XI: a hairline from `a` to `b` at `y` that fades out toward both ends (`c` in the middle).
+pub fn fade_rule(p: &egui::Painter, a: f32, b: f32, y: f32, c: Color32) {
+    let mut v = Vec::new();
+    rule(&mut v, a, b, y, c);
+    p.extend(v);
+}
+
+/// Timeless XI: the Pewter frame's top ornament centred at `x` on the edge at `y`: a stepped two-tier bar (the logo's
+/// frame) under a small diamond.
+fn ornament(v: &mut Vec<Shape>, m: &Modern, x: f32, y: f32) {
+    let glass = m.bg(m.theme.color("surface"));
+    let edge = lighter(m.theme.color("bronze"), 0.25);
+    let bar = |w: f32, top: f32| {
+        Shape::Rect(RectShape::new(
+            Rect::from_min_max(pos2(x - w / 2.0, top), pos2(x + w / 2.0, top + 3.0)),
+            CornerRadius::ZERO,
+            glass,
+            Stroke::new(0.8, edge),
+            StrokeKind::Inside,
+        ))
+    };
+    v.push(bar(92.0, y - 1.5));
+    v.push(bar(68.0, y - 4.0));
+    v.push(Shape::convex_polygon(
+        vec![pos2(x, y - 6.5), pos2(x + 4.2, y), pos2(x, y + 6.5), pos2(x - 4.2, y)],
+        m.theme.color("gold"),
+        Stroke::new(0.6, m.theme.color("bronze")),
+    ));
+}
+
 /// Short L marks at `r`'s four corners.
 fn corner_marks(v: &mut Vec<Shape>, r: Rect, c: Color32) {
     let (l, s) = (11.0, Stroke::new(1.5, c));
@@ -103,7 +134,7 @@ fn corner_marks(v: &mut Vec<Shape>, r: Rect, c: Color32) {
 
 /// The border and interior in `style` over `body` (`round` its corners), `open` the rect it is drawn on when one side
 /// runs past the screen (the edge windows), else `body` itself.
-fn shapes(m: &Modern, frame: &str, body: Rect, round: CornerRadius, style: Style) -> Vec<Shape> {
+fn shapes(m: &Modern, frame: &str, body: Rect, round: CornerRadius, style: Style, crest: bool) -> Vec<Shape> {
     let mut v = Vec::new();
     match style {
         Style::Pack => {}
@@ -162,38 +193,38 @@ fn shapes(m: &Modern, frame: &str, body: Rect, round: CornerRadius, style: Style
         }
         Style::Glass => {
             let shadow =
-                egui::epaint::Shadow { offset: [0, 4], blur: 14, spread: 0, color: Color32::from_black_alpha(110) };
+                egui::epaint::Shadow { offset: [0, 5], blur: 16, spread: 0, color: Color32::from_black_alpha(130) };
             v.push(Shape::Rect(shadow.as_shape(body, round)));
             v.push(Shape::Rect(RectShape::filled(body, round, m.bg(m.theme.color("surface")))));
-            // The glass darkens toward the bottom: the lower half under a soft wash of the night colour.
-            let night = m.bg(m.theme.color("charcoal")).gamma_multiply(0.55);
+            // The glass darkens from the top down to the night colour at the bottom.
+            let night = m.bg(m.theme.color("charcoal"));
             let mut wash = Mesh::default();
-            let (top, bottom) = (body.center().y, body.max.y - round.se.max(round.sw) as f32);
-            if bottom > top {
-                for (y, c) in [(top, Color32::TRANSPARENT), (bottom, night)] {
-                    wash.colored_vertex(pos2(body.min.x + 1.0, y), c);
-                    wash.colored_vertex(pos2(body.max.x - 1.0, y), c);
-                }
-                wash.add_triangle(0, 1, 2);
-                wash.add_triangle(1, 3, 2);
-                v.push(Shape::mesh(wash));
-                v.push(Shape::Rect(RectShape::filled(
-                    Rect::from_min_max(pos2(body.min.x, bottom), body.max),
-                    CornerRadius { nw: 0, ne: 0, sw: round.sw, se: round.se },
-                    night,
-                )));
+            let inner = body.shrink(1.0);
+            for (y, c) in [(inner.min.y, Color32::TRANSPARENT), (inner.max.y, night)] {
+                wash.colored_vertex(pos2(inner.min.x, y), c);
+                wash.colored_vertex(pos2(inner.max.x, y), c);
             }
+            wash.add_triangle(0, 1, 2);
+            wash.add_triangle(1, 3, 2);
+            v.push(Shape::mesh(wash));
             let edge = match frame {
-                "window_focused" => lighter(m.theme.color("bronze"), 0.22),
+                "window_focused" => lighter(m.theme.color("bronze"), 0.3),
                 "window_alert" => m.theme.color("hp").gamma_multiply(0.8),
                 "window_inactive" => m.theme.color("bronze").gamma_multiply(0.7),
                 _ => m.theme.color("bronze"),
             };
             v.push(Shape::Rect(RectShape::stroke(body, round, Stroke::new(1.0, edge), StrokeKind::Inside)));
-            v.push(Shape::line_segment(
-                [pos2(body.min.x + 6.0, body.min.y + 1.5), pos2(body.max.x - 6.0, body.min.y + 1.5)],
-                Stroke::new(1.0, Color32::from_white_alpha(20)),
-            ));
+            // The inner hairline, three pixels in.
+            v.push(Shape::Rect(RectShape::stroke(
+                body.shrink(3.0),
+                CornerRadius::same(round.nw.saturating_sub(2)),
+                Stroke::new(1.0, m.theme.color("gold").gamma_multiply(0.11)),
+                StrokeKind::Inside,
+            )));
+            // On the windows big enough to carry it (not the thin bars and notices stacked over each other).
+            if crest && frame != "window_tooltip" && body.width() >= 150.0 && body.height() >= 100.0 {
+                ornament(&mut v, m, body.center().x, body.min.y + 0.5);
+            }
         }
     }
     v
@@ -219,12 +250,14 @@ pub fn window(m: &Modern, frame: &str, r: Rect) -> Shape {
     if style == Style::Pack {
         return paint::window(&f, r, 1.0, m.opacity.get());
     }
-    Shape::Vec(shapes(m, frame, r, CornerRadius::same(6), style))
+    // Timeless XI: Pewter Hairline's corners are nearly square.
+    let round = if style == Style::Glass { CornerRadius::same(2) } else { CornerRadius::same(6) };
+    Shape::Vec(shapes(m, frame, r, round, style, true))
 }
 
 /// An edge window's frame in the current style: `ext` runs past the screen's edge on the anchored side, whose corners
 /// `round` leaves square. None in the pack style (the edge windows draw theirs there).
 pub fn edge(m: &Modern, ext: Rect, round: CornerRadius) -> Option<Shape> {
     let style = current(m);
-    (style != Style::Pack).then(|| Shape::Vec(shapes(m, "window_normal", ext, round, style)))
+    (style != Style::Pack).then(|| Shape::Vec(shapes(m, "window_normal", ext, round, style, false)))
 }

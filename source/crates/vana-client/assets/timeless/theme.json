@@ -1,16 +1,16 @@
 {
   "name": "Timeless",
-  "note": "The Timeless interface's palette (Settings > Client > Interface > Timeless): style D, Dusk Remastered. Same keys as assets/modern/theme.json; a key left out keeps the modern colour. Dusk-violet glass edged by a lighter shade of itself (bronze: every frame, tab and rule), cream text, cream-gold titles, candle gold, lilac focus.",
+  "note": "The Timeless interface's palette (Settings > Client > Interface > Timeless): Timeless View, Pewter Hairline (2026-11-19; it replaces style D, Dusk Remastered: charcoal #14162c, surface #282042, bronze #4d4275, gold #f3dfb2, focus #a995d6, hp #e76f6f, mp #6fa8e7, tp #f0c46e, text #f6efe0, muted #c2b6cf). Same keys as assets/modern/theme.json; a key left out keeps the modern colour. Charcoal glass darkening toward the bottom, a pewter edge (bronze: every frame, tab and rule), pale silver titles (gold), steel-blue focus, the hourglass's gold sand (tp).",
   "palette": {
-    "charcoal": "#14162c",
-    "surface": "#282042",
-    "bronze": "#4d4275",
-    "gold": "#f3dfb2",
-    "focus": "#a995d6",
-    "hp": "#e76f6f",
-    "mp": "#6fa8e7",
+    "charcoal": "#0b0c13",
+    "surface": "#161a26",
+    "bronze": "#6b7892",
+    "gold": "#d6e1f0",
+    "focus": "#8fb2e6",
+    "hp": "#e0606c",
+    "mp": "#5f9be6",
     "tp": "#f0c46e",
-    "text": "#f6efe0",
-    "muted": "#c2b6cf"
+    "text": "#e6ecf5",
+    "muted": "#a3aec3"
   }
 }

@@ -7,7 +7,7 @@ use super::super::magic::Kind;
 use super::super::suggest::Action;
 use super::super::{World, combat, listsearch, magic, monstrosity, suggest};
 use super::{Panels, Title, paint};
-use egui::{Align2, Color32, FontFamily, FontId, Sense, pos2, vec2};
+use egui::{Align2, Color32, FontId, Sense, pos2, vec2};
 
 /// A command's label (the retail label sprites, LABELS at 0x103634f8) and the pack's icon.
 fn command(c: u8) -> (&'static str, &'static str) {
@@ -32,6 +32,9 @@ fn command(c: u8) -> (&'static str, &'static str) {
         0x16 => ("Quarry", "icons/aggro"),
         0x17 => ("Scout", "icons/find"),
         0x18 => ("Sprint", "icons/haste"),
+        // Timeless XI: Timeless View calls the Trust command by the server's name for it (the Companions module; plain
+        // Trusts are off server-wide), with its own Pewter icon.
+        0x19 if super::timeless_now() => ("Companion", "icons/companion"),
         0x19 => ("Trust", "icons/party"),
         0x1a => ("Release", "icons/cancel"),
         0x1b => ("Request", "icons/party_invite"),
@@ -121,7 +124,7 @@ pub fn draw(p: &mut Panels, w: &mut World) {
                     let label = super::one_line(
                         painter,
                         label,
-                        FontId::new(m.theme.ui, FontFamily::Name(super::STRONG.into())),
+                        FontId::new(m.theme.ui, super::menu_family()),
                         super::rows::label_colour(m, on, *off),
                         room,
                     );
@@ -178,7 +181,7 @@ pub fn draw(p: &mut Panels, w: &mut World) {
                     pos2(r.min.x + 52.0, r.center().y),
                     Align2::LEFT_CENTER,
                     label,
-                    FontId::new(m.theme.ui, FontFamily::Name(super::STRONG.into())),
+                    FontId::new(m.theme.ui, super::menu_family()),
                     super::rows::label_colour(m, on, off),
                 );
                 let mut on_arrow = false;

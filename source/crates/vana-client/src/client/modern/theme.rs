@@ -14,6 +14,12 @@ const THEME: &str = include_str!("../../../assets/modern/theme.json");
 /// Timeless XI: the Timeless interface's palette, over the modern one.
 const TIMELESS_THEME: &str = include_str!("../../../assets/timeless/theme.json");
 const MANIFEST: &str = include_str!("../../../assets/modern/manifest.json");
+/// Timeless XI: Timeless View's Pewter Hairline sprites (menu / misc icons and controls, tools/timeless/pewter): one
+/// atlas and its rects, drawn in place of the pack's while the Timeless interface is on.
+const PEWTER_PNG: &[u8] = include_bytes!("../../../assets/timeless/pewter/pewter.png");
+const PEWTER_JSON: &str = include_str!("../../../assets/timeless/pewter/pewter.json");
+/// Timeless XI: Timeless View's serif (Cormorant Garamond SemiBold, OFL) for window titles and menu rows.
+const SERIF_TTF: &[u8] = include_bytes!("../../../assets/fonts/CormorantGaramond-SemiBold.ttf");
 const ATLASES: [(&str, &[u8]); 13] = [
     ("atlases/frames_0@2x.png", include_bytes!("../../../assets/modern/atlases/frames_0@2x.png")),
     ("atlases/controls_0@2x.png", include_bytes!("../../../assets/modern/atlases/controls_0@2x.png")),
@@ -48,6 +54,8 @@ pub const STRONG: &str = "strong";
 pub const LABEL: &str = "label";
 /// Party-list names out of the zone: their face, kept whatever the interface's is.
 pub const NAME: &str = "name";
+/// Timeless XI: Timeless View's titles and menu rows (Cormorant Garamond, Fira Sans behind it); STRONG elsewhere.
+pub const SERIF: &str = "serif";
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
@@ -217,6 +225,58 @@ pub struct Art {
     frames: HashMap<String, std::rc::Rc<Frame>>,
     /// Sprites and frames mods set (ui.skin), with the textures they draw from.
     skin: std::cell::RefCell<SkinArt>,
+    /// Timeless XI: the Pewter Hairline sprites, and whether they are in use this frame (Interface = Timeless).
+    pewter: HashMap<String, Sprite>,
+    pewter_on: std::cell::Cell<bool>,
+}
+
+#[derive(Deserialize)]
+struct PewterFile {
+    items: HashMap<String, PewterItem>,
+}
+
+#[derive(Deserialize)]
+struct PewterItem {
+    rect: [u32; 4],
+    size: [f32; 2],
+}
+
+/// Timeless XI: the Pewter sprites over the pack's (`base`): each keeps the pack's logical size and insets where the
+/// pack has the sprite (its own size otherwise: icons/companion), its pixels the atlas cell.
+fn pewter_sprites(
+    ctx: &Context,
+    base: &HashMap<String, Sprite>,
+    textures: &mut Vec<TextureHandle>,
+) -> HashMap<String, Sprite> {
+    let Some(img) = decode(PEWTER_PNG) else {
+        log::error!("Timeless View: pewter.png does not decode");
+        return HashMap::new();
+    };
+    let f: PewterFile = match serde_json::from_str(PEWTER_JSON) {
+        Ok(f) => f,
+        Err(e) => {
+            log::error!("Timeless View pewter.json: {e}");
+            return HashMap::new();
+        }
+    };
+    let t =
+        ctx.load_texture("timeless/pewter", ColorImage::from_rgba_unmultiplied(img.0, &img.1), TextureOptions::LINEAR);
+    let at = vec2(img.0[0] as f32, img.0[1] as f32);
+    let out = f
+        .items
+        .iter()
+        .map(|(id, it)| {
+            let [x, y, w, h] = it.rect.map(|v| v as f32);
+            let uv = Rect::from_min_max(pos2(x / at.x, y / at.y), pos2((x + w) / at.x, (y + h) / at.y));
+            let (size, margins) = match base.get(id) {
+                Some(b) => (b.size, b.margins),
+                None => (vec2(it.size[0], it.size[1]), None),
+            };
+            (id.clone(), Sprite { tex: t.id(), uv, size, margins, px: w / size.x.max(1.0), atlas: at })
+        })
+        .collect();
+    textures.push(t);
+    out
 }
 
 fn decode(png: &[u8]) -> Option<([usize; 2], Vec<u8>)> {
@@ -379,14 +439,27 @@ impl Art {
                 );
             }
         }
-        Self { _textures: textures, sprites, frames, skin: Default::default() }
+        let pewter = pewter_sprites(ctx, &sprites, &mut textures);
+        Self { _textures: textures, sprites, frames, skin: Default::default(), pewter, pewter_on: Default::default() }
     }
 
+    /// A sprite by manifest id: a mod's (ui.skin), else Timeless XI: the Pewter one while the Timeless interface is
+    /// on, else the pack's.
     pub fn sprite(&self, id: &str) -> Option<Sprite> {
         if let Some(s) = self.skin.borrow().0.get(id) {
             return Some(*s);
         }
+        if self.pewter_on.get()
+            && let Some(s) = self.pewter.get(id)
+        {
+            return Some(*s);
+        }
         self.sprites.get(id).copied()
+    }
+
+    /// Timeless XI: the Pewter sprites in use or not (Interface = Timeless), set at the start of every frame.
+    pub fn set_timeless(&self, on: bool) {
+        self.pewter_on.set(on);
     }
 
     pub fn frame(&self, name: &str) -> Option<std::rc::Rc<Frame>> {
@@ -573,6 +646,16 @@ fn install_fonts_inner(ctx: &Context, body: Option<(Vec<u8>, Vec<u8>)>, timeless
         |first: &str| -> Vec<String> { std::iter::once(first.to_string()).chain(fallbacks.iter().cloned()).collect() };
     defs.families.insert(FontFamily::Proportional, with(regular));
     defs.families.insert(FontFamily::Name(STRONG.into()), with(strong));
+    // Timeless XI: Timeless View's serif for titles and menu rows, a little larger (Cormorant's small x-height), with
+    // Fira Sans behind it for what it lacks.
+    defs.font_data.insert(
+        "CormorantGaramond-SemiBold".into(),
+        Arc::new(FontData::from_static(SERIF_TTF).tweak(egui::FontTweak { scale: 1.2, ..Default::default() })),
+    );
+    defs.families.insert(
+        FontFamily::Name(SERIF.into()),
+        std::iter::once("CormorantGaramond-SemiBold".to_string()).chain(with(strong)).collect(),
+    );
     let (name, label) = if timeless { (strong, strong) } else { ("Inter-SemiBold", "Inter-BoldItalic") };
     defs.families.insert(FontFamily::Name(NAME.into()), with(name));
     defs.families.insert(FontFamily::Name(LABEL.into()), with(label));
@@ -590,6 +673,21 @@ fn install_fonts_inner(ctx: &Context, body: Option<(Vec<u8>, Vec<u8>)>, timeless
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Timeless XI: the Pewter atlas decodes, every pack icon has a Pewter one, and every rect lies in the atlas.
+    #[test]
+    fn pewter_covers_every_pack_icon() {
+        let f: PewterFile = serde_json::from_str(PEWTER_JSON).unwrap();
+        let (size, _) = decode(PEWTER_PNG).expect("pewter.png decodes");
+        for it in manifest().items.iter().filter(|it| it.id.starts_with("icons/")) {
+            assert!(f.items.contains_key(&it.id), "no Pewter {}", it.id);
+        }
+        assert!(f.items.contains_key("icons/companion"));
+        for (id, it) in &f.items {
+            let [x, y, w, h] = it.rect.map(|v| v as usize);
+            assert!(x + w <= size[0] && y + h <= size[1], "{id} outside the atlas");
+        }
+    }
 
     #[test]
     fn theme_and_manifest_parse() {

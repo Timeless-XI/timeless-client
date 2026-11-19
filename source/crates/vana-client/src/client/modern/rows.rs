@@ -2,7 +2,7 @@
 //! use (user, 2026-10-27: the framed rows "too busy", but not plain either).
 
 use super::{Modern, paint};
-use egui::{Align2, Color32, FontFamily, FontId, Mesh, Painter, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
+use egui::{Align2, Color32, FontId, Mesh, Painter, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Style {
@@ -17,8 +17,9 @@ pub enum Style {
     Gilt,
     /// Raised rows (a light top, a dark bottom), the cursor blue with a soft glow.
     Bevel,
-    /// Timeless XI: the Timeless interface's (style D): the cursor's row lilac glass with a candle-gold mark, a soft
-    /// gold light under the pointer. Always the Timeless interface's.
+    /// Timeless XI: the Timeless interface's (Timeless View, Pewter Hairline, 2026-11-19): the cursor's row a steel-blue
+    /// band fading right between two fading hairlines, the logo's hourglass (gold sand) for its mark; a faint light
+    /// under the pointer. Always the Timeless interface's.
     Dusk,
 }
 
@@ -79,17 +80,27 @@ fn back(p: &Painter, m: &Modern, r: Rect, s: State, style: Style) {
     let (gold, focus, bronze) = (m.theme.color("gold"), m.theme.color("focus"), m.theme.color("bronze"));
     match style {
         Style::Dusk => {
-            let r = r.shrink2(vec2(1.0, 1.0));
             if s.on {
-                p.rect_filled(r, 3.0, focus.gamma_multiply(0.30));
-                let c = pos2(r.min.x + 6.0, r.center().y);
-                p.add(Shape::convex_polygon(
-                    vec![pos2(c.x - 2.5, c.y - 4.0), pos2(c.x + 3.0, c.y), pos2(c.x - 2.5, c.y + 4.0)],
-                    m.theme.color("tp"),
-                    Stroke::NONE,
+                let band = Rect::from_min_max(r.min, pos2(r.min.x + r.width() * 0.8, r.max.y));
+                p.add(gradient(band, focus.gamma_multiply(0.30), focus.gamma_multiply(0.04), true));
+                p.add(gradient(
+                    Rect::from_min_max(pos2(band.max.x, r.min.y), r.max),
+                    focus.gamma_multiply(0.04),
+                    Color32::TRANSPARENT,
+                    true,
                 ));
+                for y in [r.min.y, r.max.y - 1.0] {
+                    p.add(gradient(
+                        Rect::from_min_max(pos2(r.min.x, y), pos2(r.max.x, y + 1.0)),
+                        gold.gamma_multiply(0.34),
+                        Color32::TRANSPARENT,
+                        true,
+                    ));
+                }
+                // In the row's left margin, clear of the icons every list draws from x + 10.
+                hourglass(p, pos2(r.min.x + 5.0, r.center().y), 13.0, gold, m.theme.color("tp"));
             } else if s.hover {
-                p.rect_filled(r, 3.0, m.theme.color("tp").gamma_multiply(0.13));
+                p.rect_filled(r.shrink2(vec2(0.0, 1.0)), 0.0, gold.gamma_multiply(0.06));
             }
         }
         Style::Framed => {
@@ -186,6 +197,44 @@ fn back(p: &Painter, m: &Modern, r: Rect, s: State, style: Style) {
     }
 }
 
+/// Timeless XI: the logo's hourglass, `h` tall, centred at `c`: two curved glass walls, the stepped caps, a stream and
+/// a pile of `sand` in the lower bulb (the Pewter rows' cursor).
+pub fn hourglass(p: &Painter, c: egui::Pos2, h: f32, glass: Color32, sand: Color32) {
+    let (hw, hh) = (h * 0.27, h * 0.42);
+    // The logo's wall, top to neck to bottom, as a cubic bezier pair (x by side).
+    let wall = |side: f32| -> Vec<egui::Pos2> {
+        let seg = |p0: (f32, f32), p1: (f32, f32), p2: (f32, f32), p3: (f32, f32)| {
+            (0..=8).map(move |i| {
+                let t = i as f32 / 8.0;
+                let u = 1.0 - t;
+                let x = u * u * u * p0.0 + 3.0 * u * u * t * p1.0 + 3.0 * u * t * t * p2.0 + t * t * t * p3.0;
+                let y = u * u * u * p0.1 + 3.0 * u * u * t * p1.1 + 3.0 * u * t * t * p2.1 + t * t * t * p3.1;
+                pos2(c.x + side * x * hw, c.y + y * hh)
+            })
+        };
+        seg((1.0, -1.0), (1.0, -0.4), (0.1, -0.18), (0.06, 0.0))
+            .chain(seg((0.06, 0.0), (0.1, 0.18), (1.0, 0.4), (1.0, 1.0)).skip(1))
+            .collect()
+    };
+    let st = Stroke::new(1.1, glass);
+    p.add(Shape::line(wall(-1.0), st));
+    p.add(Shape::line(wall(1.0), st));
+    let cap = |y: f32| Rect::from_center_size(pos2(c.x, y), vec2(hw * 2.0 + 3.0, 1.8));
+    p.rect_filled(cap(c.y - hh - 0.9), 0.5, glass);
+    p.rect_filled(cap(c.y + hh + 0.9), 0.5, glass);
+    p.line_segment([pos2(c.x, c.y + 0.5), pos2(c.x, c.y + hh * 0.6)], Stroke::new(0.7, sand));
+    p.add(Shape::convex_polygon(
+        vec![
+            pos2(c.x - hw * 0.8, c.y + hh - 0.2),
+            pos2(c.x - hw * 0.3, c.y + hh * 0.66),
+            pos2(c.x + hw * 0.3, c.y + hh * 0.66),
+            pos2(c.x + hw * 0.8, c.y + hh - 0.2),
+        ],
+        sand,
+        Stroke::NONE,
+    ));
+}
+
 /// The mark of a row that opens a submenu, at its right: an arrow toward the side the submenu opens on.
 fn more(p: &Painter, m: &Modern, r: Rect, s: State, style: Style, left: bool) {
     let c = if s.on && style != Style::Bevel {
@@ -276,6 +325,7 @@ pub fn menu_row(
     let s = State { on, off, hover: hover || resp.hovered() };
     let p = ui.painter();
     back(p, m, r, s, style);
+    let face = super::menu_family();
     if let Some(sp) = m.art.sprite(icon) {
         p.add(paint::image(
             &sp,
@@ -288,7 +338,7 @@ pub fn menu_row(
         pos2(r.min.x + 50.0, r.center().y),
         Align2::LEFT_CENTER,
         label,
-        FontId::new(m.theme.ui, FontFamily::Name(super::STRONG.into())),
+        FontId::new(m.theme.ui, face),
         ink(m, s, style),
     );
     if sub {

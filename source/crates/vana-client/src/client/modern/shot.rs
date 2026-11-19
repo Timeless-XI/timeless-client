@@ -837,6 +837,8 @@ pub struct Opts {
     pub alliance: bool,
     /// Title rows with long notes.
     pub titles: bool,
+    /// Timeless XI: drawn in the Timeless interface (Timeless View).
+    pub timeless: bool,
 }
 
 pub fn shot(width: u32, height: u32, scale: u32, backdrop: Option<&Path>, out: &Path, opts: &Opts) -> Result<()> {
@@ -861,6 +863,14 @@ pub fn shot(width: u32, height: u32, scale: u32, backdrop: Option<&Path>, out: &
     warm.textures_delta.clear();
     let m = Modern::new(&ctx);
     m.set_opacity(opts.opacity);
+    // Timeless XI: the Timeless interface, as Modern::ui sets it each frame.
+    if opts.timeless {
+        m.theme.set_timeless(true);
+        m.art.set_timeless(true);
+        super::TL_PADDING.with(|c| c.set(true));
+        super::TIMELESS_NOW.store(true, std::sync::atomic::Ordering::Relaxed);
+        super::theme::install_fonts_for(&ctx, true);
+    }
     if let Some(name) = &opts.rows {
         m.row_style.set(super::rows::Style::from_name(name).with_context(|| format!("no row style {name}"))?);
     }

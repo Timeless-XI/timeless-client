@@ -95,7 +95,7 @@ pub use modmgr::{ModMgr, events as mods_events, open as open_mods, takes_keys as
 pub use padwin::{events as pad_events, takes_keys as pad_takes_keys};
 pub use status::key as status_key;
 pub use storage::key as storage_key;
-use theme::{Art, LABEL, NAME, STRONG};
+use theme::{Art, LABEL, NAME, SERIF, STRONG};
 pub use theme::{Theme, frame_image, sprite_pixels};
 
 pub use crate::config::{ModernDock as Dock, ModernLayout as Layout, ModernPlace as Place};
@@ -303,6 +303,8 @@ impl Modern {
     ) -> bool {
         TL_PADDING.with(|c| c.set(self.theme.timeless()));
         TIMELESS_NOW.store(self.theme.timeless(), std::sync::atomic::Ordering::Relaxed);
+        // Timeless XI: Timeless View's Pewter Hairline icons and controls in place of the pack's.
+        self.art.set_timeless(self.theme.timeless());
         // Timeless XI: the fonts follow the interface (the Timeless one sets labels and names in Fira Sans).
         if self.fonts_timeless.get() != self.theme.timeless() {
             self.fonts_timeless.set(self.theme.timeless());
@@ -711,15 +713,19 @@ const ROOM_MARGIN: egui::Margin = egui::Margin { bottom: 26, ..MARGIN };
 const TL_MARGIN: egui::Margin = egui::Margin { left: 14, right: 14, top: 9, bottom: 12 };
 const TL_ROOM_MARGIN: egui::Margin = egui::Margin { bottom: 24, ..TL_MARGIN };
 
-/// Timeless XI: the rule under a Timeless window's title, across the whole window (out through `margin` to the
-/// frame), and the room under it.
+/// Timeless XI: the rule under a Timeless window's title (Pewter Hairline): a hairline in the title colour that fades
+/// out toward both sides of the window, and the room under it.
 pub(super) fn title_rule(ui: &mut Ui, m: &Modern, margin: egui::Margin) {
     let y = ui.cursor().top() + 3.5;
     let r = ui.max_rect();
-    let (x0, x1) = (r.left() - margin.left as f32 + 1.0, r.right() + margin.right as f32 - 1.0);
-    let c = borders::lighter(m.theme.color("bronze"), 0.12).gamma_multiply(0.75);
-    ui.painter().line_segment([pos2(x0, y), pos2(x1, y)], egui::Stroke::new(1.0, c));
+    let (x0, x1) = (r.left() - margin.left as f32 + 6.0, r.right() + margin.right as f32 - 6.0);
+    borders::fade_rule(ui.painter(), x0, x1, y, m.theme.color("gold").gamma_multiply(0.45));
     ui.add_space(10.0);
+}
+
+/// Timeless XI: the face of menu rows and window titles: Timeless View's serif, else the pack's strong face.
+pub(super) fn menu_family() -> FontFamily {
+    FontFamily::Name(if timeless_now() { SERIF } else { STRONG }.into())
 }
 
 /// Timeless XI: the Timeless interface's (style D) soft drop shadow under every piece of interface text, added to the
@@ -1962,16 +1968,45 @@ fn title_row_in(ui: &mut Ui, m: &Modern, t: &Title, colour: egui::Color32) {
     let width = ui.available_width();
     let icon = t.icon.and_then(|i| m.art.sprite(i));
     let lead = if icon.is_some() { 34.0 } else { 0.0 };
-    let font = FontId::new(m.theme.title, FontFamily::Name(STRONG.into()));
+    // Timeless XI: Timeless View's titles are letter-spaced capitals in its serif (Pewter Hairline).
+    let tl = timeless_now();
+    let font = if tl {
+        FontId::new(m.theme.title * 0.8, menu_family())
+    } else {
+        FontId::new(m.theme.title, FontFamily::Name(STRONG.into()))
+    };
+    let caps = if tl { t.text.to_uppercase() } else { t.text.to_string() };
     let small = FontId::proportional(m.theme.small);
     let muted = m.theme.color("muted");
     let painter = ui.painter().clone();
     let measure = |s: &str| painter.layout_no_wrap(s.to_string(), small.clone(), muted).size().x;
-    let full = painter.layout_no_wrap(t.text.to_string(), font.clone(), colour).size().x;
+    // Beside a note, a title too long for its room loses the capitals' spacing, then the capitals, before it is cut.
+    let spaced = |text: &str, w: f32, sp: f32| {
+        let mut job = egui::text::LayoutJob::default();
+        let format =
+            egui::TextFormat { font_id: font.clone(), color: colour, extra_letter_spacing: sp, ..Default::default() };
+        job.append(text, 0.0, format);
+        job.wrap = egui::text::TextWrapping {
+            max_width: w,
+            max_rows: 1,
+            break_anywhere: true,
+            overflow_character: Some('\u{2026}'),
+        };
+        painter.layout_job(job)
+    };
     let note_w = t.note.map(measure).unwrap_or(0.0);
     let title_room =
         (if t.note.is_some() { width - lead - GAP - note_w.min(0.4 * width) } else { width - lead }).max(0.0);
-    let title = one_line(&painter, t.text, font, colour, title_room);
+    let (full, title) = if tl {
+        let (text, sp) = [(caps.as_str(), 2.4), (caps.as_str(), 1.2), (caps.as_str(), 0.0)]
+            .into_iter()
+            .find(|&(c, sp)| spaced(c, f32::INFINITY, sp).size().x <= title_room)
+            .unwrap_or((t.text, 0.0));
+        (spaced(text, f32::INFINITY, sp).size().x, spaced(text, title_room, sp))
+    } else {
+        let full = painter.layout_no_wrap(caps.clone(), font.clone(), colour).size().x;
+        (full, one_line(&painter, &caps, font.clone(), colour, title_room))
+    };
     let room = (width - lead - full.min(title_room) - GAP).max(0.0);
     let lines = match t.note {
         Some(n) if t.name => {

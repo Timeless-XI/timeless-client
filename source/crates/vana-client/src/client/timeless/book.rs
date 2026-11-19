@@ -28,8 +28,9 @@ pub const MAGIC: [(u16, &str); 7] = [
     (4, "Ninjutsu"),
     (5, "Songs"),
     (6, "Blue Magic"),
-    // Timeless XI: the Trusts the server has (Recruits are built on them), so their icon can go on a bar.
-    (8, "Trust"),
+    // Timeless XI: the Trusts the server has (its Companions, formerly Recruits, are built on them), so their icon can
+    // go on a bar.
+    (8, "Companion"),
 ];
 
 /// The Weapon Skills page's weapon types: the server's skill name and its label.

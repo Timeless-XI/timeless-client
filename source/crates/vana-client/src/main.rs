@@ -655,6 +655,9 @@ enum Cmd {
         /// Title rows with long notes: the Commands window on long target names, a target with a long name.
         #[arg(long)]
         titles: bool,
+        /// Timeless XI: in the Timeless interface (Timeless View: its palette, frames, rows, fonts and icons).
+        #[arg(long)]
+        timeless: bool,
     },
     /// Disassemble a zone's event scripts (event DAT), with dialogue text inlined.
     EventDump {
@@ -1420,6 +1423,7 @@ fn main() -> Result<()> {
             favs,
             modes,
             titles,
+            timeless,
             settings,
             gm,
             controller,
@@ -1445,6 +1449,7 @@ fn main() -> Result<()> {
                     favs,
                     modes,
                     titles,
+                    timeless,
                     settings,
                     gm,
                     controller,

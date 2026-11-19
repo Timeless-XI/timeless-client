@@ -184,6 +184,8 @@ pub(super) fn type_label(ty: u16) -> &'static str {
         5 => "Songs",
         6 => "Blue Magic",
         7 => "Geomancy",
+        // Timeless XI: Timeless View names the Trust list by the server's Companions.
+        8 if super::modern::timeless_now() => "Companion",
         8 => "Trust",
         _ => "Magic",
     }
