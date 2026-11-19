@@ -238,27 +238,6 @@ pub fn chip(ui: &mut Ui, m: &Modern, label: &str, s: Btn, colour: Option<Color32
 
 /// A button's look over `r` (for buttons placed by hand).
 pub fn paint_button(p: &egui::Painter, m: &Modern, r: Rect, label: &str, font: &FontId, s: Btn, hovered: bool) {
-    // Timeless XI: the Timeless interface's (style D) buttons: dusk glass, the subtle edge, lit ones in lilac.
-    if m.theme.timeless() {
-        let edge = m.theme.color("bronze");
-        let (fill, line) = match () {
-            _ if s.off => (Color32::from_black_alpha(60), edge.gamma_multiply(0.5)),
-            _ if s.lit => (m.theme.color("focus").gamma_multiply(0.32), super::borders::lighter(edge, 0.35)),
-            _ if hovered => (super::borders::lighter(m.theme.color("surface"), 0.1), super::borders::lighter(edge, 0.2)),
-            _ => (m.theme.color("surface"), edge),
-        };
-        p.rect(r.shrink(0.5), 3.0, fill, Stroke::new(1.0, line), StrokeKind::Inside);
-        if s.cursor {
-            ring(p, m, r.expand(1.0), 4.0);
-        }
-        let c = match () {
-            _ if s.off => m.theme.color("muted"),
-            _ if s.lit => m.theme.color("text"),
-            _ => m.theme.color("text"),
-        };
-        p.text(r.center(), Align2::CENTER_CENTER, label, font.clone(), c);
-        return;
-    }
     let face = match () {
         _ if s.off => "controls/button_disabled",
         _ if s.lit => "controls/button_selected",
