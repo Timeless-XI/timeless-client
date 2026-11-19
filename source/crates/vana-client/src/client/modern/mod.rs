@@ -1971,7 +1971,7 @@ fn title_row_in(ui: &mut Ui, m: &Modern, t: &Title, colour: egui::Color32) {
     // Timeless XI: Timeless View's titles are letter-spaced capitals in its serif (Pewter Hairline).
     let tl = timeless_now();
     let font = if tl {
-        FontId::new(m.theme.title * 0.86, menu_family())
+        FontId::new(m.theme.title * 0.8, menu_family())
     } else {
         FontId::new(m.theme.title, FontFamily::Name(STRONG.into()))
     };

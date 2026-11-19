@@ -646,15 +646,16 @@ fn install_fonts_inner(ctx: &Context, body: Option<(Vec<u8>, Vec<u8>)>, timeless
         |first: &str| -> Vec<String> { std::iter::once(first.to_string()).chain(fallbacks.iter().cloned()).collect() };
     defs.families.insert(FontFamily::Proportional, with(regular));
     defs.families.insert(FontFamily::Name(STRONG.into()), with(strong));
-    // Timeless XI: Timeless View's face for titles and menu rows. Pewter Hairline in Carrois Gothic (the owner's pick,
-    // 2026-11-19): Carrois there as everywhere in Timeless. Cormorant Garamond (a little larger for its small x-height)
-    // stays registered for a serif title set.
+    // Timeless XI: Timeless View's serif for titles and menu rows, a little larger (Cormorant's small x-height), with
+    // Fira Sans behind it for what it lacks.
     defs.font_data.insert(
         "CormorantGaramond-SemiBold".into(),
         Arc::new(FontData::from_static(SERIF_TTF).tweak(egui::FontTweak { scale: 1.2, ..Default::default() })),
     );
-    let serif = if timeless { with(strong) } else { std::iter::once("CormorantGaramond-SemiBold".to_string()).chain(with(strong)).collect() };
-    defs.families.insert(FontFamily::Name(SERIF.into()), serif);
+    defs.families.insert(
+        FontFamily::Name(SERIF.into()),
+        std::iter::once("CormorantGaramond-SemiBold".to_string()).chain(with(strong)).collect(),
+    );
     let (name, label) = if timeless { (strong, strong) } else { ("Inter-SemiBold", "Inter-BoldItalic") };
     defs.families.insert(FontFamily::Name(NAME.into()), with(name));
     defs.families.insert(FontFamily::Name(LABEL.into()), with(label));
