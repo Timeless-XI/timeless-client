@@ -815,6 +815,20 @@ enum Depth {
     Lamp,
 }
 
+// Timeless XI: custom looks swap one texture of our own model (client/timeless/looks.rs).
+impl ActorGpu {
+    /// The texture slot of the first of `names` the model has.
+    pub fn texture_slot(&self, names: &[&str]) -> Option<usize> {
+        names.iter().find_map(|n| self.slot.get(*n).copied())
+    }
+
+    pub fn set_texture(&mut self, slot: usize, bind: &wgpu::BindGroup) {
+        if let Some(t) = self.textures.get_mut(slot) {
+            *t = bind.clone();
+        }
+    }
+}
+
 /// A character's GPU side: its textures, and either a vertex buffer re-filled with a CPU-posed mesh
 /// (update_actor) or a static skinned mesh posed on the GPU from its bones (new_skinned / pose_actor).
 /// Clones share the GPU resources (skinned actors of one model share one copy).
@@ -3442,6 +3456,15 @@ impl ZoneRenderer {
             b.tex += 1;
         }
         b.tex == b.ch.textures.len() && self.anim.ready(&b.ch)
+    }
+
+    /// Timeless XI: an RGBA texture for an actor's model (custom looks, client/timeless/looks.rs), sent whole with
+    /// its mips queued: the bind group and the mips' sequence number.
+    pub fn actor_texture(&self, gpu: &Gpu, t: &crate::dat::zone::Texture) -> (wgpu::BindGroup, u64) {
+        let mut up = upload::TexUp::new(gpu, t, true);
+        let seq = up.step(gpu, t, true).unwrap_or(0);
+        let view = up.texture.create_view(&Default::default());
+        (view_bind_group(gpu, &self.texture_layout, &self.sampler, &view), seq)
     }
 
     /// An actor skinned on the GPU: its bind-pose corners (SkinMesh) and textures go up once per model.

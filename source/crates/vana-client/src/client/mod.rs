@@ -7966,6 +7966,8 @@ struct World {
     tl_fish: timeless::fishing::TlFish,
     /// Timeless XI: Timeless Angler, the fishing HUD and school banner (timeless/angler.rs).
     angler: timeless::angler::Angler,
+    /// Timeless XI: custom looks (timeless/looks.rs): our recoloured face and the Appearance window.
+    looks: timeless::looks::Looks,
     /// Config `modern_condense` (with `modern`): an action's battle lines merge (combat::condense).
     condense: bool,
     /// The lines later records of their action merge into, and the last action's serial.
@@ -10632,6 +10634,7 @@ impl App {
                             tl_bar: Default::default(),
                             tl_fish: Default::default(),
                             angler: Default::default(),
+                            looks: Default::default(),
                             condense: self.cfg.modern_condense,
                             condensed: Vec::new(),
                             condensed_targets: Vec::new(),
@@ -13173,6 +13176,13 @@ impl App {
                 .collect();
             looks.splice(0..0, again);
         }
+        // Timeless XI: the custom looks' try-on changed: our look again.
+        if world.looks.try_on_ver != world.looks.try_on_seen {
+            world.looks.try_on_seen = world.looks.try_on_ver;
+            if let Some(l) = world.look_base.get(&world.my_id) {
+                looks.push((world.my_id, Source::Pc(*l)));
+            }
+        }
         // Load a character model whenever an actor's look is new or changed.
         let mut wanted = Vec::new();
         for (id, source) in looks {
@@ -13184,7 +13194,9 @@ impl App {
             let source = match source {
                 Source::Pc(l) => {
                     world.look_base.insert(id, l);
-                    Source::Pc(world.lua.model(id).map_or(l, |m| m.applied(l)))
+                    let l = world.lua.model(id).map_or(l, |m| m.applied(l));
+                    // Timeless XI: the custom looks' try-on (timeless/looks.rs), our own model only.
+                    Source::Pc(if id == world.my_id { timeless::looks::try_on(&world.looks, l) } else { l })
                 }
                 other => {
                     world.look_base.remove(&id);
@@ -17409,6 +17421,7 @@ impl App {
                     let m = self.modern.get_or_insert_with(|| modern::Modern::new(ctx));
                     if !world.ui_hidden {
                         m.tl_angler(ctx, world);
+                        m.tl_looks(ctx, world);
                     }
                     m.tl_fishing(ctx, world);
                 }
@@ -20636,6 +20649,8 @@ fn pose_actors(gfx: &Gfx, fg: &mut FrameGpu, w: &mut World, r: &mut ZoneRenderer
         }
         a.q_layers = layers;
     }
+    // Timeless XI: our custom look's face texture (timeless/looks.rs).
+    timeless::looks::apply(&gfx.gpu, w, r);
     // Test 6: the occlusion results, a frame or two late, drop actors hidden behind scenery.
     r.occl.results.retain(|id, _| visible.contains(id));
     visible.retain(|id| r.occl.results.get(id) != Some(&false));
