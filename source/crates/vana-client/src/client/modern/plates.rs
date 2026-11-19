@@ -60,11 +60,19 @@ fn rasterize(text: &str, px: f32) -> Option<(Raster, Vec<u8>)> {
     for g in glyphs {
         let Some(o) = font.outline_glyph(g) else { continue };
         let b = o.px_bounds();
+        // Timeless XI: the Timeless names lean 4 degrees (modern::SLANT): each covered pixel moved right by its height
+        // over the baseline, split between the two pixels it lands across.
+        let baseline = pad + sf.ascent();
         o.draw(|x, y, c| {
-            let (px, py) = (b.min.x as i32 + x as i32, b.min.y as i32 + y as i32);
-            if px >= 0 && py >= 0 && (px as usize) < w && (py as usize) < h {
-                let k = py as usize * w + px as usize;
-                cov[k] = (cov[k] + c).min(1.0);
+            let (fx, py) = (b.min.x + x as f32, b.min.y as i32 + y as i32);
+            let shift = if timeless { (baseline - (py as f32 + 0.5)) * super::SLANT } else { 0.0 };
+            let sx = fx + shift;
+            let (px, t) = (sx.floor() as i32, sx - sx.floor());
+            for (px, c) in [(px, c * (1.0 - t)), (px + 1, c * t)] {
+                if c > 0.0 && px >= 0 && py >= 0 && (px as usize) < w && (py as usize) < h {
+                    let k = py as usize * w + px as usize;
+                    cov[k] = (cov[k] + c).min(1.0);
+                }
             }
         });
     }

@@ -31,6 +31,11 @@ pub fn faded(s: Shape, a: f32) -> Shape {
 pub fn outlined(p: &Painter, at: Pos2, align: Align2, text: &str, font: FontId, colour: Color32) -> Rect {
     let galley = p.layout_no_wrap(text.to_string(), font, colour);
     let r = align.anchor_size(at, galley.size());
+    // Timeless XI: the Timeless interface draws clean text; its soft shadow comes from modern::text_shadows.
+    if super::timeless_now() {
+        p.galley(r.min, galley, colour);
+        return r;
+    }
     let px = 1.0 / p.pixels_per_point();
     for (dx, dy) in
         [(-1.0, -1.0), (0.0, -1.0), (1.0, -1.0), (-1.0, 0.0), (1.0, 0.0), (-1.0, 1.0), (0.0, 1.0), (1.0, 1.0)]

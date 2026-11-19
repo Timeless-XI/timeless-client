@@ -791,8 +791,7 @@ fn tl_party_row(
     let name_y = if full { r.min.y + 13.0 } else { r.min.y + 15.0 };
     let g = super::one_line(painter, &row.name, name_font, m.theme.color("text"), name_w);
     let at = pos2(x, name_y - g.size().y / 2.0);
-    painter.galley(at + vec2(1.0, 1.0), g.clone(), Color32::from_black_alpha(190));
-    painter.galley(at, g, m.theme.color("text"));
+    super::slanted(painter, at, &g, m.theme.color("text"));
     let jobs = super::one_line(painter, &row.jobs, FontId::proportional(m.theme.small - 1.5), m.theme.color("muted"), name_w);
     painter.galley(pos2(x, name_y + 9.0), jobs, m.theme.color("muted"));
     if full {
@@ -956,8 +955,7 @@ fn tl_target(p: &mut Panels, v: &TargetView, frame: &str, dist: Option<&str>) {
         let colour = v.colour.unwrap_or(m.theme.color("text"));
         let g = super::one_line(painter, &v.name, name_font, colour, (width - pct_w - 12.0).max(0.0));
         let at = pos2(row.min.x, row.center().y - g.size().y / 2.0);
-        painter.galley(at + vec2(1.0, 1.0), g.clone(), Color32::from_black_alpha(200));
-        painter.galley(at, g, colour);
+        super::slanted(painter, at, &g, colour);
         if let Some(s) = pct {
             painter.text(pos2(row.max.x, row.center().y + 1.0), Align2::RIGHT_CENTER, s, small, m.theme.color("muted"));
         }

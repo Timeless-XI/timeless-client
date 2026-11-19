@@ -761,6 +761,38 @@ fn shadow_of(shape: &Shape) -> Option<Shape> {
     }
 }
 
+/// Timeless XI: the slant of the Timeless interface's names (on screen and in the target and party windows): 4 degrees.
+pub const SLANT: f32 = 0.0699;
+
+/// Timeless XI: `galley` drawn at `at` in `colour`, slanted `SLANT` (each glyph's quad sheared about the row's
+/// baseline, so the letters lean and stay on their line), over the interface's soft shadow. egui's own italics lean
+/// about 14 degrees; this draws the galley's glyph meshes itself.
+pub(super) fn slanted(p: &egui::Painter, at: Pos2, galley: &std::sync::Arc<egui::Galley>, colour: Color32) {
+    // The glyph meshes' uvs are in font-atlas pixels (the tessellator normalizes them); so here too.
+    let [tw, th] = p.ctx().fonts(|f| f.font_image_size());
+    let norm = vec2(1.0 / tw.max(1) as f32, 1.0 / th.max(1) as f32);
+    for (offset, c) in [(vec2(0.0, 1.0), Color32::from_black_alpha(185)), (Vec2::ZERO, colour)] {
+        let mut mesh = egui::Mesh::default();
+        for placed in &galley.rows {
+            let row_at = at + placed.pos.to_vec2() + offset;
+            let base = row_at.y + placed.row.size.y * 0.78;
+            let src = &placed.row.visuals.mesh;
+            mesh.texture_id = src.texture_id;
+            let start = mesh.vertices.len() as u32;
+            for v in &src.vertices {
+                let mut q = row_at + v.pos.to_vec2();
+                q.x += (base - q.y) * SLANT;
+                let uv = pos2(v.uv.x * norm.x, v.uv.y * norm.y);
+                mesh.vertices.push(egui::epaint::Vertex { pos: q, uv, color: c });
+            }
+            mesh.indices.extend(src.indices.iter().map(|i| i + start));
+        }
+        if !mesh.is_empty() {
+            p.add(Shape::mesh(mesh));
+        }
+    }
+}
+
 /// Timeless XI: the margin a framed panel has (for drawing out to its frame).
 pub(super) fn panel_margin(_m: &Modern) -> egui::Margin {
     margin()
@@ -2234,5 +2266,39 @@ mod panel_tests {
         assert_eq!(m.art.sprite("gauges/hp_full").unwrap().tex, base.tex);
         m.theme.set_skin(HashMap::from([("gold".to_string(), red)]));
         assert_eq!(m.theme.color("gold"), red);
+    }
+}
+
+#[cfg(test)]
+mod slant_tests {
+    use super::*;
+
+    #[test]
+    fn slanted_names_sample_the_atlas_and_lean_four_degrees() {
+        let ctx = Context::default();
+        let mut found = Vec::new();
+        let out = ctx.run_ui(Default::default(), |ui| {
+            let ctx = ui.ctx().clone();
+            let p = ctx.layer_painter(LayerId::new(Order::Foreground, Id::unique("slant test")));
+            let g = p.layout_no_wrap("River Crab".into(), FontId::proportional(20.0), Color32::WHITE);
+            slanted(&p, pos2(10.0, 10.0), &g, Color32::WHITE);
+        });
+        for cs in out.shapes {
+            if let Shape::Mesh(m) = cs.shape {
+                found.push(m);
+            }
+        }
+        // A shadow mesh and the text's.
+        assert_eq!(found.len(), 2);
+        let m = &found[1];
+        assert!(!m.vertices.is_empty());
+        assert!(m.vertices.iter().all(|v| (0.0..=1.0).contains(&v.uv.x) && (0.0..=1.0).contains(&v.uv.y)));
+        // Each glyph quad: its top two corners right of its bottom two by about tan(4 deg) x the glyph's height.
+        for q in m.vertices.chunks(4) {
+            let (top, bottom) = (&q[0], &q[2]);
+            let h = bottom.pos.y - top.pos.y;
+            let lean = top.pos.x - bottom.pos.x;
+            assert!(h > 0.0 && (lean - h * SLANT).abs() < 0.01, "h {h} lean {lean}");
+        }
     }
 }
