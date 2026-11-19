@@ -291,7 +291,7 @@ fn settings(
         .fixed_pos(pos2(x, y))
         .show(ctx, |ui| {
             let bg = ui.painter().add(egui::Shape::Noop);
-            let inner = egui::Frame::NONE.inner_margin(super::MARGIN).show(ui, |ui| {
+            let inner = egui::Frame::NONE.inner_margin(super::margin()).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
                     let (r, _) = ui.allocate_exact_size(vec2(96.0, 28.0), Sense::hover());
@@ -745,12 +745,12 @@ pub struct Shown {
 
 /// The window's height without lines: its margins, the tab row and the gap under it.
 fn chrome() -> f32 {
-    super::ROOM_MARGIN.sum().y + TAB_H + GAP
+    super::room_margin().sum().y + TAB_H + GAP
 }
 
 /// The lines' wrap width for a room: its inside, less a little air at the right.
 fn wrap_width(room: Vec2) -> f32 {
-    room.x - super::ROOM_MARGIN.sum().x - 6.0
+    room.x - super::room_margin().sum().x - 6.0
 }
 
 /// The chat window under the retail log's rule: each wrapped row a new line brings keeps it open a period longer, up to
@@ -1172,7 +1172,7 @@ pub fn draw(p: &mut Panels, v: &ChatView, s: Shown, lift: bool) {
     // above them is rounded to pixels from the moving top, which made the text hop a pixel as the height changed.
     let floor = {
         let place = p.place("chat");
-        let y = p.resolve("chat", &place, height).y + height - super::ROOM_MARGIN.bottom as f32;
+        let y = p.resolve("chat", &place, height).y + height - super::room_margin().bottom as f32;
         (y * ppp).round() / ppp
     };
     let mut button = (Rect::NOTHING, false);

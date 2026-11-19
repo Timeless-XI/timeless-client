@@ -372,7 +372,7 @@ pub fn status_panel(p: &mut Panels, v: &StatusView, small: bool) {
     }
     let look = p.look();
     let per = v.effects.len().min(FX_ROW);
-    let width = super::MARGIN.sum().x + (per - 1) as f32 * FX_STEP + FX;
+    let width = super::margin().sum().x + (per - 1) as f32 * FX_STEP + FX;
     // No frame: the icons alone (movable all the same).
     p.framed("status", None, width, "none", |ui| {
         effects_grid(ui, look, &v.effects, FX, FX_STEP, FX_ROW, small, v.cursor)
@@ -572,7 +572,7 @@ pub fn party_panel(
     let strip = if rest.is_some() { REST_H } else { 0.0 };
     let cap = if exp.is_some() { EXP_CAP } else { 0.0 };
     let pets_h = pets.len() as f32 * (PET_ROW + 4.0);
-    let height = cap + super::MARGIN.sum().y + 37.0 + strip + n * row_h + (n - 1.0) * 4.0 + pets_h;
+    let height = cap + super::margin().sum().y + super::title_h() + strip + n * row_h + (n - 1.0) * 4.0 + pets_h;
     let mut clicked = None;
     let show = super::Show {
         title: Some(Title { icon: None, text: title, note: note.as_deref(), name: false }),
@@ -615,8 +615,8 @@ pub fn party_panel(
                     ui.ctx().layer_painter(painter.layer_id()).add(paint::turned(&s, a, 1, colour));
                 }
             }
-            // Past the row frame's left ornament.
-            let mut x = r.min.x + 22.0;
+            // Past the row frame's left ornament (the Timeless glass has none).
+            let mut x = r.min.x + if m.theme.timeless() { 8.0 } else { 22.0 };
             let dim = if row.here.is_some() { Color32::WHITE } else { Color32::from_gray(120) };
             if let Some(s) = row.icon.as_deref().and_then(|j| m.art.sprite(j)) {
                 painter.add(paint::image(&s, pos2(x, r.center().y - 12.0), 24.0, dim));
@@ -674,6 +674,15 @@ pub fn party_panel(
                 row_menu(m, &resp, row.slot);
                 continue;
             };
+            // Timeless XI: the guide's row (style D): name and jobs, then HP / MP / TP columns.
+            if m.theme.timeless() {
+                tl_party_row(ui, m, look, r, x, right, row, v, full, small);
+                if resp.clicked() {
+                    clicked = Some(PartyPick::Slot(row.slot));
+                }
+                row_menu(m, &resp, row.slot);
+                continue;
+            }
             // Room inside the row's frame lines: the labels start well under its top, the MP line ends well over its
             // bottom.
             let hp_r = Rect::from_min_max(pos2(x, r.min.y + 26.0), pos2(right, r.min.y + 38.0));
@@ -758,6 +767,68 @@ pub fn party_panel(
         exp_bar(p, id, r, e);
     }
     clicked
+}
+
+/// Timeless XI: a party row in the Timeless interface (style D), right of the job icon (`x` .. `right` in `r`): the
+/// name over the jobs (the full party: their effects under them), then three columns, HP, MP and TP, each its number
+/// over a thin flat bar (TP's against 3000, lit from 1000). A job without MP leaves its column empty.
+#[allow(clippy::too_many_arguments)]
+fn tl_party_row(
+    ui: &Ui,
+    m: &Modern,
+    look: Look,
+    r: Rect,
+    x: f32,
+    right: f32,
+    row: &PartyRow,
+    v: &RowVitals,
+    full: bool,
+    small: bool,
+) {
+    let painter = ui.painter();
+    let name_w = 104.0f32.min((right - x) * 0.4);
+    let name_font = FontId::new(m.theme.ui, FontFamily::Name(super::STRONG.into()));
+    let name_y = if full { r.min.y + 13.0 } else { r.min.y + 15.0 };
+    let g = super::one_line(painter, &row.name, name_font, m.theme.color("text"), name_w);
+    let at = pos2(x, name_y - g.size().y / 2.0);
+    painter.galley(at + vec2(1.0, 1.0), g.clone(), Color32::from_black_alpha(190));
+    painter.galley(at, g, m.theme.color("text"));
+    let jobs = super::one_line(painter, &row.jobs, FontId::proportional(m.theme.small - 1.5), m.theme.color("muted"), name_w);
+    painter.galley(pos2(x, name_y + 9.0), jobs, m.theme.color("muted"));
+    if full {
+        let mut ex = x;
+        for e in &row.effects {
+            if ex + 14.0 > x + name_w {
+                break;
+            }
+            let at = Rect::from_min_size(pos2(ex, r.max.y - 17.0), vec2(14.0, 14.0));
+            effect_icon(look, painter, e, at, small);
+            show_effect_tip(ui, m, at.expand(1.0), e);
+            ex += 15.0;
+        }
+    }
+    let x0 = x + name_w + 8.0;
+    let col_w = ((right - x0 - 16.0) / 3.0).max(10.0);
+    let font = FontId::new(m.theme.small, FontFamily::Name(super::LABEL.into()));
+    let hp = v.hp.to_string();
+    let mp = v.mpf.map(|f| (v.mp.to_string(), f));
+    let tp = v.tp.map(|tp| {
+        let c = if tp > 999 { m.theme.color("focus") } else { m.theme.color("text") };
+        (tp.to_string(), tp as f32 / 3000.0, c)
+    });
+    let cols: [Option<(&str, String, f32, Color32)>; 3] = [
+        Some(("hp", hp, v.hpf, v.hp_colour)),
+        mp.map(|(s, f)| ("mp", s, f, m.theme.color("text"))),
+        tp.map(|(s, f, c)| ("tp", s, f, c)),
+    ];
+    let mid = r.center().y;
+    for (k, col) in cols.into_iter().enumerate() {
+        let Some((kind, text, f, colour)) = col else { continue };
+        let cx = x0 + k as f32 * (col_w + 8.0);
+        let bar_r = Rect::from_min_size(pos2(cx, mid + 2.0), vec2(col_w, 6.0));
+        flat_bar(painter, m, kind, bar_r, f);
+        paint::outlined(painter, pos2(cx + col_w, mid - 1.0), Align2::RIGHT_BOTTOM, &text, font.clone(), colour);
+    }
 }
 
 /// A pet or fellow row: a slimmer row with the name, the HP gauge and its percent, and the pet's TP (as party TP shows);

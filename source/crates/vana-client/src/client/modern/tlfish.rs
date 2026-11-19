@@ -16,17 +16,17 @@ fn rgba(r: u8, g: u8, b: u8, a: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(r, g, b, (a * 255.0).round() as u8)
 }
 
-/// The Timeless palette (the website's and the add-on's).
+/// The Timeless palette: style D (Dusk Remastered) for the panel and text; the water stays blue.
 struct Pal;
 impl Pal {
     fn panel() -> Color32 {
-        rgba(10, 11, 18, 0.92)
+        rgba(40, 32, 66, 0.94)
     }
     fn edge() -> Color32 {
-        rgba(40, 48, 64, 1.0)
+        rgba(77, 66, 117, 1.0)
     }
     fn track() -> Color32 {
-        rgba(17, 20, 29, 1.0)
+        rgba(20, 22, 44, 1.0)
     }
     fn water_top() -> Color32 {
         rgba(16, 26, 44, 1.0)
@@ -41,13 +41,13 @@ impl Pal {
         rgba(61, 95, 148, 0.45)
     }
     fn text() -> Color32 {
-        rgba(230, 236, 245, 1.0)
+        rgba(246, 239, 224, 1.0)
     }
     fn muted() -> Color32 {
-        rgba(152, 163, 184, 1.0)
+        rgba(194, 182, 207, 1.0)
     }
     fn gold() -> Color32 {
-        rgba(232, 200, 120, 1.0)
+        rgba(240, 196, 110, 1.0)
     }
     fn red() -> Color32 {
         rgba(214, 48, 48, 1.0)

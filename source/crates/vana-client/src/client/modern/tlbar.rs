@@ -107,7 +107,7 @@ fn bar_height(w: &World, b: usize) -> f32 {
         0 => STRIP,
         _ => 0.0,
     };
-    super::MARGIN.sum().y + strip + slots
+    super::margin().sum().y + strip + slots
 }
 
 /// The room between bar 1's slots and its strip under them.
@@ -119,7 +119,7 @@ const SNAP_GAP: f32 = 4.0;
 
 /// A bar panel's backdrop as seen: the panel's rect less its margins, plus the backdrop's 8 px.
 fn seen(r: Rect) -> Rect {
-    let m = super::MARGIN;
+    let m = super::margin();
     Rect::from_min_max(
         r.min + vec2(m.left as f32 - 8.0, m.top as f32 - 8.0),
         r.max - vec2(m.right as f32 - 8.0, m.bottom as f32 - 8.0),
@@ -207,7 +207,7 @@ fn snap(p: &mut Panels, w: &mut World) {
 /// The pet bar's panel's height.
 fn pet_height(w: &World) -> f32 {
     let (sz, _) = slot_size(w);
-    super::MARGIN.sum().y + (sz * 0.8).round() + 14.0
+    super::margin().sum().y + (sz * 0.8).round() + 14.0
 }
 
 /// Each bar's panel (bar 1's carries the strip).
@@ -357,7 +357,7 @@ pub fn draw(p: &mut Panels, w: &mut World) {
         });
         // The panel's inner width: bar 1's strip needs room for its buttons.
         let inner = if b == 0 { width.max(STRIP_W) } else { width };
-        let shown = p.show(id, Show { size: vec2(inner + super::MARGIN.sum().x, 0.0), frame: "none", at: fixed, ..Default::default() }, |ui, _| {
+        let shown = p.show(id, Show { size: vec2(inner + super::margin().sum().x, 0.0), frame: "none", at: fixed, ..Default::default() }, |ui, _| {
             ui.multiply_opacity(alpha);
             // No spacing between the strip and the slots: the panel's height is exactly `bar_height`.
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -855,7 +855,7 @@ fn place(p: &mut Panels, w: &mut World) {
     // with its bottom on the chat window's bottom just right of it, then the Ctrl bar over it, the Alt bar over that,
     // the pet bar on top; backdrops SNAP_GAP apart.
     let Some(chat) = rect_of(p, "chat") else { return };
-    let m = super::MARGIN;
+    let m = super::margin();
     // Panels overlap by their margins less the backdrops' 8 px, less the gap.
     let overlap = (m.top as f32 - 8.0) + (m.bottom as f32 - 8.0) - SNAP_GAP;
     let x = (chat.max.x + 12.0).round();
@@ -1951,7 +1951,7 @@ mod tests {
     fn bars_snap_within_reach() {
         let panel = |x: f32, y: f32| {
             // A panel whose backdrop (seen) starts at (x, y) and is 300 x 60.
-            let m = super::super::MARGIN;
+            let m = super::super::margin();
             let min = pos2(x - (m.left as f32 - 8.0), y - (m.top as f32 - 8.0));
             Rect::from_min_size(min, vec2(300.0 + m.left as f32 + m.right as f32 - 16.0, 60.0 + m.top as f32 + m.bottom as f32 - 16.0))
         };

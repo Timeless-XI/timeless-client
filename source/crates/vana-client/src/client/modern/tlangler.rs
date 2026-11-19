@@ -15,20 +15,21 @@ fn rgb(r: u8, g: u8, b: u8) -> Color32 {
 
 struct K;
 impl K {
+    // Timeless XI: style D (Dusk Remastered): cream text, lilac-grey quiet text, cream-gold, lilac for the blue.
     fn text() -> Color32 {
-        rgb(230, 236, 245)
+        rgb(246, 239, 224)
     }
     fn muted() -> Color32 {
-        rgb(152, 163, 184)
+        rgb(194, 182, 207)
     }
     fn dim() -> Color32 {
-        rgb(110, 120, 140)
+        rgb(138, 126, 160)
     }
     fn gold() -> Color32 {
-        rgb(227, 201, 142)
+        rgb(243, 223, 178)
     }
     fn blue() -> Color32 {
-        rgb(143, 178, 230)
+        rgb(169, 149, 214)
     }
     fn green() -> Color32 {
         rgb(120, 200, 140)
@@ -40,10 +41,10 @@ impl K {
         rgb(224, 96, 108)
     }
     fn panel() -> Color32 {
-        Color32::from_rgba_unmultiplied(10, 11, 18, 225)
+        Color32::from_rgba_unmultiplied(40, 32, 66, 230)
     }
     fn edge() -> Color32 {
-        rgb(40, 48, 64)
+        rgb(77, 66, 117)
     }
 }
 

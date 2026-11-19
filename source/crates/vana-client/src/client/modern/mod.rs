@@ -301,6 +301,7 @@ impl Modern {
         window: [u32; 2],
         cfg: &mut crate::config::Config,
     ) -> bool {
+        TL_PADDING.with(|c| c.set(self.theme.timeless()));
         // Timeless XI: the fonts follow the interface (the Timeless one sets labels and names in Fira Sans).
         if self.fonts_timeless.get() != self.theme.timeless() {
             self.fonts_timeless.set(self.theme.timeless());
@@ -721,8 +722,29 @@ pub(super) fn title_rule(ui: &mut Ui, m: &Modern, margin: egui::Margin) {
 }
 
 /// Timeless XI: the margin a framed panel has (for drawing out to its frame).
-pub(super) fn panel_margin(m: &Modern) -> egui::Margin {
-    if m.theme.timeless() { TL_MARGIN } else { MARGIN }
+pub(super) fn panel_margin(_m: &Modern) -> egui::Margin {
+    margin()
+}
+
+thread_local! {
+    /// Timeless XI: this frame's panels have the Timeless interface's padding (set at the start of Modern::ui).
+    static TL_PADDING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// A panel's margin this frame (the Timeless interface's tighter one, else the pack's); every height worked out from
+/// the margin asks here, so it matches what `show` draws.
+pub(super) fn margin() -> egui::Margin {
+    if TL_PADDING.with(|c| c.get()) { TL_MARGIN } else { MARGIN }
+}
+
+/// A resizable panel's margin this frame (as `margin`).
+pub(super) fn room_margin() -> egui::Margin {
+    if TL_PADDING.with(|c| c.get()) { TL_ROOM_MARGIN } else { ROOM_MARGIN }
+}
+
+/// The title row's height with the room under it (title_row 28, egui's 3, then ours: 6, or the Timeless rule's 10).
+pub(super) fn title_h() -> f32 {
+    if TL_PADDING.with(|c| c.get()) { 41.0 } else { 37.0 }
 }
 
 /// The panels placed by their bottom, growing upward (the chat window, the party window).
@@ -1342,12 +1364,7 @@ impl<'a> Panels<'a> {
             let w = if o.resizable { room.x } else { m.rects.borrow().get(id).map_or(o.size.x, |r| r.width()) };
             pos = on_screen(Rect::from_min_size(pos, vec2(w, h)), screen);
         }
-        let margin = match (o.resizable, m.theme.timeless()) {
-            (true, true) => TL_ROOM_MARGIN,
-            (false, true) => TL_MARGIN,
-            (true, false) => ROOM_MARGIN,
-            (false, false) => MARGIN,
-        };
+        let margin = if o.resizable { room_margin() } else { margin() };
         let (title, frame, alpha, fold) = (o.title, o.frame, o.alpha, o.fold.clamp(0.0, 1.0));
         // The panel with the keys in the focused frame.
         let frame = if frame == "window_normal" && self.focus == Some(id) { "window_focused" } else { frame };
