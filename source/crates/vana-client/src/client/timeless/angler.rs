@@ -924,11 +924,13 @@ pub struct Prefs {
     pub hud_auto: bool,
     /// The school of fish banner.
     pub banner: bool,
+    /// Ask to open the Angler's Almanac when a fishing session starts.
+    pub ask: bool,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Prefs { hud: true, hud_auto: true, banner: true }
+        Prefs { hud: true, hud_auto: true, banner: true, ask: true }
     }
 }
 
@@ -973,6 +975,11 @@ pub struct Angler {
     pub hooked: Option<(u16, bool)>,
     /// The status we last saw (a cast = turning 56 from not fishing).
     last_status: u8,
+    /// "Open the Angler's Almanac?": seconds left (it closes by itself at 0).
+    pub ask: Option<f32>,
+    /// Unix seconds we were last fishing (a cast after FISH_BREAK without one starts a new fishing session, which
+    /// asks again).
+    last_fishing: u64,
     /// What the HUD shows, worked out four times a second.
     pub view: Option<View>,
     next_view: f32,
@@ -1025,6 +1032,18 @@ pub const RANKS: [&str; 12] = [
     "Authority",
 ];
 
+/// How long "Open the Angler's Almanac?" stays up.
+pub const ASK_SECONDS: f32 = 6.0;
+/// A cast after this long without fishing starts a new fishing session (and asks again).
+pub const FISH_BREAK: u64 = 300;
+
+/// The answer to "Open the Angler's Almanac?".
+pub fn answer(w: &mut World, yes: bool) {
+    if w.angler.ask.take().is_some() && yes {
+        w.angler.guide.open = true;
+    }
+}
+
 pub fn now_secs() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
@@ -1074,6 +1093,14 @@ pub fn tick(w: &mut World, dt: f32) {
     // A cast: our status turns 56 (NewFishingStart) from a non-fishing one.
     let status = w.my_motion.status;
     if status == 56 && !fishing_now(w.angler.last_status) {
+        // The first cast of a fishing session (none for FISH_BREAK) asks once whether to open the Almanac.
+        if now.saturating_sub(w.angler.last_fishing) >= FISH_BREAK
+            && w.angler.prefs.ask
+            && !w.angler.guide.open
+            && !w.ui_hidden
+        {
+            w.angler.ask = Some(ASK_SECONDS);
+        }
         let fresh = w.angler.hole.cast(zone, x, z, now);
         let s = &mut w.angler.session;
         s.casts += 1;
@@ -1081,6 +1108,16 @@ pub fn tick(w: &mut World, dt: f32) {
         log::info!("angler: cast {} at this spot{}", w.angler.hole.casts, if fresh { " (a new spot)" } else { "" });
     }
     w.angler.last_status = status;
+    if fishing_now(status) {
+        w.angler.last_fishing = now;
+    }
+    // The question gives way to a bite (the bar game needs the screen and the keys), and goes by itself.
+    if let Some(t) = w.angler.ask.as_mut() {
+        *t -= dt;
+        if *t <= 0.0 || w.tl_fish.play.is_some() {
+            w.angler.ask = None;
+        }
+    }
     // The server's lines and the catch lines.
     for line in std::mem::take(&mut w.chat.tap) {
         on_line(w, &line, now);

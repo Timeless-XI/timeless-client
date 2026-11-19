@@ -15592,7 +15592,10 @@ impl App {
         self.list_wheel -= notches;
         // Over a modern panel the pointer is egui's: the game's windows get no clicks or wheel there.
         // Timeless XI: the Timeless Angler's HUD and guide are egui in every interface.
-        let mine = !(matches!(&self.phase, Phase::World(w) if w.modern || w.angler.prefs.hud || w.angler.guide.open)
+        let mine = !(matches!(&self.phase, Phase::World(w) if w.modern
+            || w.angler.prefs.hud
+            || w.angler.guide.open
+            || w.angler.ask.is_some())
             && (ctx.is_pointer_over_egui() || ctx.egui_is_using_pointer()));
         let mut input = ctx.input(|i| UiInput {
             wheel: if mine { notches as i32 } else { 0 },

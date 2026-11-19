@@ -374,8 +374,14 @@ pub fn update(w: &mut World, input: &mut Input, dt: f32, window: bool) {
         }
     };
     // Key function 0x0e (Enter, mode 1) any time, with no window for the wait; 0x0f (Escape) with no window.
-    let enter = input.test(0x0e, mode::PRESS);
-    let escape = !window && input.test(0x0f, mode::PRESS);
+    let mut enter = input.test(0x0e, mode::PRESS);
+    let mut escape = !window && input.test(0x0f, mode::PRESS);
+    // Timeless XI: while "Open the Angler's Almanac?" is up, Enter answers yes and Escape no; neither reaches the
+    // cast (Enter would reel in early, Escape give up).
+    if w.angler.ask.is_some() && (enter || escape) {
+        super::timeless::angler::answer(w, enter);
+        (enter, escape) = (false, false);
+    }
     // Timeless XI: the bar game or item box replaces the arrow game's frames until its end report is sent.
     if w.tl_fish.active() || w.tl_fish.end_due.is_some() {
         timeless_frame(w, enter, escape, input.axis(4), dt);

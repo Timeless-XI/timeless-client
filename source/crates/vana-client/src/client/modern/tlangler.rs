@@ -87,6 +87,8 @@ struct Asks {
     hide: bool,
     reset_session: bool,
     guide: bool,
+    /// The Almanac question's answer.
+    answer: Option<bool>,
 }
 
 const TABS: [&str; 7] = ["Current Zone", "Tracker", "Moon Effects", "Zones", "Fish", "Schools", "Settings"];
@@ -95,9 +97,11 @@ impl super::Modern {
     /// The Angler's HUD and the school banner, if they show.
     pub fn tl_angler(&self, ctx: &Context, w: &mut World) {
         let Some(v) = w.angler.view.clone() else { return };
-        let asks = Asks::default();
-        let mut asks = asks;
+        let mut asks = Asks::default();
         self.tl_angler_banner(ctx, w, &v);
+        if let Some(left) = w.angler.ask {
+            self.tl_angler_ask(ctx, left, &mut asks);
+        }
         let a = &w.angler;
         let school = a.hole.active;
         if a.prefs.hud && (!a.prefs.hud_auto || v.has_rod() || school || v.fishing) {
@@ -115,11 +119,15 @@ impl super::Modern {
             }
             let changed = prefs.hud != w.angler.prefs.hud
                 || prefs.hud_auto != w.angler.prefs.hud_auto
-                || prefs.banner != w.angler.prefs.banner;
+                || prefs.banner != w.angler.prefs.banner
+                || prefs.ask != w.angler.prefs.ask;
             (w.angler.guide, w.angler.prefs) = (g, prefs);
             if changed {
                 w.angler.save_prefs();
             }
+        }
+        if let Some(yes) = asks.answer {
+            angler::answer(w, yes);
         }
         if asks.end_school {
             angler::let_school_go(w);
@@ -383,7 +391,7 @@ impl super::Modern {
                             {
                                 asks.fish = true;
                             }
-                            if ui.small_button(if a.guide.open { "Close guide" } else { "Open guide" }).clicked() {
+                            if ui.small_button(if a.guide.open { "Close almanac" } else { "Open almanac" }).clicked() {
                                 asks.guide = true;
                             }
                             if ui.small_button("Hide").on_hover_text("Hide this HUD. Bring it back with /angler hud").clicked() {
@@ -392,6 +400,62 @@ impl super::Modern {
                         });
                     });
             });
+    }
+
+    /// "Open the Angler's Almanac?" for a few seconds after the first cast of a fishing session: high on the screen,
+    /// clear of the bar game; Enter / Yes opens it, Escape / No or nothing closes it; a bar shows the time left.
+    fn tl_angler_ask(&self, ctx: &Context, left: f32, asks: &mut Asks) {
+        let at = pos2(ctx.content_rect().center().x, ctx.content_rect().top() + ctx.content_rect().height() * 0.24);
+        egui::Area::new(Id::unique("tl angler ask"))
+            .order(Order::Foreground)
+            .pivot(Align2::CENTER_TOP)
+            .fixed_pos(at)
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(K::panel())
+                    .stroke(Stroke::new(1.5, K::gold()))
+                    .corner_radius(CornerRadius::same(8))
+                    .inner_margin(egui::Margin::symmetric(16, 10))
+                    .show(ui, |ui| {
+                        ui.set_width(300.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(RichText::new("Open the Angler's Almanac?").size(16.0).strong().color(K::gold()));
+                            ui.label(
+                                RichText::new("What bites here, your odds, the moon and schools of fish.")
+                                    .size(12.5)
+                                    .color(K::muted()),
+                            );
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                let w = 300.0;
+                                ui.add_space((w - 2.0 * 120.0 - 12.0) / 2.0);
+                                let yes = egui::Button::new(RichText::new("Yes  (Enter)").color(K::gold()))
+                                    .stroke(Stroke::new(1.5, K::gold()))
+                                    .min_size(vec2(120.0, 24.0));
+                                if ui.add(yes).clicked() {
+                                    asks.answer = Some(true);
+                                }
+                                ui.add_space(12.0);
+                                let no = egui::Button::new(RichText::new("No  (Esc)").color(K::text()))
+                                    .min_size(vec2(120.0, 24.0));
+                                if ui.add(no).clicked() {
+                                    asks.answer = Some(false);
+                                }
+                            });
+                            ui.add_space(6.0);
+                            // The time left, draining.
+                            let (r, _) = ui.allocate_exact_size(vec2(300.0, 3.0), egui::Sense::hover());
+                            let f = (left / angler::ASK_SECONDS).clamp(0.0, 1.0);
+                            ui.painter().rect_filled(r, CornerRadius::same(1), K::edge());
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(r.min, vec2(r.width() * f, r.height())),
+                                CornerRadius::same(1),
+                                K::gold().gamma_multiply(0.8),
+                            );
+                        });
+                    });
+            });
+        ctx.request_repaint();
     }
 
     fn tl_angler_banner(&self, ctx: &Context, w: &World, v: &View) {
@@ -485,7 +549,7 @@ impl super::Modern {
         asks: &mut Asks,
     ) {
         let mut open = true;
-        egui::Window::new(RichText::new("Timeless Angler").color(K::gold()))
+        egui::Window::new(RichText::new("Angler's Almanac").color(K::gold()))
             .id(Id::unique("tl angler guide"))
             .open(&mut open)
             .default_size(vec2(720.0, 480.0))
@@ -1079,8 +1143,9 @@ fn tab_settings(ui: &mut egui::Ui, prefs: &mut angler::Prefs) {
     ui.checkbox(&mut prefs.hud, "Show the HUD");
     ui.checkbox(&mut prefs.hud_auto, "Only with a rod in hand (or while fishing, or in a school)");
     ui.checkbox(&mut prefs.banner, "School of fish banner");
+    ui.checkbox(&mut prefs.ask, "Offer the Almanac on my first cast (again after 5 minutes without fishing)");
     ui.add_space(6.0);
-    ui.label(RichText::new("Commands: /angler (this guide), /angler hud, /angler banner, /angler auto, /angler school end, /angler spot reset, /angler session reset. Drag the HUD by any empty part of it.").color(K::muted()));
+    ui.label(RichText::new("Commands: /angler or /almanac (this window), /angler hud, /angler banner, /angler auto, /angler school end, /angler spot reset, /angler session reset. Drag the HUD by any empty part of it.").color(K::muted()));
     ui.label(RichText::new(format!("Fishing tables from the server, built {}.", angler::data().built)).color(K::dim()));
 }
 
