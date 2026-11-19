@@ -1,0 +1,19 @@
+name = "Timeless Telegraphs"
+version = "1.0.0"
+authors = ["TimelessXI"]
+description = "Monsters' area moves marked on the ground as they ready them (/telegraphs): circles and cones that fill up until the move goes off. Step out in time and it misses you."
+permissions = ["packets.write"]
+
+[commands.telegraphs]
+help = "Turns the ground markers on or off."
+args = ""
+forms = [
+  { args = "alert", help = "The on-screen \"Move out!\" when you stand inside one." },
+  { args = "labels", help = "The move's name over its marker." },
+  { args = "opacity <0.2-1>", help = "How solid the markers are." },
+  { args = "test", help = "Sample markers around you." },
+]
+
+[commands.timelesstelegraphs]
+help = "The same as /telegraphs."
+args = ""

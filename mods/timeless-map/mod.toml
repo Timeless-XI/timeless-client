@@ -1,0 +1,24 @@
+name = "Timeless Map"
+version = "1.0.0"
+authors = ["TimelessXI"]
+description = "What is happening across Vana'diel right now (/worldmap): conquest owners, open rifts, beastman warbands, Fomor bands and roaming Champions on a map, with pillars of light over the ones in your zone."
+permissions = ["packets.write"]
+
+[settings.key_worldmap]
+type = "key"
+default = ""
+label = "World Map Key"
+help = "A key that opens or closes the world map."
+
+[commands.worldmap]
+help = "Opens or closes the world map."
+args = ""
+forms = [
+  { args = "beams", help = "Pillars of light over what is happening in your zone." },
+  { args = "alerts", help = "A chat line when a rift, warband, Fomor band or Legendary Champion appears." },
+  { args = "update", help = "Asks the server for everything again." },
+]
+
+[commands.wmap]
+help = "The same as /worldmap."
+args = ""

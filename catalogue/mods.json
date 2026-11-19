@@ -3417,6 +3417,91 @@
       }
     },
     {
+      "id": "timeless-map",
+      "name": "Timeless Map",
+      "kind": "lua",
+      "version": "1.0.0",
+      "authors": [
+        "TimelessXI"
+      ],
+      "description": "What is happening across Vana'diel right now (/worldmap): conquest owners, open rifts, beastman warbands, Fomor bands and roaming Champions on a map, with pillars of light over the ones in your zone.",
+      "files": [
+        {
+          "path": "init.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-map/init.lua",
+          "sha256": "917b147d35ae934ea8bcdadf2f889506bf14431efff3399fc690eeeba1270486",
+          "size": 5169
+        },
+        {
+          "path": "lib/action.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-map/lib/action.lua",
+          "sha256": "50e668f589fda4d96712fd68a76df0dff617b766e1c0b7c01ea5298d45abe43b",
+          "size": 651
+        },
+        {
+          "path": "lib/beams.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-map/lib/beams.lua",
+          "sha256": "2c619b4578109e2513c1989e055f82a30bf74394080ba89d294aa730a083df16",
+          "size": 2758
+        },
+        {
+          "path": "lib/canvas.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-map/lib/canvas.lua",
+          "sha256": "8aefe1988225bedb0703d74ea4519b209f68558626c580c32a8039df1e3d5ee3",
+          "size": 10638
+        },
+        {
+          "path": "lib/protocol.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-map/lib/protocol.lua",
+          "sha256": "e89da91ca526cc6cddb9e641de89b57683303f637a940bd1a7fe4bd2e964a4dc",
+          "size": 4005
+        },
+        {
+          "path": "lib/style.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-map/lib/style.lua",
+          "sha256": "c906bac41070aed7af413fa07cb10bc308baf1ab1be99c9f5e4c24e2ff3961f2",
+          "size": 2753
+        },
+        {
+          "path": "lib/worldmap.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-map/lib/worldmap.lua",
+          "sha256": "1982aa07e713eb7faf5aa44e0582967a45226766f4c02169bb09e237587f0dd8",
+          "size": 13746
+        },
+        {
+          "path": "mod.toml",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-map/mod.toml",
+          "sha256": "09dddca0010f20034185c31dc177586d17abe9bbe4258b19b676242003583048",
+          "size": 847
+        }
+      ],
+      "required": true,
+      "commands": {
+        "worldmap": {
+          "help": "Opens or closes the world map.",
+          "args": "",
+          "forms": [
+            {
+              "args": "beams",
+              "help": "Pillars of light over what is happening in your zone."
+            },
+            {
+              "args": "alerts",
+              "help": "A chat line when a rift, warband, Fomor band or Legendary Champion appears."
+            },
+            {
+              "args": "update",
+              "help": "Asks the server for everything again."
+            }
+          ]
+        },
+        "wmap": {
+          "help": "The same as /worldmap.",
+          "args": ""
+        }
+      }
+    },
+    {
       "id": "timeless-menu",
       "name": "TimelessMenu",
       "kind": "lua",
@@ -3481,6 +3566,180 @@
         },
         "timeless": {
           "help": "The same as /tm.",
+          "args": ""
+        }
+      }
+    },
+    {
+      "id": "timeless-telegraphs",
+      "name": "Timeless Telegraphs",
+      "kind": "lua",
+      "version": "1.0.0",
+      "authors": [
+        "TimelessXI"
+      ],
+      "description": "Monsters' area moves marked on the ground as they ready them (/telegraphs): circles and cones that fill up until the move goes off. Step out in time and it misses you.",
+      "files": [
+        {
+          "path": "img/cone.png",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-telegraphs/img/cone.png",
+          "sha256": "b882fa3ac01f18c1df0ddcd1f126d20b86fccf5b5cad59a9894ec2b28ca9b902",
+          "size": 4896
+        },
+        {
+          "path": "init.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-telegraphs/init.lua",
+          "sha256": "bacd1b59a4c29ee4f734093557e4efd1c23d91e2a6a3f20a1c2db4d8bab47148",
+          "size": 7647
+        },
+        {
+          "path": "lib/action.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-telegraphs/lib/action.lua",
+          "sha256": "6d4435d433abd900955de0a728fbdddb1b4bdfbdc8928abcfe659f82d49c4f9c",
+          "size": 653
+        },
+        {
+          "path": "lib/protocol.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-telegraphs/lib/protocol.lua",
+          "sha256": "785b53380d0029df7c9b3d875beefe28b0da5bb47ae0cb134704e7f2a9c7282a",
+          "size": 1477
+        },
+        {
+          "path": "lib/shapes.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-telegraphs/lib/shapes.lua",
+          "sha256": "8625e3bff4c91b037a065b1aba9523f094274a30b15aa50cad31a85cf4b03750",
+          "size": 5378
+        },
+        {
+          "path": "lib/state.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-telegraphs/lib/state.lua",
+          "sha256": "f70938f022c49c2739361af16762e8e1bb463ebe0de62bcc091298cf0d24d854",
+          "size": 123
+        },
+        {
+          "path": "mod.toml",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-telegraphs/mod.toml",
+          "sha256": "e9bf7c38a90392630cbb20a849fe43db978e570e6fe320e8dd1034ba39c76331",
+          "size": 733
+        }
+      ],
+      "required": true,
+      "commands": {
+        "telegraphs": {
+          "help": "Turns the ground markers on or off.",
+          "args": "",
+          "forms": [
+            {
+              "args": "alert",
+              "help": "The on-screen \"Move out!\" when you stand inside one."
+            },
+            {
+              "args": "labels",
+              "help": "The move's name over its marker."
+            },
+            {
+              "args": "opacity <0.2-1>",
+              "help": "How solid the markers are."
+            },
+            {
+              "args": "test",
+              "help": "Sample markers around you."
+            }
+          ]
+        },
+        "timelesstelegraphs": {
+          "help": "The same as /telegraphs.",
+          "args": ""
+        }
+      }
+    },
+    {
+      "id": "timeless-threat",
+      "name": "Timeless Threat",
+      "kind": "lua",
+      "version": "1.0.0",
+      "authors": [
+        "TimelessXI"
+      ],
+      "description": "Exact enmity from the TimelessXI server (/threat): every monster you fight, everyone on its enmity list, and who it's attacking. Warns you before you pull hate.",
+      "files": [
+        {
+          "path": "init.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-threat/init.lua",
+          "sha256": "259d5b8198c8d2bfa7746788d3a96ba0a7d7a7c7160a78c185b8657612ae5fb6",
+          "size": 4898
+        },
+        {
+          "path": "lib/action.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-threat/lib/action.lua",
+          "sha256": "1219cf74431cee28a9dfffc2cba4e1121f404ad60234f3df2220212e044bdd38",
+          "size": 653
+        },
+        {
+          "path": "lib/canvas.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-threat/lib/canvas.lua",
+          "sha256": "8aefe1988225bedb0703d74ea4519b209f68558626c580c32a8039df1e3d5ee3",
+          "size": 10638
+        },
+        {
+          "path": "lib/protocol.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-threat/lib/protocol.lua",
+          "sha256": "766a17bf786e6e89b49dc3d8dfaafaa7a385821e9f04dc73b4d4ee6cfe180591",
+          "size": 3032
+        },
+        {
+          "path": "lib/style.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-threat/lib/style.lua",
+          "sha256": "c906bac41070aed7af413fa07cb10bc308baf1ab1be99c9f5e4c24e2ff3961f2",
+          "size": 2753
+        },
+        {
+          "path": "lib/threat.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-threat/lib/threat.lua",
+          "sha256": "73a2e23a2b7f8a0fabc136f01ead926a30ebbd3f1ed903df4ecd87694b49dd0e",
+          "size": 9171
+        },
+        {
+          "path": "mod.toml",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-threat/mod.toml",
+          "sha256": "884f91187238e09a341a4de44e06fa826a352b0af4acb7aa60a6224fb17d8316",
+          "size": 996
+        }
+      ],
+      "required": true,
+      "commands": {
+        "threat": {
+          "help": "Shows or hides the enmity window.",
+          "args": "",
+          "forms": [
+            {
+              "args": "compact",
+              "help": "Only your target, or every monster you're fighting."
+            },
+            {
+              "args": "rows <2-7>",
+              "help": "How many names each monster shows."
+            },
+            {
+              "args": "width <160-360>",
+              "help": "The window's width."
+            },
+            {
+              "args": "warn",
+              "help": "The on-screen warning when you're about to pull hate."
+            },
+            {
+              "args": "demo",
+              "help": "A sample fight, to place the window."
+            },
+            {
+              "args": "update",
+              "help": "Asks the server for everything again."
+            }
+          ]
+        },
+        "timelessthreat": {
+          "help": "The same as /threat.",
           "args": ""
         }
       }

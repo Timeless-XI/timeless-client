@@ -1,0 +1,27 @@
+name = "Timeless Threat"
+version = "1.0.0"
+authors = ["TimelessXI"]
+description = "Exact enmity from the TimelessXI server (/threat): every monster you fight, everyone on its enmity list, and who it's attacking. Warns you before you pull hate."
+permissions = ["packets.write"]
+
+[settings.key_threat]
+type = "key"
+default = ""
+label = "Enmity Key"
+help = "A key that shows or hides the enmity window."
+
+[commands.threat]
+help = "Shows or hides the enmity window."
+args = ""
+forms = [
+  { args = "compact", help = "Only your target, or every monster you're fighting." },
+  { args = "rows <2-7>", help = "How many names each monster shows." },
+  { args = "width <160-360>", help = "The window's width." },
+  { args = "warn", help = "The on-screen warning when you're about to pull hate." },
+  { args = "demo", help = "A sample fight, to place the window." },
+  { args = "update", help = "Asks the server for everything again." },
+]
+
+[commands.timelessthreat]
+help = "The same as /threat."
+args = ""
