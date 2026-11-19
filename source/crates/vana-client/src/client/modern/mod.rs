@@ -703,7 +703,8 @@ const COLUMN: [&str; 3] = ["command", "command sub", "window"];
 /// Seconds a texture of Modern::images stays undrawn before it goes.
 const IMAGE_KEEP: f64 = 60.0;
 /// The windows on a screen edge (extras.rs edge_window): they slide along it, so nothing docks on them.
-const EDGE: [&str; 7] = ["timers", "minimap", "widescan", "regime", "timers_recasts", "timers_buffs", "timers_debuffs"];
+const EDGE: [&str; 8] =
+    ["timers", "minimap", "widescan", "regime", "timers_recasts", "timers_buffs", "timers_debuffs", "tl_angler"];
 
 impl Dock {
     /// The side of the panel it sits on that `dx` counts from.
@@ -772,6 +773,8 @@ fn default_place(id: &str) -> Place {
         "tl_hotbar3" => at(0.31, 0.92),
         "tl_petbar" => at(0.31, 0.72),
         "tl_picker" => at(0.38, 0.30),
+        // Timeless XI: the minimized Angler HUD's tab on the right edge, halfway down.
+        "tl_angler" => at(-0.001, 0.45),
         "tl_layout" => at(0.40, 0.28),
         "tl_actions" => at(0.28, 0.16),
         "blklist" => at(0.2, 0.0347),

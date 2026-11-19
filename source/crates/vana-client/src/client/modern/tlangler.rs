@@ -84,7 +84,9 @@ fn step_colour(step: u8) -> Color32 {
 struct Asks {
     end_school: bool,
     fish: bool,
-    hide: bool,
+    minimize: bool,
+    close: bool,
+    restore: bool,
     reset_session: bool,
     guide: bool,
     /// The Almanac question's answer.
@@ -105,7 +107,13 @@ impl super::Modern {
         let a = &w.angler;
         let school = a.hole.active;
         if a.prefs.hud && (!a.prefs.hud_auto || v.has_rod() || school || v.fishing) {
-            self.tl_angler_hud(ctx, w, &v, &mut asks);
+            if !a.prefs.minimized {
+                self.tl_angler_hud(ctx, w, &v, &mut asks);
+            } else if !w.modern {
+                // Minimized, Classic: a tab on the right edge (the Modern and Timeless interfaces draw it as one of
+                // their edge windows, extras.rs angler_tab).
+                self.tl_angler_tab(ctx, &mut asks);
+            }
         }
         // The guide: its state and settings are copied out, drawn against the world, then put back.
         if w.angler.guide.open || asks.guide {
@@ -135,10 +143,12 @@ impl super::Modern {
         if asks.reset_session {
             angler::reset_session(w);
         }
-        if asks.hide {
-            w.angler.prefs.hud = false;
+        if asks.minimize || asks.restore {
+            w.angler.prefs.minimized = asks.minimize;
             w.angler.save_prefs();
-            w.chat.push_colour("Angler HUD hidden. Type /angler hud to bring it back.".into(), super::super::WHITE);
+        }
+        if asks.close {
+            angler::close_all(w);
         }
         if asks.fish && !v.fishing {
             super::super::textcmd::run(w, "/fish", super::super::textcmd::Mode::Typed);
@@ -322,7 +332,16 @@ impl super::Modern {
                             text(ui, &format!("Cast #{} - No school remaining", a.hole.casts), K::muted());
                             text(ui, "Move 20+ yalms away for a chance to find another school!", K::muted());
                         } else if o.next >= angler::EXHAUSTED_AT {
-                            text(ui, &format!("Cast #{} - this fishing spot is exhausted. Move on!", a.hole.casts), K::red());
+                            text(
+                                ui,
+                                &format!("Cast #{} - this fishing spot is exhausted (half the bites).", a.hole.casts),
+                                K::amber(),
+                            );
+                            text(
+                                ui,
+                                "Move 20+ yalms to fresh waters for full bites and a chance at a school!",
+                                K::muted(),
+                            );
                         } else {
                             text(ui, &format!("Cast #{} at this fishing spot", a.hole.casts), K::text());
                             ui.label(RichText::new(format!("School Chance: {}", pct(o.now))).font(small.clone()).color(K::text()))
@@ -391,15 +410,70 @@ impl super::Modern {
                             {
                                 asks.fish = true;
                             }
-                            if ui.small_button(if a.guide.open { "Close almanac" } else { "Open almanac" }).clicked() {
+                            if ui
+                                .small_button(if a.guide.open { "Close Almanac" } else { "Open Almanac" })
+                                .on_hover_text("The Angler's Almanac: fish, bait, the moon and schools of fish (/almanac).")
+                                .clicked()
+                            {
                                 asks.guide = true;
                             }
-                            if ui.small_button("Hide").on_hover_text("Hide this HUD. Bring it back with /angler hud").clicked() {
-                                asks.hide = true;
+                            if ui
+                                .small_button("Minimize")
+                                .on_hover_text("Fold the HUD into a Fishing tab on the screen's edge; click the tab to open it.")
+                                .clicked()
+                            {
+                                asks.minimize = true;
+                            }
+                            if ui
+                                .small_button("Close")
+                                .on_hover_text(
+                                    "Close every fishing window (this HUD, the school banner, the Almanac). Fishing notices then \
+                                     show in the chat; /angler show brings the windows back.",
+                                )
+                                .clicked()
+                            {
+                                asks.close = true;
                             }
                         });
                     });
             });
+    }
+
+    /// The minimized HUD in the Classic interface: a gold-lettered tab on the right edge (the edge windows' look:
+    /// the word down the tab, double chevrons pointing into the screen); a click opens the HUD again.
+    fn tl_angler_tab(&self, ctx: &Context, asks: &mut Asks) {
+        let screen = ctx.content_rect();
+        let font = FontId::proportional(14.0);
+        let galley = ctx.fonts_mut(|f| f.layout_no_wrap("Fishing".into(), font, Color32::WHITE));
+        let size = vec2(24.0, galley.size().x + 28.0);
+        let r = egui::Rect::from_min_size(pos2(screen.max.x - size.x, screen.top() + screen.height() * 0.45), size);
+        egui::Area::new(Id::unique("tl angler tab")).order(Order::Middle).fixed_pos(r.min).show(ctx, |ui| {
+            let (rr, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+            let p = ui.painter();
+            p.rect(
+                rr,
+                CornerRadius { nw: 6, sw: 6, ne: 0, se: 0 },
+                K::panel(),
+                Stroke::new(1.0, K::gold().gamma_multiply(0.6)),
+                egui::StrokeKind::Inside,
+            );
+            let c = if resp.hovered() { K::text() } else { K::gold() };
+            let gw = galley.size().x;
+            p.add(
+                egui::epaint::TextShape::new(pos2(rr.max.x - 4.0, rr.center().y - gw / 2.0 + 6.0), galley, c)
+                    .with_angle(std::f32::consts::FRAC_PI_2),
+            );
+            // «  (pointing into the screen) at the top.
+            for d in [-3.0, 3.0] {
+                let x = rr.center().x + d;
+                let y = rr.min.y + 9.0;
+                p.line_segment([pos2(x + 2.0, y - 3.0), pos2(x - 1.0, y)], Stroke::new(1.5, c));
+                p.line_segment([pos2(x - 1.0, y), pos2(x + 2.0, y + 3.0)], Stroke::new(1.5, c));
+            }
+            if resp.on_hover_text("Fishing HUD: click to open it.").clicked() {
+                asks.restore = true;
+            }
+        });
     }
 
     /// "Open the Angler's Almanac?" for a few seconds after the first cast of a fishing session: high on the screen,
@@ -1130,7 +1204,8 @@ fn tab_schools(ui: &mut egui::Ui, w: &World, v: &View, asks: &mut Asks) {
         "Each spot can have one school. It lasts the cast that finds it plus 6-12 more.",
         "In a school every cast hooks a fish, and fish bite in half the time.",
         "A school ends if you zone, move 20+ yalms off the spot, or don't cast for 5 minutes.",
-        "After 75 casts the spot is exhausted: no schools, and only half your casts get a bite.",
+        "After 75 casts the spot is exhausted: fish bite half as often there and no schools come. Fresh waters 20+ \
+         yalms away bring full bites and a new chance at a school.",
     ] {
         ui.label(format!("- {t}"));
     }
@@ -1145,7 +1220,7 @@ fn tab_settings(ui: &mut egui::Ui, prefs: &mut angler::Prefs) {
     ui.checkbox(&mut prefs.banner, "School of fish banner");
     ui.checkbox(&mut prefs.ask, "Offer the Almanac on my first cast (again after 5 minutes without fishing)");
     ui.add_space(6.0);
-    ui.label(RichText::new("Commands: /angler or /almanac (this window), /angler hud, /angler banner, /angler auto, /angler school end, /angler spot reset, /angler session reset. Drag the HUD by any empty part of it.").color(K::muted()));
+    ui.label(RichText::new("Commands: /angler or /almanac (this window), /angler show (every fishing window), /angler close, /angler minimize, /angler hud, /angler banner, /angler auto, /angler ask, /angler school end, /angler spot reset, /angler session reset. Drag the HUD by any empty part of it.").color(K::muted()));
     ui.label(RichText::new(format!("Fishing tables from the server, built {}.", angler::data().built)).color(K::dim()));
 }
 

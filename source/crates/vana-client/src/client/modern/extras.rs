@@ -14,6 +14,21 @@ pub fn draw(p: &mut Panels, w: &mut World) {
     mod_edges(p, w);
     minimap_panel(p, w);
     widescan_panel(p, w);
+    angler_tab(p, w);
+}
+
+/// Timeless XI: the minimized Timeless Angler HUD as one of the edge windows' tabs ("Fishing", on the right edge until
+/// moved); a click opens the HUD again (modern/tlangler.rs draws it; Classic draws its own tab there).
+fn angler_tab(p: &mut Panels, w: &mut World) {
+    let a = &w.angler;
+    let Some(v) = a.view.as_ref() else { return };
+    if hidden(w) || !a.prefs.hud || !a.prefs.minimized || (a.prefs.hud_auto && !v.has_rod() && !a.hole.active && !v.fishing) {
+        return;
+    }
+    if edge_window(p, "tl_angler", 300.0, false, true, "Fishing", |_, _, _| false) {
+        w.angler.prefs.minimized = false;
+        w.angler.save_prefs();
+    }
 }
 
 /// Hidden in events, under the map, the Region Info map.

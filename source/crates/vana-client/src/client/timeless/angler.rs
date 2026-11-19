@@ -926,11 +926,13 @@ pub struct Prefs {
     pub banner: bool,
     /// Ask to open the Angler's Almanac when a fishing session starts.
     pub ask: bool,
+    /// The HUD is minimized to a tab on the screen's edge.
+    pub minimized: bool,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Prefs { hud: true, hud_auto: true, banner: true, ask: true }
+        Prefs { hud: true, hud_auto: true, banner: true, ask: true, minimized: false }
     }
 }
 
@@ -1044,6 +1046,31 @@ pub fn answer(w: &mut World, yes: bool) {
     }
 }
 
+/// A line in the chat log, in the system colour.
+pub fn chat_note(w: &mut World, text: &str) {
+    let colour = w.battle.as_ref().map_or(super::super::WHITE, |b| b.colour_in(121, &w.game));
+    w.chat.push_colour(text.to_string(), colour);
+}
+
+/// The HUD's Close: every fishing window goes (HUD, banner, Almanac and its question); the notices show in the chat.
+pub fn close_all(w: &mut World) {
+    let a = &mut w.angler;
+    (a.prefs.hud, a.prefs.banner, a.prefs.ask, a.prefs.minimized) = (false, false, false, false);
+    (a.guide.open, a.ask, a.notice) = (false, None, None);
+    a.save_prefs();
+    chat_note(
+        w,
+        "Fishing windows closed: fishing notices will show here in the chat. Type /angler show to bring them back.",
+    );
+}
+
+/// `/angler show`: every fishing window back.
+fn show_all(w: &mut World) {
+    let a = &mut w.angler;
+    (a.prefs.hud, a.prefs.banner, a.prefs.ask, a.prefs.minimized) = (true, true, true, false);
+    a.save_prefs();
+}
+
 pub fn now_secs() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
@@ -1124,8 +1151,13 @@ pub fn tick(w: &mut World, dt: f32) {
     }
     if let Some(why) = w.angler.hole.check(zone, x, z, now) {
         let (c, n) = w.angler.hole.last_school.unwrap_or_default();
-        w.angler.notice =
-            Some((format!("The school of fish moved on ({why}).\nYou caught {n} fish in {c} casts."), now + 8));
+        let text = format!("The school of fish moved on ({why}).\nYou caught {n} fish in {c} casts.");
+        if w.angler.prefs.banner {
+            w.angler.notice = Some((text, now + 8));
+        } else {
+            // The fishing windows are closed: the notice goes to the chat (the server's own lines are there already).
+            chat_note(w, &text.replace('\n', " "));
+        }
     }
     if w.angler.notice.as_ref().is_some_and(|n| now >= n.1) {
         w.angler.notice = None;
@@ -1200,8 +1232,8 @@ fn on_line(w: &mut World, line: &str, now: u64) {
             }
             Some(Msg::Exhausted) => {
                 a.notice = Some((
-                    "This fishing spot is exhausted (75 casts): only half your casts get a bite now.\nMove 20+ yalms away for \
-                     a chance to find another school!"
+                    "This fishing spot is exhausted: the fish here bite half as often now.\nMove 20+ yalms away to fresh \
+                     waters for full bites and a chance at a school of fish!"
                         .into(),
                     now + 10,
                 ));
@@ -1272,13 +1304,24 @@ pub fn command(w: &mut World, args: &[&str]) {
         _ => !cur,
     };
     match args.first().map(|s| s.to_ascii_lowercase()).as_deref() {
-        None | Some("guide") => a.guide.open = !a.guide.open,
-        Some("hud") | Some("show") | Some("hide") => {
-            a.prefs.hud = match args.first().map(|s| s.to_ascii_lowercase()).as_deref() {
-                Some("show") => true,
-                Some("hide") => false,
-                _ => onoff(args.get(1), a.prefs.hud),
+        None | Some("guide") | Some("almanac") => a.guide.open = !a.guide.open,
+        Some("show") => show_all(w),
+        Some("close") => close_all(w),
+        Some("hud") | Some("hide") => {
+            a.prefs.hud = if args.first().is_some_and(|s| s.eq_ignore_ascii_case("hide")) {
+                false
+            } else {
+                onoff(args.get(1), a.prefs.hud)
             };
+            a.prefs.minimized = false;
+            a.save_prefs();
+        }
+        Some("minimize") => {
+            a.prefs.minimized = !a.prefs.minimized;
+            a.save_prefs();
+        }
+        Some("ask") => {
+            a.prefs.ask = onoff(args.get(1), a.prefs.ask);
             a.save_prefs();
         }
         Some("auto") => {
