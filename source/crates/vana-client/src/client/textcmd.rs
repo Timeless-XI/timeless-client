@@ -687,6 +687,12 @@ pub(super) fn run_unfiltered(w: &mut World, line: &str, mode: Mode) {
     }
     // Timeless XI: /tfish practice [0-100] [mixed|smooth|sinker|floater|dart] [monster] plays a practice round of the
     // Timeless Fishing bar game (no fish, nothing sent).
+    // Timeless XI: /angler [hud | banner | auto [on|off] | school end | spot reset | session reset].
+    if first.eq_ignore_ascii_case("/angler") || first.eq_ignore_ascii_case("/fishhud") {
+        let args: Vec<&str> = line.split_whitespace().skip(1).collect();
+        super::timeless::angler::command(w, &args);
+        return;
+    }
     if first.eq_ignore_ascii_case("/tfish") {
         let args: Vec<&str> = line.split_whitespace().skip(1).collect();
         if args.first().is_some_and(|a| a.eq_ignore_ascii_case("practice")) {

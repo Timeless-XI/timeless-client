@@ -128,6 +128,11 @@ fn timeless_pose(w: &World, s: u8) -> bool {
     matches!(s, 0x34 | 0x35) && w.tl_fish.play.as_ref().is_some_and(|p| !matches!(p, Play::Bar(r) if r.practice))
 }
 
+/// Timeless XI: a c2s 0x110 for the Timeless features (the Angler's End school), through the same send gate.
+pub fn send_para(w: &mut World, para: i32, mode: u8, para2: u32) -> bool {
+    send(w, para, mode, para2)
+}
+
 /// The fishing statuses and the request latch keep us in place (FUN_100964f0).
 pub fn locked(w: &World) -> bool {
     w.fish_pending
@@ -200,6 +205,7 @@ pub fn on_fish(w: &mut World, p: FishParams) {
 /// of the arrow game.
 pub fn on_timeless(w: &mut World, b: tl::Bite) {
     log::info!("fishing: Timeless bite {b:?}");
+    super::timeless::angler::on_bite(w, b.item, b.monster());
     if w.tl_fish.active() {
         return;
     }

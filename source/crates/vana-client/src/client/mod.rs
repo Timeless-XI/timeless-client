@@ -2870,6 +2870,10 @@ fn world_hud(
         }
         keys.clear();
     }
+    // Timeless XI: a Timeless Angler guide filter field has the keyboard.
+    if world.angler.guide.typing && world.angler.guide.open {
+        keys.clear();
+    }
     // The modern full log's find takes the text, Backspace and Escape while the log is open.
     let find_typing = log_find_events(world, &input.events);
     if find_typing {
@@ -7958,6 +7962,8 @@ struct World {
     tl_bar: timeless::hotbar::Hotbar,
     /// Timeless XI: the Timeless Fishing bar game (timeless/fishing.rs), in every interface.
     tl_fish: timeless::fishing::TlFish,
+    /// Timeless XI: Timeless Angler, the fishing HUD and school banner (timeless/angler.rs).
+    angler: timeless::angler::Angler,
     /// Config `modern_condense` (with `modern`): an action's battle lines merge (combat::condense).
     condense: bool,
     /// The lines later records of their action merge into, and the last action's serial.
@@ -10623,6 +10629,7 @@ impl App {
                             tl_chime: self.cfg.timeless_ready_chime,
                             tl_bar: Default::default(),
                             tl_fish: Default::default(),
+                            angler: Default::default(),
                             condense: self.cfg.modern_condense,
                             condensed: Vec::new(),
                             condensed_targets: Vec::new(),
@@ -14819,6 +14826,7 @@ impl App {
             swkbd::zone_in(world);
         }
         fishing::update(world, &mut self.input, dt, window);
+        timeless::angler::tick(world, dt);
         primer::update(world, dt * 60.0);
         if world.layout.is_some() && !world_window_open(world) {
             layout::update(world, &mut self.input, dt);
@@ -15583,7 +15591,8 @@ impl App {
         let notches = self.list_wheel.trunc();
         self.list_wheel -= notches;
         // Over a modern panel the pointer is egui's: the game's windows get no clicks or wheel there.
-        let mine = !(matches!(&self.phase, Phase::World(w) if w.modern)
+        // Timeless XI: the Timeless Angler's HUD and guide are egui in every interface.
+        let mine = !(matches!(&self.phase, Phase::World(w) if w.modern || w.angler.prefs.hud || w.angler.guide.open)
             && (ctx.is_pointer_over_egui() || ctx.egui_is_using_pointer()));
         let mut input = ctx.input(|i| UiInput {
             wheel: if mine { notches as i32 } else { 0 },
@@ -17392,7 +17401,11 @@ impl App {
                 // Timeless XI: the Timeless Fishing bar game, in every interface (not hidden with the UI: a round
                 // that can't be seen can't be played).
                 if !event::cinema(world) {
-                    self.modern.get_or_insert_with(|| modern::Modern::new(ctx)).tl_fishing(ctx, world);
+                    let m = self.modern.get_or_insert_with(|| modern::Modern::new(ctx));
+                    if !world.ui_hidden {
+                        m.tl_angler(ctx, world);
+                    }
+                    m.tl_fishing(ctx, world);
                 }
                 // What the Config windows and the settings screen hand to the app.
                 let keys = [world.cam_keys[1] as u32, world.cam_keys[0] as u32];

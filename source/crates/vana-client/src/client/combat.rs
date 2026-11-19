@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 /// Chat log lines with their colour (BGRA, 0x80 = 1.0).
 #[derive(Default)]
 pub struct ChatLog {
+    /// Timeless XI: every line as plain text, for the Timeless Angler (timeless/angler.rs takes them each frame).
+    pub tap: Vec<String>,
     lines: Vec<(String, [u8; 4])>,
     /// Local time each line came in (hour, minute, second), whether it is a chat line (retail stamps only those) and
     /// whether its continuation lines are indented (the mode's flag, FUN_10127870).
@@ -143,6 +145,9 @@ impl ChatLog {
             }
         }
         log::debug!(target: "chat", "{}", crate::dat::font::strip_codes(&s));
+        if self.tap.len() < 256 {
+            self.tap.push(crate::dat::font::strip_codes(&s));
+        }
         // Players' lines are never folded; system and battle lines are, when the last one is the same.
         if self.fold
             && !chat

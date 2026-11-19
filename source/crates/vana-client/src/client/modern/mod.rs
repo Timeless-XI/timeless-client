@@ -61,6 +61,8 @@ mod tlbar;
 mod tlbook;
 // Timeless XI: the Timeless Fishing bar game on screen (every interface).
 mod tlfish;
+// Timeless XI: Timeless Angler's HUD and school banner (every interface).
+mod tlangler;
 
 /// The pack's names for mods (lua/skin.rs).
 pub(in crate::client) mod pack {
