@@ -3333,17 +3333,17 @@
       "id": "timeless-journal",
       "name": "Timeless Journal",
       "kind": "lua",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "authors": [
         "TimelessXI"
       ],
-      "description": "TimelessXI's Journal (/ql): your missions and quests and what to do next, without spoilers unless you want them, and a tracker with your current missions on the screen's edge.",
+      "description": "TimelessXI's Journal (/ql): your missions and quests and what to do next, without spoilers unless you want them, and a tracker with your current missions on the screen's edge, and your companions' stories as a book.",
       "files": [
         {
           "path": "init.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-journal/init.lua",
-          "sha256": "3a49ac58eaf75b4c2fa8278f6c2f08ed9f17ffa99c41470fda9657d8cb0baba4",
-          "size": 4844
+          "sha256": "46f19747e02d9b85d5010c533e4554f8739815d00248a3d8cc4e8a5fa1adea7a",
+          "size": 5579
         },
         {
           "path": "lib/action.lua",
@@ -3360,14 +3360,20 @@
         {
           "path": "lib/journal.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-journal/lib/journal.lua",
-          "sha256": "d1ff627fc0e7612bde96a013200ed9a07e8c29f9c273771f28afbb6feba37376",
-          "size": 13286
+          "sha256": "d483426bd0df258936ece814ce2f6a7d67e2a5a67848655472708191fc5b100f",
+          "size": 13736
         },
         {
           "path": "lib/protocol.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-journal/lib/protocol.lua",
           "sha256": "1f44216925e4625042e9d5483da1000d557fee89aedd32d347452cda539ec5cf",
           "size": 5351
+        },
+        {
+          "path": "lib/stories.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-journal/lib/stories.lua",
+          "sha256": "1237b45c29ac049830563261affa883ebe0a38099a2d6ae135062f06aed19402",
+          "size": 9522
         },
         {
           "path": "lib/style.lua",
@@ -3378,8 +3384,8 @@
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-journal/mod.toml",
-          "sha256": "fbbe9576edc81a04499afa70cc813e556ae833c7d6398d9f6d0024de0c13412a",
-          "size": 950
+          "sha256": "6c867698ec2c41a659a7e196f90addbec99fd510be498c85fa771d357cbf3ce2",
+          "size": 1039
         }
       ],
       "required": true,
@@ -3389,8 +3395,8 @@
           "args": "",
           "forms": [
             {
-              "args": "missions|quests|retail",
-              "help": "Opens it on that tab."
+              "args": "missions|quests|retail|stories",
+              "help": "Opens it on that tab (stories: your kept companions' stories)."
             },
             {
               "args": "tracker",
@@ -3502,6 +3508,77 @@
       }
     },
     {
+      "id": "timeless-masterworks",
+      "name": "Timeless Masterworks",
+      "kind": "lua",
+      "version": "1.0.0",
+      "authors": [
+        "TimelessXI"
+      ],
+      "description": "Your crafting ledger (/masterworks): skills and guild ranks, recipe mastery with the Masterwork chance each recipe has reached, Masterworks made, rested synths and Flash of Insight, today's craft orders and your apprentice.",
+      "files": [
+        {
+          "path": "init.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/init.lua",
+          "sha256": "5b2e669cbdd1a2b103f2f4aada40b7c1128fbc125881b5c00bc86a35432ac6a6",
+          "size": 3215
+        },
+        {
+          "path": "lib/action.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/lib/action.lua",
+          "sha256": "c5f9015a4ca8266302f05cfc6ea743efcb64aae67f085dbbbd0e68b3b0eacaa7",
+          "size": 652
+        },
+        {
+          "path": "lib/canvas.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/lib/canvas.lua",
+          "sha256": "8aefe1988225bedb0703d74ea4519b209f68558626c580c32a8039df1e3d5ee3",
+          "size": 10638
+        },
+        {
+          "path": "lib/ledger.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/lib/ledger.lua",
+          "sha256": "889b673759194d91b552475e356c3e38a8abcd3f8320c632e7325d589f7dd9e3",
+          "size": 10603
+        },
+        {
+          "path": "lib/protocol.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/lib/protocol.lua",
+          "sha256": "247cfc397aff7b2309b9de0bc3d338575005d3c02fc840fb7a0c54463bf731f8",
+          "size": 4739
+        },
+        {
+          "path": "lib/style.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/lib/style.lua",
+          "sha256": "c906bac41070aed7af413fa07cb10bc308baf1ab1be99c9f5e4c24e2ff3961f2",
+          "size": 2753
+        },
+        {
+          "path": "mod.toml",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/mod.toml",
+          "sha256": "3363c271e99dfebdc9f6e2d99715950979efeea726b658b787dbf18b439d8196",
+          "size": 712
+        }
+      ],
+      "required": true,
+      "commands": {
+        "masterworks": {
+          "help": "Opens or closes your crafting ledger.",
+          "args": "",
+          "forms": [
+            {
+              "args": "update",
+              "help": "Asks the server again now."
+            }
+          ]
+        },
+        "timelessmasterworks": {
+          "help": "The same as /masterworks.",
+          "args": ""
+        }
+      }
+    },
+    {
       "id": "timeless-menu",
       "name": "TimelessMenu",
       "kind": "lua",
@@ -3566,6 +3643,302 @@
         },
         "timeless": {
           "help": "The same as /tm.",
+          "args": ""
+        }
+      }
+    },
+    {
+      "id": "timeless-reputation",
+      "name": "Timeless Reputation",
+      "kind": "lua",
+      "version": "1.0.0",
+      "authors": [
+        "TimelessXI"
+      ],
+      "description": "Your fame in San d'Oria, Bastok, Windurst, Jeuno, Selbina and Rabao, and Norg: each area's crest, its fame level and what people there think of you, how far to the next level, and your nation and rank. Open it from the Timeless menu. Needs the server's reputation module.",
+      "files": [
+        {
+          "path": "init.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-reputation/init.lua",
+          "sha256": "cfc6990902cc351695036a6e8ff281652b5ddca4f42c443035f73822ca4daa60",
+          "size": 2209
+        },
+        {
+          "path": "lib/action.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-reputation/lib/action.lua",
+          "sha256": "ee7465dc5a3793f80f515028a3d79903293526a3deea61f744401a7e451e094d",
+          "size": 648
+        },
+        {
+          "path": "lib/canvas.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-reputation/lib/canvas.lua",
+          "sha256": "8aefe1988225bedb0703d74ea4519b209f68558626c580c32a8039df1e3d5ee3",
+          "size": 10638
+        },
+        {
+          "path": "lib/protocol.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-reputation/lib/protocol.lua",
+          "sha256": "7a6594f1b72ad7f39f871f5ac76baee5fd412d1f82670719f275c16585872be1",
+          "size": 1964
+        },
+        {
+          "path": "lib/style.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-reputation/lib/style.lua",
+          "sha256": "c906bac41070aed7af413fa07cb10bc308baf1ab1be99c9f5e4c24e2ff3961f2",
+          "size": 2753
+        },
+        {
+          "path": "lib/window.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-reputation/lib/window.lua",
+          "sha256": "ebbd3d2b7c55a41fca37950208e8979f3d12a1254719ef53767cbbd4f87bdf80",
+          "size": 6807
+        },
+        {
+          "path": "mod.toml",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-reputation/mod.toml",
+          "sha256": "b8a39f44951d32f87a912cfafe5dbd0d636110ee7ca1fa4829eaf9b49b38cc8c",
+          "size": 695
+        }
+      ],
+      "required": true,
+      "commands": {
+        "reputation": {
+          "help": "Opens or closes the Reputation window (the Timeless menu's Reputation card does the same).",
+          "args": ""
+        }
+      }
+    },
+    {
+      "id": "timeless-shop",
+      "name": "Timeless Shop",
+      "kind": "lua",
+      "version": "1.1.1",
+      "authors": [
+        "TimelessXI"
+      ],
+      "description": "The Goblin Bazaar, the Wandering Merchant and the Everglass Shop as real shop windows with item previews, dressed for the shopkeeper's race: a goblin's patched sack, a moogle's pom-pom, Elvaan gilt, Tarutaru stars... Each keeper has their own voice, sounds and remarks, and remembers their regulars.",
+      "files": [
+        {
+          "path": "init.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/init.lua",
+          "sha256": "b268d51adb7e9a789aaef90a5e34e43cec13cbff5a1131024f2146d436568d42",
+          "size": 7435
+        },
+        {
+          "path": "lib/action.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/lib/action.lua",
+          "sha256": "92b79965b0006555e819d84dbe0b19061c901ef9b4dc6fdbbdc1aa8685ec1861",
+          "size": 651
+        },
+        {
+          "path": "lib/canvas.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/lib/canvas.lua",
+          "sha256": "8aefe1988225bedb0703d74ea4519b209f68558626c580c32a8039df1e3d5ee3",
+          "size": 10638
+        },
+        {
+          "path": "lib/flavor.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/lib/flavor.lua",
+          "sha256": "a55b3b249f699585483fb6c9849bbe383a04b972b2d1f54fde09969439431139",
+          "size": 16391
+        },
+        {
+          "path": "lib/protocol.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/lib/protocol.lua",
+          "sha256": "709f48b4169f5e1ebd8f16a037bbbfaea738e53d69939cc9bd8c6f6b4e99d2f3",
+          "size": 3646
+        },
+        {
+          "path": "lib/style.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/lib/style.lua",
+          "sha256": "c906bac41070aed7af413fa07cb10bc308baf1ab1be99c9f5e4c24e2ff3961f2",
+          "size": 2753
+        },
+        {
+          "path": "lib/themes.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/lib/themes.lua",
+          "sha256": "4a9d8d941c81ddee79d38ada448a0a59df87efb7170054c9a4d739eea1444be0",
+          "size": 22929
+        },
+        {
+          "path": "lib/window.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/lib/window.lua",
+          "sha256": "40543e8f308401c44bc2f8324358c7332868a632fc5dabae1d1fc8a98e00004d",
+          "size": 20475
+        },
+        {
+          "path": "mod.toml",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/mod.toml",
+          "sha256": "caac5fc73ae002f3525f7c3e1dc9d2840c5584d7ce7dba4448af3ff5000b38c3",
+          "size": 861
+        },
+        {
+          "path": "sounds/anvil_buy.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/anvil_buy.wav",
+          "sha256": "c51c28ddd6066275118f0705194012203f6ff7d07f393b950afdad8aebe827bf",
+          "size": 35244
+        },
+        {
+          "path": "sounds/anvil_open.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/anvil_open.wav",
+          "sha256": "62a0af372b7a54b7219c8785601c1291fc660c52c5385942313862615e90003d",
+          "size": 32044
+        },
+        {
+          "path": "sounds/bamboo_buy.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/bamboo_buy.wav",
+          "sha256": "dfc2bb059563a753a59c763584a7d061501c9a208a2921f38aa9972ffb54a5ee",
+          "size": 19244
+        },
+        {
+          "path": "sounds/bamboo_open.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/bamboo_open.wav",
+          "sha256": "ec4c0e39674e55b13e5ec132a484e738d13c2f2fdbcd3cd8a1b494efa81941fa",
+          "size": 16044
+        },
+        {
+          "path": "sounds/bell_buy.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/bell_buy.wav",
+          "sha256": "96739e54e122bf048e2e679850421fdd60bf0b0a9571dcc11d1514bff1edc6c8",
+          "size": 32044
+        },
+        {
+          "path": "sounds/bell_open.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/bell_open.wav",
+          "sha256": "f60911c508f5a628afb69f74f6e9ffce595755b9b8dae9218d6a30ec4478e53d",
+          "size": 28844
+        },
+        {
+          "path": "sounds/chime_buy.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/chime_buy.wav",
+          "sha256": "a33e4a9272be9a519d20f3300e5fd85e4f9e7645513c2f83ea9623e178bff860",
+          "size": 25644
+        },
+        {
+          "path": "sounds/chime_open.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/chime_open.wav",
+          "sha256": "d45bb4dd9e3cc07027e6592e71a9fa768ff4e091181961757a7d0de6654965cd",
+          "size": 25644
+        },
+        {
+          "path": "sounds/coins_buy.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/coins_buy.wav",
+          "sha256": "1b75181f42dbe52b3ba67a0a8a70a61208b7483f73d320ea100e3ea7f61c6e53",
+          "size": 25644
+        },
+        {
+          "path": "sounds/coins_open.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/coins_open.wav",
+          "sha256": "6b514a42c8a6b9e1c2461f69a86bbdc265c8c4911e30f7fbf9241ce0835a09a7",
+          "size": 22444
+        },
+        {
+          "path": "sounds/drum_buy.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/drum_buy.wav",
+          "sha256": "5ff544905ed560220a8b70d59734fecdcb6a7364c1ccaafa2c2fa837636fedaa",
+          "size": 25644
+        },
+        {
+          "path": "sounds/drum_open.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/drum_open.wav",
+          "sha256": "e421158b2f438bdfa19a00fe761eaa58b6cd2a197180248314ea31c9bba543e5",
+          "size": 25644
+        },
+        {
+          "path": "sounds/gong_buy.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/gong_buy.wav",
+          "sha256": "044fc97e50c2b5928400707813926a39ddc92c5c081d72ecf6b9887931132699",
+          "size": 38444
+        },
+        {
+          "path": "sounds/gong_open.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/gong_open.wav",
+          "sha256": "c92b6eba8b9ece8c4f08378e723631990e724d477eb6bc8e536d3ba2906eed27",
+          "size": 51244
+        },
+        {
+          "path": "sounds/guild_buy.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/guild_buy.wav",
+          "sha256": "2f8050010d2708ef90f43855a36385b6dbc6eb16a13cea92bee4e8f73689a6fa",
+          "size": 28844
+        },
+        {
+          "path": "sounds/guild_open.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/guild_open.wav",
+          "sha256": "c491055796d730aa9a77a7a52fa0c3ec8349b78e701bfc07472a3e84b6c79195",
+          "size": 28844
+        },
+        {
+          "path": "sounds/harp_buy.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/harp_buy.wav",
+          "sha256": "43cdb4e0b0952e64830e2de758a7b0aef5e325d2b77def7ef969640b2cfc4631",
+          "size": 38444
+        },
+        {
+          "path": "sounds/harp_open.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/harp_open.wav",
+          "sha256": "11f1f0c138bce2fdd2e0de48d978a0ee32a878463267921291c64f2512ebbf12",
+          "size": 44844
+        },
+        {
+          "path": "sounds/hush_buy.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/hush_buy.wav",
+          "sha256": "21ad92c8b4a1eb022faed2af1a09359a86103e689915cbdfc122558b79d1cb84",
+          "size": 25644
+        },
+        {
+          "path": "sounds/hush_open.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/hush_open.wav",
+          "sha256": "1a44dc040277f77ef3c660489d3302b8b67fc39ee03c67503c62d55e4ec80dcd",
+          "size": 28844
+        },
+        {
+          "path": "sounds/shell_buy.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/shell_buy.wav",
+          "sha256": "57276d115a56d26b7495f561688958762f06641aa8077cba3b6bd361fb40a054",
+          "size": 16044
+        },
+        {
+          "path": "sounds/shell_open.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/shell_open.wav",
+          "sha256": "b2b1d134a7d4d50587cb641875cf82120d7507ffc751ffe765024a1b05098de1",
+          "size": 14444
+        },
+        {
+          "path": "sounds/wood_buy.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/wood_buy.wav",
+          "sha256": "3eed07c0516fac57dfed78dfddbfa0ed57e93677d95c3ab57db3e0f2767a59a4",
+          "size": 19244
+        },
+        {
+          "path": "sounds/wood_open.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-shop/sounds/wood_open.wav",
+          "sha256": "e6e30ff4ea6cc001d49ccfb0ee0374e7def2a9c27803fd227b777bf7d4aa5c7a",
+          "size": 12844
+        }
+      ],
+      "required": true,
+      "commands": {
+        "storefront": {
+          "help": "The shop window: a sample shop in a race's colours, or close it.",
+          "args": "",
+          "forms": [
+            {
+              "args": "demo [race]",
+              "help": "A sample shop: goblin, moogle, hume, elvaan, tarutaru, mithra, galka, quadav, yagudo, orc, tonberry or guild."
+            },
+            {
+              "args": "sound",
+              "help": "Shop sounds on or off."
+            },
+            {
+              "args": "close",
+              "help": "Closes the shop window."
+            }
+          ]
+        },
+        "timelessshop": {
+          "help": "The same as /storefront.",
           "args": ""
         }
       }
@@ -3740,6 +4113,113 @@
         },
         "timelessthreat": {
           "help": "The same as /threat.",
+          "args": ""
+        }
+      }
+    },
+    {
+      "id": "timeless-townlife",
+      "name": "Timeless Town Life",
+      "kind": "lua",
+      "version": "1.0.0",
+      "authors": [
+        "TimelessXI"
+      ],
+      "description": "Bastok, lived in: speech bubbles over the townsfolk, street lamps that glow once the lamplighter has been round, chimney smoke, sounds by place (hammering, crowds, gulls) and a Town window (/town) with the headlines, the caravan, market day and the gossip. Needs the server's townlife module.",
+      "files": [
+        {
+          "path": "img/glow.png",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/img/glow.png",
+          "sha256": "b23a4f4811c16d452e8b9c4282939004b761841b904cb155b20ca6436729033d",
+          "size": 1823
+        },
+        {
+          "path": "img/smoke.png",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/img/smoke.png",
+          "sha256": "1ffdf86a2379a955670fcb7d1e9941c0dac40b74c075aa83dc7ea14e79de5ace",
+          "size": 2704
+        },
+        {
+          "path": "init.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/init.lua",
+          "sha256": "3db34443d089d46d80899f4eecf1ec591a91c555269cad6c4283770f3c5ca126",
+          "size": 2960
+        },
+        {
+          "path": "lib/action.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/lib/action.lua",
+          "sha256": "c1ab6218bf3b467cc5e471c4794ce2f441c69fa6e97a1af18b771872a2e31403",
+          "size": 650
+        },
+        {
+          "path": "lib/canvas.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/lib/canvas.lua",
+          "sha256": "8aefe1988225bedb0703d74ea4519b209f68558626c580c32a8039df1e3d5ee3",
+          "size": 10638
+        },
+        {
+          "path": "lib/protocol.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/lib/protocol.lua",
+          "sha256": "6957958870312eaf1521a24bfa5d2abd4b8a15c562d85f33eeb6acb420ab8e5f",
+          "size": 2812
+        },
+        {
+          "path": "lib/style.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/lib/style.lua",
+          "sha256": "c906bac41070aed7af413fa07cb10bc308baf1ab1be99c9f5e4c24e2ff3961f2",
+          "size": 2753
+        },
+        {
+          "path": "lib/town.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/lib/town.lua",
+          "sha256": "0ecd6adeab8abfaae7a85bdbb947593bdfdcb52142ce51c08b696f5f458c4b2e",
+          "size": 2392
+        },
+        {
+          "path": "lib/world.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/lib/world.lua",
+          "sha256": "b1b91dc9d0c877173362668538f37affee0666ff1fdfd657b0dcedf49e35cd23",
+          "size": 5406
+        },
+        {
+          "path": "mod.toml",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/mod.toml",
+          "sha256": "7cb00c2e9b5154c9c4c7808aaf0e38306ec27bf10977c54bf319616600ebfe03",
+          "size": 1169
+        },
+        {
+          "path": "sounds/crowd.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/sounds/crowd.wav",
+          "sha256": "5e858a06707b61d4b60a5ec4fa4fb0fa3bc14683292138a74d0c4b040e339749",
+          "size": 176444
+        },
+        {
+          "path": "sounds/gulls.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/sounds/gulls.wav",
+          "sha256": "2f110ff63ad5c991e760e63ce3981d5702bb5d97771203f226e117abc6a25eab",
+          "size": 154394
+        },
+        {
+          "path": "sounds/hammer.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/sounds/hammer.wav",
+          "sha256": "f6738c741287dc4ecdfd08a0796bf76159a65ad5f6b8fc2a3e7cb7e6ee36a17c",
+          "size": 114704
+        }
+      ],
+      "required": true,
+      "commands": {
+        "town": {
+          "help": "Opens or closes the Town window.",
+          "args": "",
+          "forms": [
+            {
+              "args": "update",
+              "help": "Asks for the latest news."
+            }
+          ]
+        },
+        "townlife": {
+          "help": "The same as /town.",
           "args": ""
         }
       }

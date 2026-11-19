@@ -1,0 +1,15 @@
+name = "Timeless Reputation"
+version = "1.0.0"
+authors = ["TimelessXI"]
+description = "Your fame in San d'Oria, Bastok, Windurst, Jeuno, Selbina and Rabao, and Norg: each area's crest, its fame level and what people there think of you, how far to the next level, and your nation and rank. Open it from the Timeless menu. Needs the server's reputation module."
+permissions = ["packets.write"]
+
+[settings.key_reputation]
+type = "key"
+default = ""
+label = "Reputation Key"
+help = "A key that opens or closes the Reputation window (it's also on the Timeless menu)."
+
+[commands.reputation]
+help = "Opens or closes the Reputation window (the Timeless menu's Reputation card does the same)."
+args = ""
