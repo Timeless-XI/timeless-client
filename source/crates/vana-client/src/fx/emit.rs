@@ -1,0 +1,1125 @@
+//! The CPU side of a generator: its per-frame update stream (FUN_10048740) and the emission stream that builds
+//! each new element (FUN_1004d920); MODLOG "Effect generators". The element's per-frame stream runs on the GPU.
+
+use super::elem::{Elem, NONE, dk, st, w};
+use super::math::{Rng, euler, then, wrap};
+use super::{Draw, ElemCpu, Frame, Instance, Ref, Registry};
+use crate::dat::generator::{Op, kind};
+use glam::{Mat4, Vec3};
+use std::f32::consts::PI;
+
+/// What an emission asks of the effect manager after the element exists.
+pub enum Child {
+    /// Ops 0x44 / 0x53 / 0x6a: clone generator `src`, linked to the new element (+0x164); `orient` = 0x53 / 0x6a
+    /// (the clone's matrix follows the element's rotation and scale), `billboard` = 0x6a.
+    Clone { src: Ref, op: u8 },
+    /// Op 0x3c: run generator `src` once now with the new element as parent.
+    Burst { src: Ref },
+}
+
+/// The parent element of a child emission (FUN_1004d920's `parent`).
+#[derive(Clone, Copy, Debug)]
+pub struct Parent {
+    pub pos: Vec3,
+    pub world: Vec3,
+    pub rot: Vec3,
+    pub scale: Vec3,
+    pub color: u32,
+    pub life: f32,
+    pub max_life: f32,
+    pub uv: [f32; 2],
+    pub bias: f32,
+    /// The slot vector at its generator's update op 0x02 (its drift), when it has one (emission op 0x46).
+    pub vel: Option<Vec3>,
+    /// Filled for an emission: what op 0x45 copies from the parent.
+    pub frame: Option<ParentFrame>,
+    /// The parent's generator (op 0x94 takes its op 0x4e point list).
+    pub src: Option<Ref>,
+    /// A point light parent's intensity +0x1a0 and range +0x19c (emission ops 0x7e / 0x7f).
+    pub light: Option<[f32; 2]>,
+    /// Its generator's first emission op 0x3e..0x40 (code) and the parent's S[k + code - 0x3e], S[k + 3] (ops
+    /// 0x98..0x9a).
+    pub slots: Option<(u8, [u32; 2])>,
+}
+
+/// The parent element's frame (FUN_10046440: its matrix slot) and its generator's attach word and actors.
+#[derive(Clone, Copy, Debug)]
+pub struct ParentFrame {
+    pub slot: u32,
+    pub matrix: Option<Mat4>,
+    pub scale_a: Vec3,
+    pub scale_b: Vec3,
+    pub attach: u32,
+    pub actors: [super::sched::Who; 2],
+}
+
+/// FUN_1003c740: the attach word bits ops 0x45 / 0x86 copy (0..16 and 24..27).
+const ATTACH_COPY: u32 = 0x0ffd_ffff;
+
+pub struct Spawn {
+    pub elem: Elem,
+    pub cpu: ElemCpu,
+    pub children: Vec<Child>,
+    /// Batched D3a (CMoVuAnmElem): the particle records (pos0, dir, vel) of FUN_10063060.
+    pub parts: Vec<[f32; 9]>,
+    /// A sound element (kind 0x3d, CYySoundElem).
+    pub sound: Option<super::sound::Sound>,
+    /// Kind 1, CMoSkeletonElem: the model folder (skeleton, meshes, motions) its CXiSkeletonActor is made from.
+    pub model: Option<Ref>,
+}
+
+/// Resource kind after FUN_1004d920's remap (table 0x10051748): Vum / Om1 -> D3m, Anm -> D3a, Mmd -> D3b.
+fn remap(k: u8) -> u8 {
+    match k {
+        0x0b | 0x0c => kind::D3M,
+        0x0e => kind::D3A,
+        0x1d => 0x25,
+        k => k,
+    }
+}
+
+/// Kinds that name no resource (FUN_100485c0: handle = 1).
+fn needs_no_resource(k: u8) -> bool {
+    matches!(k, 0x57 | 0x47 | 0x22 | 0x24 | 0x5c)
+}
+
+/// FUN_1004d920: builds one element from the instance's emission stream, or None when op 1's resource does not
+/// resolve (retail returns without emitting).
+/// `me`: whether the instance's actor1 / actor2 is our player (emission op 0x82).
+/// Generator +0xdf bit 1 (asm 0x10047e42..0x10047f13): set at its start only for these door parts, whose lighting then
+/// skips the parent branch of FUN_100467e0.
+fn lit_parent_off(file: u32, name: [u8; 4]) -> bool {
+    let n = &name[..];
+    match file {
+        83895 | 83896 | 83903 | 83904 => {
+            [b"0b11", b"0b12", b"0b21", b"0b22", b"0b31", b"0b32"].iter().any(|x| &x[..] == n)
+        }
+        83897 => n == b"pb41",
+        83905..=83908 => [b"0b10", b"0b11", b"0b12", b"0b20", b"0b21", b"0b22"].iter().any(|x| &x[..] == n),
+        _ => false,
+    }
+}
+
+pub fn emit(
+    reg: &mut Registry,
+    inst: &mut Instance,
+    parent: Option<&Parent>,
+    f: &Frame,
+    rng: &mut Rng,
+    ground: &dyn Fn(Vec3, Vec3) -> Option<Vec3>,
+    me: [bool; 2],
+) -> Option<Spawn> {
+    // The emission stream is lent out while it runs (it was cloned per element) and put back.
+    let stream = std::mem::take(&mut inst.streams[1]);
+    let r = emit_ops(reg, inst, &stream, parent, f, rng, ground, me);
+    inst.streams[1] = stream;
+    r
+}
+
+fn emit_ops(
+    reg: &mut Registry,
+    inst: &mut Instance,
+    stream: &[Op],
+    parent: Option<&Parent>,
+    f: &Frame,
+    rng: &mut Rng,
+    ground: &dyn Fn(Vec3, Vec3) -> Option<Vec3>,
+    me: [bool; 2],
+) -> Option<Spawn> {
+    let lib = inst.src.0;
+    let from = inst.src.1;
+    let op1 = stream.first().filter(|o| o.code == 0x01)?;
+    let mut e = Elem::default();
+    e.0[w::ME] = me[0] as u32 | (me[1] as u32) << 1;
+    let mut children = Vec::new();
+    let res_kind = op1.byte(0x21);
+    // FUN_1004e8d0 c:57183: a D3m with 0x1000000 and neither 0x200000 nor 0x100000 is a CMoD3mSpecularElem, whose prep
+    // (FUN_10041160) turns lighting (flag 16) off and fog (flag 25) on-skip every frame.
+    let spec = remap(res_kind) == kind::D3M && op1.u32(1) & 0x30_0000 == 0 && op1.u32(1) & 0x100_0000 != 0;
+    let flags = if spec { (op1.u32(1) & !0x1_0000) | 0x200_0000 } else { op1.u32(1) };
+    let mut spec_on = false;
+    let mut spec_tex = None;
+    let name = op1.u32(3);
+    // Link step FUN_10047270 / FUN_100485c0: D3m kinds fall back to an MMB of the same name.
+    let draw = if res_kind == 0x22 && inst.flags & 0x2000_0000 == 0 {
+        // CMoDist (FUN_10051d90).
+        Draw::Dist
+    } else if res_kind == 0x22 {
+        // CMoVuDist (FUN_10043110 -> FUN_10063c80): its particles only count the draws; N = gen flags & 0x1ff + 1
+        // with op 0x56, else 0. The count drawn (the weather density applies) is worked out each draw (Draw::VuDist).
+        let n = if stream.iter().any(|o| o.code == 0x56) { (inst.flags & 0x1ff) + 1 } else { 0 };
+        if n == 0 { Draw::None } else { Draw::VuDist(n, inst.de & 1 != 0) }
+    } else if res_kind == 0x5c && inst.dam.as_ref().is_some_and(|d| !d.glyphs.is_empty()) {
+        // DamValueProg (FUN_10041f40): without a task's number the string is empty and nothing draws.
+        Draw::DamValue
+    } else if res_kind == 0x24 {
+        // RingProg (FUN_100555f0), or with 0x100000 CMoDistRingElem (FUN_10043720).
+        if flags & 0x10_0000 == 0 { Draw::Ring } else { Draw::DistRing }
+    } else if needs_no_resource(res_kind) {
+        Draw::None
+    } else {
+        match remap(res_kind) {
+            kind::D3M => match reg
+                .resolve(lib, from, kind::D3M, name)
+                .map(|r| (r, true))
+                .or_else(|| reg.resolve(lib, from, kind::MMB, name).map(|r| (r, false)))
+            {
+                // The ground projection (0x200000, FUN_10040e70): never a plain mesh.
+                Some((r, _)) if flags & 0x20_0000 != 0 => reg.mesh(r).map(Draw::GroundProj).unwrap_or(Draw::None),
+                // DistModel (0x100000, FUN_10043320); an MMB in its place draws nothing (+0x179).
+                Some((r, true)) if flags & 0x10_0000 != 0 => reg.mesh(r).map(Draw::DistModel).unwrap_or(Draw::None),
+                Some(_) if flags & 0x10_0000 != 0 => Draw::None,
+                Some((r, d3m)) => {
+                    // The specular stage needs the D3m; an MMB in its place draws the plain MMB path.
+                    spec_on = spec && d3m;
+                    reg.mesh(r).map(Draw::Mesh).unwrap_or(Draw::None)
+                }
+                None => {
+                    reg.miss(lib, from, name, res_kind);
+                    return None;
+                }
+            },
+            kind::D3A | 0x39 => match reg.resolve(lib, from, kind::D3A, name) {
+                Some(r) => reg.sprite(r).map(Draw::Sprite).unwrap_or(Draw::None),
+                None => {
+                    reg.miss(lib, from, name, res_kind);
+                    return None;
+                }
+            },
+            // D3b, or with 0x100000 CMoDistMorphElem (FUN_10043590).
+            0x25 => match reg.resolve(lib, from, 0x25, name) {
+                Some(r) => reg
+                    .morph(r)
+                    .map(if flags & 0x10_0000 != 0 { Draw::DistMorph } else { Draw::Morph })
+                    .unwrap_or(Draw::None),
+                None => {
+                    reg.miss(lib, from, name, res_kind);
+                    return None;
+                }
+            },
+            _ => Draw::None,
+        }
+    };
+    // Kind 1 (CMoSkeletonElem): a folder holding a whole model; none, no element.
+    let model = if res_kind == kind::FOLDER {
+        let r = reg.resolve(lib, from, kind::FOLDER, name);
+        if r.is_none() {
+            reg.miss(lib, from, name, res_kind);
+            return None;
+        }
+        r
+    } else {
+        None
+    };
+    // Kind 0x3d: a SeSep; no resource means no element (FUN_1004d920 returns at op 1).
+    let mut sound = None;
+    if res_kind == 0x3d {
+        let r = reg.resolve(lib, from, 0x3d, name)?;
+        let (se, loops) = super::sound::sesep(reg.libs[r.0].data(r.1))?;
+        let mut s = super::sound::Sound::new(se, loops);
+        s.res = r;
+        // Op 0x4c on a world generator sets height mode 1; without 0x4c the defaults stand.
+        if inst.mode == 0 {
+            s.ymode = 0;
+        }
+        sound = Some(s);
+    }
+    e.0[w::FLAGS] = flags;
+    if let Draw::Mesh(id) | Draw::GroundProj(id) = draw {
+        let r = reg.meshes.get(id as usize).and_then(|r| reg.libs[r.0].meshes.get(&r.1)).map_or(0.0, |m| m.radius);
+        e.set(w::RADIUS, r);
+    }
+    let mut pos = Vec3::new(op1.f32(5), op1.f32(6), op1.f32(7));
+    // Step 4: flag 0x800000 snapshots the emitter frame at spawn.
+    let mut snapshot = (flags & 0x80_0000 != 0 && (inst.matrix.is_some() || parent.is_some()))
+        .then(|| inst.matrix.unwrap_or(Mat4::IDENTITY));
+    let mut borrow = None;
+    // 0x100511c6..: the snapshot takes the generator's scales here; a later op 0x45 changes only the generator's.
+    let mut snap_scale = (inst.scale_a, inst.scale_b);
+    // Step 8: flag 0x4000000 = position in camera space (z negated, through the inverse view).
+    if flags & 0x400_0000 != 0 {
+        pos.z = -pos.z;
+        pos = f.view.inverse().transform_point3(pos);
+    }
+    let mut pos0 = pos;
+    let mut life = op1.i16_at(0x22) as f32;
+    let extra = op1.i16_at(0x24);
+    if extra != 0 {
+        life += rng.un(extra as u16 as u32) as f32;
+    }
+    e.set(w::LIFE, life);
+    e.set(w::MAX_LIFE, life);
+    e.0[w::BLEND] = 0x48;
+    e.set(w::ALPHA, 1.0);
+    e.set(w::FADE, 1.0);
+    e.set_v3(w::SCALE, Vec3::ZERO);
+    e.0[w::STATE] = st::ALIVE
+        | if inst.flags & 0x2000_0000 != 0 { st::BATCHED } else { 0 }
+        | if matches!(draw, Draw::None) { 0 } else { st::HAS_RES };
+    inst.emitted += 1;
+    let batched = inst.flags & 0x2000_0000 != 0;
+    // Bit 1: no parent step in the light matrix; MMB stand-ins (elem +0x179) skip it too.
+    let mmb = matches!(draw, Draw::Mesh(id) if reg.meshes.get(id as usize).and_then(|r| reg.libs[r.0].meshes.get(&r.1)).is_some_and(|m| m.mmb));
+    // Bits 16..20: the attach mode (FUN_10045190 picks the bit-0 basis by it).
+    e.0[w::GEN_BITS] = ((inst.de as u32) << 8)
+        | ((lit_parent_off(reg.libs[lib].file_id, inst.name) || mmb) as u32 * 2)
+        | ((inst.mode as u32) << 16);
+    // Bits 23..31: this generator's first emission op 0x3e..0x40 (slot k, code - 0x3e), for a child's ops 0x98..0x9a.
+    if let Some(o) = inst.streams[1].iter().find(|o| (0x3e..=0x40).contains(&o.code)) {
+        e.0[w::GEN_BITS] |= 1 << 23 | (o.slot as u32 & 0x3f) << 24 | ((o.code - 0x3e) as u32) << 30;
+    }
+    // FUN_10040c20 -> FUN_10183760: an MMB is culled by its box (bit 21); in zone 237 (scene DAT 337) the chunks
+    // FUN_10176ed0 lists move -0.8 down the view (bit 22).
+    if let Draw::Mesh(id) = draw
+        && let Some(&(ml, node)) = reg.meshes.get(id as usize)
+        && let Some(m) = reg.libs[ml].meshes.get(&node).filter(|m| m.mmb)
+    {
+        let (lo, hi) = (Vec3::from(m.bbox[0]), Vec3::from(m.bbox[1]));
+        let (c, h) = ((lo + hi) * 0.5, (hi - lo) * 0.5);
+        e.set_v3(w::MMB_BOX, c);
+        e.set(w::MMB_BOX + 3, h.x);
+        e.set(w::MMB_BOX + 4, h.y);
+        e.0[w::GEN_BITS] |= 1 << 21;
+        let name = reg.libs[ml].tree.nodes[node].name();
+        let in_237 = reg.zone.is_some_and(|z| reg.libs[z].file_id == 337);
+        if in_237 && matches!(name.trim_end_matches('\0'), "awan" | "brac" | "col1" | "sh-u" | "suim") {
+            e.0[w::GEN_BITS] |= 1 << 22;
+        }
+    }
+    e.0[w::KIND] = match draw {
+        // FUN_10055340: key = the generator's 4cc; FUN_10171720 finds its table entry (none: it does nothing).
+        Draw::None if res_kind == 0x47 => {
+            let key = u32::from_le_bytes(inst.name);
+            e.0[w::L_SLOT] = reg.light_keys.iter().position(|&k| k == key).map_or(NONE, |s| s as u32);
+            dk::LIGHT
+        }
+        Draw::None => dk::NONE,
+        Draw::Dist => dk::DIST,
+        Draw::Ring => dk::RING,
+        Draw::DistModel(_) => dk::DIST_MODEL,
+        Draw::VuDist(..) => dk::DIST,
+        Draw::DistRing => dk::DIST_RING,
+        Draw::GroundProj(_) => dk::GROUND_PROJ,
+        Draw::DamValue => {
+            let d = inst.dam.as_ref().unwrap();
+            let pack = |gs: &[u8]| gs.iter().enumerate().fold(0u32, |a, (k, &g)| a | (g as u32 & 0xf) << (4 * k));
+            e.0[w::GLARE] = (d.rgb & 0xff_ffff) | (d.glyphs.len() as u32) << 24;
+            e.0[w::MORPH_W] = pack(&d.glyphs[..d.glyphs.len().min(8)]);
+            e.0[w::MORPH_W + 1] = pack(d.glyphs.get(8..).unwrap_or_default());
+            dk::DAMV
+        }
+        Draw::Mesh(_) => dk::MESH,
+        Draw::Morph(id) | Draw::DistMorph(id) => {
+            e.0[w::FRAMES] = reg.morph_data_of(id).map_or(0, |m| m.k);
+            // Byte 2 bit 7: the alpha test, read by vs_morph / vs_distmorph.
+            e.0[w::GLARE] = reg.morph_data_of(id).is_some_and(|m| m.alpha_test) as u32;
+            e.0[w::SFRAMES] = reg.morph_at[id as usize];
+            if matches!(draw, Draw::DistMorph(_)) { dk::DIST_MORPH } else { dk::MORPH }
+        }
+        Draw::Sprite(id) => {
+            e.0[w::FRAMES] = reg.sprite_frames(id);
+            e.0[w::SFRAMES] = reg.sprite_at[id as usize].0;
+            if reg.sprite_is_flare(id) {
+                dk::FLARE
+            } else if batched {
+                dk::BATCHED
+            } else {
+                dk::SPRITE
+            }
+        }
+    };
+    let mut parts = Vec::new();
+    let count = inst.emitted;
+    let gen_dist = inst.dist;
+    let key = |reg: &mut Registry, op: &Op| reg.key_ref(lib, from, op.u32(2));
+    // Op 0x94 (0x1004fed3): this stream's op 0x4e takes the parent generator's op 0x4e list (0x4e on both sides).
+    let parent_vtx = if stream.iter().any(|o| o.code == 0x94) {
+        parent.and_then(|p| p.src).and_then(|(pl, pn)| {
+            let name = reg.libs[pl].generator(pn)?.streams[1].iter().find(|o| o.code == 0x4e)?.u32(2);
+            reg.resolve(pl, pn, kind::VTX, name)
+        })
+    } else {
+        None
+    };
+    for op in stream.iter().skip(1) {
+        let s = op.slot as usize;
+        let v3 = |k: usize| Vec3::new(op.f32(k), op.f32(k + 1), op.f32(k + 2));
+        match op.code {
+            // Creation / lifetime.
+            0x1d => {
+                if let Draw::Sprite(id) = draw {
+                    let n = reg.sprite_frames(id).max(1) as f32;
+                    e.set(w::FRAME_PERIOD, life / n);
+                    e.set(w::FRAME_CD, life / n);
+                }
+            }
+            0x1e => e.0[w::BLEND] = op.u32(1) & 0xffff,
+            0x30 => e.set(w::BIAS, op.f32(1)),
+            // 0x72 scales by the target's model size; actors are not linked yet *(inf: size 1)*.
+            // 0x10051d23: on a skeleton target the bias scales with its depth size, (size - 1) x f + 1 (f = @2, 0 = 1).
+            0x72 => {
+                let k = if op.f32(2) == 0.0 { 1.0 } else { op.f32(2) };
+                e.set(w::BIAS, op.f32(1) * ((inst.target_depth - 1.0) * k + 1.0));
+            }
+            // Position.
+            0x06 if !batched => {
+                let r = rng.uf(op.f32(1)) + op.f32(2);
+                let mut m = euler(Vec3::new(rng.us(PI), rng.us(PI), 0.0));
+                if gen_dist != 0.0 {
+                    m.x_axis.x /= gen_dist;
+                }
+                pos += m.transform_point3(Vec3::new(r, 0.0, 0.0));
+            }
+            0x07 => {
+                let r = rng.uf(op.f32(1)) + op.f32(2);
+                let mr = euler(Vec3::new(rng.us(PI), rng.us(PI), 0.0));
+                let ms = Mat4::from_scale(v3(3));
+                let mf = euler(Vec3::new(0.0, op.f32(7), op.f32(6)));
+                let mut m = then(mr, then(ms, mf));
+                if gen_dist != 0.0 {
+                    m.x_axis.x /= gen_dist;
+                }
+                pos += m.transform_point3(Vec3::new(r, 0.0, 0.0));
+            }
+            0x1f => {
+                let a = wrap(op.f32(8) + rng.us(op.f32(9)));
+                let n = op.i16_at(0x2c);
+                let b = if n != 0 {
+                    ((count % (n as u32 + 1)) as f32 * PI / (n as f32 + 1.0)) * 2.0 - PI
+                } else {
+                    rng.us(PI)
+                };
+                let mr = euler(Vec3::new(0.0, b, a));
+                let ms = Mat4::from_scale(v3(3));
+                let mf = euler(Vec3::new(0.0, op.f32(7), op.f32(6)));
+                let mut m = then(then(mr, ms), mf);
+                if op.byte(0x28) & 1 != 0
+                    && let Some(att) = inst.matrix
+                {
+                    let mut a = att;
+                    a.w_axis = glam::Vec4::W;
+                    a = then(a, f.view_rot);
+                    m = then(m, a.inverse());
+                }
+                if gen_dist != 0.0 {
+                    m.x_axis.x /= gen_dist;
+                }
+                let r = rng.uf(op.f32(1)) + op.f32(2);
+                pos += m.transform_point3(Vec3::new(r, 0.0, 0.0));
+            }
+            // Op 0x45: the parent generator's attach fields and actors; under 0x800000 the parent's frame becomes
+            // the snapshot, else a frameless element rides the parent generator's frame.
+            0x45 => {
+                if let Some(p) = parent {
+                    if let Some(pf) = p.frame {
+                        inst.attach = (inst.attach & !ATTACH_COPY) | (pf.attach & ATTACH_COPY);
+                        inst.mode = crate::dat::generator::attach_mode(inst.attach);
+                        inst.size_scaled = (inst.attach >> 24) & 0xf != 0;
+                        inst.actors = pf.actors;
+                        if let Some(m) = pf.matrix {
+                            if snapshot.is_some() {
+                                snapshot = Some(m);
+                                inst.scale_a = pf.scale_a;
+                                inst.scale_b = pf.scale_b;
+                            } else if inst.matrix.is_none() {
+                                borrow = Some(pf.slot);
+                            }
+                        }
+                    }
+                    pos += p.pos;
+                    pos0 = pos;
+                }
+            }
+            // 0x1004fff0: the parent's actors, then its world position through this generator's inverse frame,
+            // x over scale A's x *(the attachment is not rebuilt for the new actors until the next frame)*.
+            0x9b => {
+                if let Some(p) = parent {
+                    if let Some(pf) = p.frame {
+                        inst.actors = pf.actors;
+                    }
+                    let mut v = inst.matrix.map_or(p.world, |m| m.inverse().transform_point3(p.world));
+                    if inst.scale_a.x != 0.0 {
+                        v.x /= inst.scale_a.x;
+                    }
+                    pos += v;
+                    pos0 = pos;
+                }
+            }
+            // 0x1004fac3: the attach copy without the actors; under 0x800000 the snapshot is the parent frame's
+            // translation alone with the parent's scales, else a frameless element borrows the parent's frame.
+            0x86 => {
+                if let Some(p) = parent {
+                    if let Some(pf) = p.frame {
+                        inst.attach = (inst.attach & !ATTACH_COPY) | (pf.attach & ATTACH_COPY);
+                        inst.mode = crate::dat::generator::attach_mode(inst.attach);
+                        inst.size_scaled = (inst.attach >> 24) & 0xf != 0;
+                        if let Some(m) = pf.matrix {
+                            if snapshot.is_some() {
+                                snapshot = Some(Mat4::from_translation(m.w_axis.truncate()));
+                                snap_scale = (pf.scale_a, pf.scale_b);
+                            } else if inst.matrix.is_none() {
+                                borrow = Some(pf.slot);
+                            }
+                        }
+                    }
+                    pos += p.pos;
+                    pos0 = pos;
+                }
+            }
+            // Point list (Vtx, kind 0x3e): u32 count, points from +0x10 (vec4); random (0x4e) or by emission count
+            // (0x4f) *(the attach-rotation option, byte op+0xc bit 0, is not applied)*.
+            0x4e | 0x4f if !batched => {
+                let shared = parent_vtx.filter(|_| op.code == 0x4e);
+                if let Some(r) = shared.or_else(|| reg.resolve(lib, from, kind::VTX, op.u32(2))) {
+                    let d = reg.libs[r.0].data(r.1);
+                    let n = d.get(0..4).map_or(0, |b| u32::from_le_bytes(b.try_into().unwrap()));
+                    if n > 0 {
+                        let i = if op.code == 0x4e { rng.un(n) } else { count % n } as usize;
+                        let g = |o: usize| d.get(o..o + 4).map_or(0.0, |b| f32::from_le_bytes(b.try_into().unwrap()));
+                        let mut p = Vec3::new(g(0x10 + i * 16), g(0x14 + i * 16), g(0x18 + i * 16));
+                        // 0x1004eb5d: option bit 0 with a frame (FUN_100473f0): p x M x (b90 x M)^-1, i.e. the point
+                        // through the view rotation's inverse.
+                        if op.u32(3) & 1 != 0 && (inst.matrix.is_some() || snapshot.is_some()) {
+                            p = glam::Mat3::from_mat4(f.view).transpose() * p;
+                        }
+                        pos += p;
+                    }
+                }
+            }
+            // Path start: S[s] keyframe, S[s+1] sampler, S[s+7] the path; S[s+3..5] = p(0), pos += p(0).
+            0x54 => {
+                if let Some((at, p)) = reg.path_ref(lib, from, op.u32(5)) {
+                    e.set_s(s, if op.u32(2) != 0 { key(reg, op) } else { NONE });
+                    e.set_s(s + 1, op.u32(3));
+                    e.set_s(s + 7, at);
+                    e.set_sv3(s + 3, p);
+                    pos += p;
+                }
+            }
+            0x87 => {
+                e.set_sv3(s, pos);
+                e.set_sv3(s + 3, Vec3::ZERO);
+            }
+            0x67 => {
+                let v = e.sv3(s);
+                pos += v * life;
+                e.set_sv3(s, -v);
+            }
+            // Rotation / scale.
+            0x09 => e.set_v3(w::ROT, v3(1)),
+            0x0a => {
+                let r = e.v3(w::ROT);
+                e.set_v3(
+                    w::ROT,
+                    Vec3::new(
+                        wrap(r.x + rng.us(op.f32(1))),
+                        wrap(r.y + rng.us(op.f32(2))),
+                        wrap(r.z + rng.us(op.f32(3))),
+                    ),
+                );
+            }
+            0x3b => {
+                let r = e.v3(w::ROT);
+                let c = count as f32;
+                let spin = |k: usize, v: f32| (c * op.f32(k) + v) % (2.0 * PI) - PI;
+                e.set_v3(w::ROT, Vec3::new(spin(1, r.x), spin(2, r.y), spin(3, r.z)));
+            }
+            0x3d => {
+                let d = pos - pos0;
+                e.set_sf(s + 3, -d.z.atan2(d.x));
+            }
+            0x0f => e.set_v3(w::SCALE, v3(1)),
+            // Point light: range base, intensity base, range scale + 1, intensity scale + 1.
+            0x58 if e.0[w::KIND] == dk::LIGHT => {
+                e.set(w::L_RANGE, op.f32(1));
+                e.set(w::L_INT, op.f32(2));
+                e.set(w::L_RSCALE, op.f32(3) + 1.0);
+                e.set(w::L_ISCALE, op.f32(4) + 1.0);
+            }
+            // vtable +0x34 = FUN_10051dc0 on CMoDist: +0x194 = op+8.
+            // vtable +0x34: CMoDist / VuDist / DistModel +0x194, DistMorph +0x1c0 (DistRing's +0x1b6 is never read); a
+            // no-op on the rest.
+            0x32 if matches!(draw, Draw::Dist | Draw::VuDist(..) | Draw::DistModel(_) | Draw::DistMorph(_)) => {
+                e.set(w::DIST_OFF, op.f32(2))
+            }
+            0x32 => {}
+            // On the source actor: local matrix times its ground frame, position = its foot contact (+0x63c).
+            0x8e => {
+                if let Some((p, m)) = inst.ground {
+                    pos = p;
+                    for (k, c) in m.iter().enumerate() {
+                        e.set_v3(w::GROUND + 3 * k, *c);
+                    }
+                    e.0[w::STATE] |= st::GROUND;
+                }
+            }
+            0x10 => {
+                let sc = e.v3(w::SCALE);
+                e.set_v3(w::SCALE, sc + Vec3::new(rng.uf(op.f32(1)), rng.uf(op.f32(2)), rng.uf(op.f32(3))));
+            }
+            0x11 => {
+                let u = rng.uf(op.f32(1));
+                e.set_v3(w::SCALE, e.v3(w::SCALE) + Vec3::splat(u));
+            }
+            0x47 => {
+                if let Some(p) = parent {
+                    e.set_v3(w::ROT, p.rot)
+                }
+            }
+            0x79 => {
+                if let Some(p) = parent {
+                    e.set_v3(w::ROT, e.v3(w::ROT) + p.rot)
+                }
+            }
+            0x49 => {
+                if let Some(p) = parent {
+                    e.set_v3(w::SCALE, p.scale)
+                }
+            }
+            0x7a => {
+                if let Some(p) = parent {
+                    e.set_v3(w::SCALE, e.v3(w::SCALE) + p.scale)
+                }
+            }
+            // Colour: file bytes R, G, B, A -> +0xfa, +0xf9, +0xf8, +0xfb (FUN_1003d440).
+            0x16 => {
+                let [r, g, b, a] = op.u32(1).to_le_bytes();
+                e.0[w::COLOR] = u32::from_le_bytes([b, g, r, a]);
+            }
+            0x17 => {
+                for (k, o) in [(2usize, 4usize), (1, 5), (0, 6)] {
+                    let add = rng.un(op.byte(o) as u32) as u8;
+                    e.set_cb(k, e.cb(k).wrapping_add(add));
+                }
+            }
+            0x18 => {
+                let add = rng.un(op.byte(4) as u32) as u8;
+                for k in 0..3 {
+                    e.set_cb(k, e.cb(k).wrapping_add(add));
+                }
+            }
+            0x48 => {
+                if let Some(p) = parent {
+                    e.0[w::COLOR] = p.color
+                }
+            }
+            0x91 => e.set_s(s, e.0[w::COLOR]),
+            0x8f | 0x90 => {
+                // Tint by the area light: the brighter of (sun + ambient) and (moon + ambient); 0x8f of the
+                // caster's area (FUN_101819a0), 0x90 of the zone. 0x8f without a source actor (FUN_1003b6d0) tints nothing.
+                let c = match (op.code, inst.actors[0]) {
+                    (0x8f, super::sched::Who::None) => None,
+                    (0x8f, _) => Some(inst.area_light.unwrap_or(f.area_light)),
+                    _ => Some(f.area_light),
+                };
+                if let Some(c) = c {
+                    for (k, ch) in [(2usize, c.x), (1, c.y), (0, c.z)] {
+                        e.set_cb(k, (e.cb(k) as f32 * ch).max(0.0) as u32 as u8);
+                    }
+                }
+            }
+            // Slot initialisers.
+            0x02 => e.set_sv3(s, if batched { Vec3::ZERO } else { v3(1) }),
+            0x03 | 0x0c | 0x13 => {
+                for c in 0..3 {
+                    e.set_sf(s + c, e.sf(s + c) + rng.us(op.f32(1 + c)));
+                }
+            }
+            0x0b | 0x12 => e.set_sv3(s, v3(1)),
+            0x31 => e.set_sv3(s, Vec3::splat(rng.us(op.f32(1)))),
+            0x19 => {
+                e.set_s(s, op.u32(1));
+                e.set_s(s + 1, op.u32(2));
+            }
+            0x1a => {
+                for (c, o) in [(0usize, 4usize), (1, 6), (2, 8)] {
+                    let word = e.s(s + c / 2);
+                    let half = (c % 2) * 16;
+                    let cur = (word >> half) as u16 as i16;
+                    let add = rng.sn(op.i16_at(o) as i32) as i16;
+                    let nw = (word & !(0xffff << half)) | (((cur.wrapping_add(add)) as u16 as u32) << half);
+                    e.set_s(s + c / 2, nw);
+                }
+            }
+            0x3e..=0x40 => {
+                let c = (op.code - 0x3e) as usize;
+                e.set_sf(s + c, op.f32(1) + rng.us(op.f32(2)));
+            }
+            0x41 => {
+                let d = (pos - pos0).normalize_or_zero();
+                let u = rng.us(op.f32(1));
+                e.set_sv3(s, e.sv3(s) + d * u);
+            }
+            0x08 if !batched => {
+                let d = (pos - pos0).normalize_or_zero();
+                e.set_sv3(s, e.sv3(s) + d * op.f32(1));
+            }
+            // 0x1004e986: S[s] = the keyframe linked from the 4cc @2 (word 1 is 0 in the files).
+            0x50..=0x52 => {
+                e.set_s(s, key(reg, op));
+                e.set_s(s + 1, op.u32(3));
+                if let Some(k) = reg.update_op_slot(inst.src, 0x02) {
+                    let src = match op.code {
+                        0x50 => k,
+                        0x51 => k + 1,
+                        _ => k + 2,
+                    };
+                    e.set_s(k + 2, e.s(src));
+                }
+            }
+            // Keyframe bindings: S[s] = keyframe, S[s+1] = its parameter, S[s+2] = the base value.
+            // FUN_1004e8d0 0x10050cd2: op 0x5f's slot: the key, its sampler flags, and the player factor (FUN_1003c7d0):
+            // b = actor1 (unless flags @0x14 & 2) or actor2 (unless & 4) is us; flags & 1 clear: 1 if b, else f32
+            // @0x10 or 0.5; set: 1 unless b, else @0x10 or 1.
+            0x82 => {
+                e.set_s(s, key(reg, op));
+                e.set_s(s + 1, op.u32(3));
+                let (fl, p) = (op.u32(5), op.f32(4));
+                let b = (fl & 2 == 0 && me[0]) || (fl & 4 == 0 && me[1]);
+                let v = if fl & 1 == 0 {
+                    if b {
+                        1.0
+                    } else if p != 0.0 {
+                        p
+                    } else {
+                        0.5
+                    }
+                } else if !b || p == 0.0 {
+                    1.0
+                } else {
+                    p
+                };
+                e.set_sf(s + 2, v);
+            }
+            0x21..=0x2f
+            | 0x33..=0x39
+            | 0x59..=0x66
+            | 0x68
+            | 0x69
+            | 0x6c..=0x70
+            | 0x74..=0x78
+            | 0x7c
+            | 0x7d
+            | 0x80..=0x85
+            | 0x8b..=0x8d
+            | 0x93
+            | 0x95..=0x97 => {
+                e.set_s(s, key(reg, op));
+                e.set_s(s + 1, op.u32(3));
+                let r = e.v3(w::ROT);
+                let base: Option<u32> = match op.code {
+                    0x21 | 0x95 => Some(pos.x.to_bits()),
+                    0x22 | 0x96 => Some(pos.y.to_bits()),
+                    0x23 | 0x97 => Some(pos.z.to_bits()),
+                    0x24 => Some((r.x / PI).to_bits()),
+                    0x25 => Some((r.y / PI).to_bits()),
+                    0x26 => Some((r.z / PI).to_bits()),
+                    0x27..=0x29 => Some(e.f(w::SCALE + (op.code - 0x27) as usize).to_bits()),
+                    0x2a => Some((e.cb(2) as f32 / 255.0).to_bits()),
+                    0x2b => Some((e.cb(1) as f32 / 255.0).to_bits()),
+                    0x2c => Some((e.cb(0) as f32 / 255.0).to_bits()),
+                    0x2d => Some((e.cb(3) as f32 / 255.0).to_bits()),
+                    0x2e => {
+                        e.0[w::STATE] |= st::SCROLL_U;
+                        Some(e.0[w::UV])
+                    }
+                    0x2f => {
+                        e.0[w::STATE] |= st::SCROLL_V;
+                        Some(e.0[w::UV + 1])
+                    }
+                    0x33..=0x37 => Some(0.0f32.to_bits()),
+                    0x7c => Some(e.0[w::L_INT]),
+                    // 0x10050b27: S[s+2] = the update stream's op 0x2c record (FUN_10049330), read by update op 0x44.
+                    0x69 => Some(u32::from(reg.update_op_slot(inst.src, 0x2c).is_some())),
+                    0x7d => Some(e.0[w::L_RANGE]),
+                    0x38 => Some((1.0f32 / 120.0).to_bits()),
+                    // 0x10050bc6: the distortion classes' base is their offset (+0x194, op 0x32's).
+                    0x39 if matches!(draw, Draw::Dist | Draw::VuDist(..) | Draw::DistModel(_) | Draw::DistMorph(_)) => {
+                        Some(e.0[w::DIST_OFF])
+                    }
+                    // The specular fields' bases: angles / pi, colour bytes R, G, B, A / 255.
+                    0x59..=0x5b if spec_on => Some((e.f(w::SPEC_ANG + (op.code - 0x59) as usize) / PI).to_bits()),
+                    0x5c..=0x5f if spec_on => Some(
+                        (e.0[w::SPEC_COL].to_le_bytes()[[2, 1, 0, 3][(op.code - 0x5c) as usize]] as f32 / 255.0)
+                            .to_bits(),
+                    ),
+                    _ => None,
+                };
+                if let Some(b) = base {
+                    e.set_s(s + 2, b);
+                }
+            }
+            // Child generators.
+            0x3c => {
+                if let Some(g) = reg.resolve(lib, from, kind::GENERATOR, op.u32(2)) {
+                    children.push(Child::Burst { src: g });
+                }
+            }
+            0x44 | 0x53 | 0x6a => {
+                if let Some(g) = reg.resolve(lib, from, kind::GENERATOR, op.u32(2)) {
+                    children.push(Child::Clone { src: g, op: op.code });
+                }
+            }
+            // Copy from parent.
+            0x4a => {
+                if let Some(p) = parent {
+                    e.set(w::UV, p.uv[0]);
+                    e.set(w::UV + 1, p.uv[1]);
+                }
+            }
+            0x9d => {
+                if let Some(p) = parent {
+                    e.set(w::BIAS, p.bias)
+                }
+            }
+            // 0x1004f126 / f1ae / f238: with a living parent (+0x110 != 0), its life and max life; then, when its
+            // generator's emission stream has op 0x3e / 0x3f / 0x40, S[s + n] = P[k + n] and S[s + 3] = P[k + 3].
+            0x98..=0x9a => {
+                if let Some(p) = parent.filter(|p| p.life != 0.0) {
+                    e.set(w::LIFE, p.life);
+                    e.set(w::MAX_LIFE, p.max_life);
+                    let n = (op.code - 0x98) as usize;
+                    if let Some((code, v)) = p.slots
+                        && code == 0x3e + n as u8
+                    {
+                        e.set_s(s + n, v[0]);
+                        e.set_s(s + 3, v[1]);
+                    }
+                }
+            }
+            // 0x1004ff54 / 0x1004ff8c: a point light takes its parent's intensity / range.
+            0x7e if e.0[w::KIND] == dk::LIGHT => {
+                if let Some(l) = parent.and_then(|p| p.light) {
+                    e.set(w::L_INT, l[0]);
+                }
+            }
+            0x7f if e.0[w::KIND] == dk::LIGHT => {
+                if let Some(l) = parent.and_then(|p| p.light) {
+                    e.set(w::L_RANGE, l[1]);
+                }
+            }
+            // 0x1004ea4d: S[s] = word 1 (its pointer walk to the next 0x4e / 0x4f only runs on a non-zero word 1,
+            // which none of its 7 generators can reach).
+            0x89 => e.set_s(s, op.u32(1)),
+            // Op 0x4b (CMoLfdElem): the glare colour (the two floats have no reader).
+            0x4b if e.0[w::KIND] == dk::FLARE => {
+                let [r, g, b, a] = op.u32(3).to_le_bytes();
+                e.0[w::GLARE] = u32::from_le_bytes([b, g, r, a]);
+            }
+            // Sound ops (CYySoundElem only).
+            0x4c if sound.is_some() => {
+                let s = sound.as_mut().unwrap();
+                if s.loops || inst.flags & 0x400 != 0 || life == 0.0 {
+                    inst.flags &= !0x800;
+                }
+                if inst.mode == 0 {
+                    s.ymode = 1;
+                }
+                s.near = op.f32(2);
+                s.far = op.f32(1);
+                s.vol = 127;
+            }
+            // FUN_10048220 (all.c 53240): the Sph's name is at op+4; op+8 only takes the resolved handle. A missing name
+            // leaves the sound at the generator.
+            0x6b if sound.is_some() => {
+                let name = op.u32(1);
+                if name != 0
+                    && let Some(r) = reg.resolve(lib, from, kind::SPH, name)
+                {
+                    sound.as_mut().unwrap().sph = Some(std::sync::Arc::new(super::sound::sph(reg.libs[r.0].data(r.1))));
+                }
+            }
+            0x8a if sound.is_some() => sound.as_mut().unwrap().keep = true,
+            0x92 if sound.is_some() => sound.as_mut().unwrap().ymode = 1,
+            0x9e if sound.is_some() => sound.as_mut().unwrap().ymode = 2,
+            // Op 0x56: the particle block of a batched D3a (CMoVuAnmElem), from the other ops of this generator.
+            0x56 if e.0[w::KIND] == dk::BATCHED => {
+                let find = |st: usize, code: u8| -> Option<&Op> {
+                    let ops: &[Op] = if st == 1 { stream } else { &inst.streams[st] };
+                    ops.iter().find(|o| o.code == code)
+                };
+                let speed = find(1, 0x08).map_or(0.0, |o| o.f32(1));
+                let o7 = find(1, 0x07);
+                let r = o7.as_ref().map(|o| o.f32(1)).or_else(|| find(1, 0x06).map(|o| o.f32(1))).unwrap_or(0.0);
+                let bscale = o7.as_ref().map_or(Vec3::ONE, |o| Vec3::new(o.f32(3), o.f32(4), o.f32(5)));
+                let base = find(1, 0x02).map_or(Vec3::ZERO, |o| Vec3::new(o.f32(1), o.f32(2), o.f32(3)));
+                let gravity = find(2, 0x03).map_or(Vec3::ZERO, |o| Vec3::new(o.f32(1), o.f32(2), o.f32(3)));
+                let drag = find(2, 0x2c).map_or(1.0, |o| o.f32(1)) - 1.0;
+                let n = (inst.flags & 0x1ff) as usize + 1;
+                // Op 0x4e / 0x4f (0x1004ec2c): each particle starts at a point of the list, random per particle or
+                // the generator's emission count for all (fixed for the element's life).
+                let list = find(1, 0x4e).or_else(|| find(1, 0x4f)).and_then(|o| {
+                    let shared = parent_vtx.filter(|_| o.code == 0x4e);
+                    let r = shared.or_else(|| reg.resolve(lib, from, kind::VTX, o.u32(2)))?;
+                    let d = reg.libs[r.0].data(r.1);
+                    let c = d.get(0..4).map_or(0, |b| u32::from_le_bytes(b.try_into().unwrap()));
+                    let f = |o: usize| d.get(o..o + 4).map_or(0.0, |b| f32::from_le_bytes(b.try_into().unwrap()));
+                    let pts: Vec<Vec3> = (0..c as usize)
+                        .map(|i| Vec3::new(f(0x10 + i * 16), f(0x14 + i * 16), f(0x18 + i * 16)))
+                        .collect();
+                    (c > 0).then_some((o.code, pts))
+                });
+                for _ in 0..n {
+                    let (r1, r2, r3) = (rng.us(1.0), rng.us(1.0), rng.us(1.0));
+                    let u = Vec3::new(r3, r2, r1);
+                    let mut p0 = u * r * bscale;
+                    if let Some((code, pts)) = &list {
+                        let c = pts.len() as u32;
+                        p0 += pts[(if *code == 0x4f { count % c } else { rng.un(c) } % c) as usize];
+                    }
+                    let dir = u.normalize_or_zero();
+                    let vel = dir * speed + base;
+                    parts.push([p0.x, p0.y, p0.z, dir.x, dir.y, dir.z, vel.x, vel.y, vel.z]);
+                }
+                e.0[w::PART_N] = n as u32;
+                e.set_v3(w::GRAVITY, gravity);
+                e.set(w::DRAG, drag);
+            }
+            // Ground snap, point lists, paths, sound, class-specific: not handled yet.
+            // FUN_1004e8d0 0x10051835 (IsType 7): angles f32 @4..@0xc, a TexInfo 4cc @0x10 (an IMG of that 4cc; none or
+            // a miss: DAT 0's `cubemap spec`), the specular colour @0x20 (file RGBA), bits @0x24 & 7; `!sp` names
+            // CLAMP. Words @0x18 / @0x1c have no reader.
+            0x55 if spec_on => {
+                e.set_v3(w::SPEC_ANG, v3(1));
+                let [r, g, b, a] = op.u32(8).to_le_bytes();
+                e.0[w::SPEC_COL] = u32::from_le_bytes([b, g, r, a]);
+                let name = op.u32(4);
+                let hit = if name != 0 { reg.resolve(lib, from, kind::IMG, name) } else { None };
+                let clamp = hit.is_some() && name.to_le_bytes()[..3] == *b"!sp";
+                let img =
+                    hit.or_else(|| reg.global.and_then(|g| reg.libs[g].img_named("cubemap spec").map(|i| (g, i))));
+                let cube = img.is_some_and(|(l, i)| reg.libs[l].is_cubemap(i));
+                spec_tex = img.and_then(|(l, i)| {
+                    reg.libs[l].texture_at(i).map(|t| crate::fx::SpecTex { tex: (l, t), cube, clamp })
+                });
+                e.0[w::SPEC_BITS] = 32 | (op.u32(9) & 7) | if clamp { 8 } else { 0 } | if cube { 16 } else { 0 };
+            }
+            0x55 => {}
+            // vtable +0x38: the ground projection's decal blend +0x198 (u16 @4); a no-op on the other classes.
+            0x43 if matches!(draw, Draw::GroundProj(_)) => e.0[w::GP_BLEND] = op.u32(1) & 0xffff,
+            0x43 => {}
+            // FUN_1004e8d0 0x10051b5b (any class): ring radii f32 @4.., colours @0x14.. (file RGBA), segments byte
+            // @0x24, rings byte @0x25 + 2 (at most 4).
+            0x3a => {
+                for k in 0..4 {
+                    e.set(w::RING_R + k, op.f32(1 + k));
+                    let [r, g, b, a] = op.u32(5 + k).to_le_bytes();
+                    e.0[w::RING_C + k] = u32::from_le_bytes([b, g, r, a]);
+                }
+                e.0[w::RING_SR] = op.byte(0x24) as u32 | (op.byte(0x25) as u32 + 2).min(4) << 8;
+            }
+            // FUN_1004e8d0 0x1004f7d6: onto the ground under the element (1 above to 6 below, as attach point 0x30);
+            // a miss leaves it.
+            0x42 => {
+                let m = snapshot.or(inst.matrix);
+                let wp = m.map_or(pos, |m| m.transform_point3(pos));
+                if let Some(h) = ground(wp - Vec3::Y, wp + Vec3::Y * 6.0) {
+                    pos = m.map_or(h, |m| m.inverse().transform_point3(h));
+                }
+            }
+            // FUN_1004e8d0 0x1004fc85: the parent element's drift (its update op 0x02 slot) x f32 @4, and S[s+3] = 1.
+            0x46 => {
+                if let Some(v) = parent.and_then(|p| p.vel) {
+                    e.set_sv3(s, v * op.f32(1));
+                    e.set_sf(s + 3, 1.0);
+                }
+            }
+            // No-ops in retail: 0x56 on every class but VuAnm / VuLine / VuDist / Disintegrate (the `vib?` NullProg
+            // generators carry it for their per-frame op 0x5f), 0x06 / 0x08 in batched mode (data for 0x56), 0x7b
+            // (the attachment reads its offsets). VuDist takes its 0x56 count at the draw choice.
+            0x56 => {}
+            0x06 | 0x08 | 0x4e | 0x4f if batched => {}
+            // 0x1004fed3: the parent generator's op 0x4e list stands for this stream's (parent_vtx).
+            0x94 => {}
+            // 0x1005156d: element +0x160 = word 1 (a 4-character tag such as 'ki03' or 'lt01'), copied to children by op
+            // 0x9c (0x1005157b); nothing in the effects code reads +0x160, so neither has a visible effect.
+            0x88 | 0x9c => {}
+            0x7b => {}
+            _ => reg.unhandled(1, op.code),
+        }
+    }
+    e.set_v3(w::POS, pos);
+    let life = e.f(w::LIFE);
+    let max_life = e.f(w::MAX_LIFE);
+    let (stream_at, op2) = reg.stream(inst.src);
+    e.0[w::STREAM] = stream_at;
+    e.0[w::OP2_SLOT] = op2.map_or(NONE, |s| s as u32);
+    let frame = match (snapshot, borrow) {
+        (Some(_), _) => NONE,
+        (None, Some(s)) => s,
+        (None, None) => inst.mslot,
+    };
+    e.0[w::PARENT] = frame;
+    if matches!(draw, Draw::GroundProj(_)) && e.0[w::GP_BLEND] == 0 {
+        e.0[w::GP_BLEND] = 0x48;
+    }
+    let cpu = ElemCpu {
+        gp: matches!(draw, Draw::GroundProj(_)).then(|| crate::fx::GroundDecal {
+            blend: e.0[w::GP_BLEND] as u16,
+            cell: None,
+            verts: Vec::new(),
+        }),
+        quake: None,
+        spec: spec_tex,
+        inst: usize::MAX,
+        serial: 0,
+        born: 0,
+        late: false,
+        life,
+        max_life,
+        flags,
+        blend: e.0[w::BLEND] as u16,
+        draw,
+        key: e.f(w::BIAS),
+        drawn: false,
+        hidden: false,
+        back: None,
+        child: None,
+        snapshot,
+        snap_scale,
+        mslot: NONE,
+        frame,
+        borrowed: borrow.is_some(),
+        parts: None,
+        light: (e.0[w::KIND] == dk::LIGHT && e.0[w::L_SLOT] != NONE).then_some(e.0[w::L_SLOT]),
+        light_scale: (e.0[w::KIND] == dk::LIGHT).then(|| [e.f(w::L_ISCALE), e.f(w::L_RSCALE)]),
+        drift: reg.update_op_slot(inst.src, 0x02).is_some(),
+    };
+    Some(Spawn { elem: e, cpu, children, parts, sound, model })
+}
+
+/// FUN_10048740 steps 2-3: the generator's stream. Returns false when this frame's emission is skipped
+/// (distance or view gate).
+pub fn generator_stream(reg: &mut Registry, inst: &mut Instance, f: &Frame) -> bool {
+    let x = if inst.life > 0.0 { (1.0 - (inst.life - inst.elapsed) / inst.life).min(1.0) } else { 0.0 };
+    let mut emit = true;
+    let ops = std::mem::take(&mut inst.streams[0]);
+    let lib = inst.src.0;
+    let from = inst.src.1;
+    let sample = |reg: &Registry, op: &Op, x: f32| -> Option<f32> {
+        let r = reg.resolve(lib, from, kind::KEYFRAME, op.u32(2))?;
+        Some(reg.keyframe(r)?.sample(x, op.u32(3) & 0xf != 0))
+    };
+    let set_emission = |inst: &mut Instance, code: u8, word: usize, v: f32| {
+        if let Some(o) = inst.streams[1].iter_mut().find(|o| o.code == code)
+            && let Some(slot) = o.words.get_mut(word)
+        {
+            *slot = v.to_bits();
+        }
+    };
+    #[allow(clippy::approx_constant, reason = "truncated pi, kept as written")]
+    let half_turns = |v: f32| wrap((v % 2.0) * 3.1415);
+    for op in &ops {
+        match op.code {
+            0x04 | 0x17 => {
+                let t = if op.code == 0x17 { f.dayfrac } else { x };
+                if op.code == 0x04 && x == 0.0 {
+                    continue;
+                }
+                // 0x10049a10: op 4 is linked only by the clone ctor (FUN_100536c0), which also makes its keyframe's first
+                // value the resource's count (word 4 = float(d8 & 0x1ff)); a resource running as itself stops.
+                let clone = inst.clone
+                    || inst.driven.is_some()
+                    || matches!(inst.owner, super::Owner::Task(_) | super::Owner::Actor(_) | super::Owner::Step(_));
+                if op.code == 0x04 && !clone {
+                    inst.countdown = 32767.0;
+                    continue;
+                }
+                let v = if op.code == 0x04 {
+                    let n = reg.libs[lib].generator(from).map_or(0, |g| g.flags & 0x1ff) as f32;
+                    reg.resolve(lib, from, kind::KEYFRAME, op.u32(2))
+                        .and_then(|r| reg.keyframe(r))
+                        .map(|k| k.sample_v0(t, op.u32(3) & 0xf != 0, n))
+                } else {
+                    sample(reg, op, t)
+                };
+                match v {
+                    Some(v) if v > 0.0 => {
+                        let interval = ((60.0 / v) as i32).min(0x7fff) as i16;
+                        inst.interval = interval;
+                        inst.flags = (inst.flags & !0x1ff) | ((v / 60.0) as u32 & 0x1ff);
+                        inst.countdown = inst.countdown.min(interval as f32);
+                    }
+                    Some(_) => inst.countdown = 32767.0,
+                    None => {
+                        inst.countdown = 32767.0;
+                    }
+                }
+            }
+            0x05 => {
+                if let Some(v) = sample(reg, op, x) {
+                    set_emission(inst, 0x08, 1, v)
+                }
+            }
+            0x06 | 0x07 => {
+                if let Some(v) = sample(reg, op, x) {
+                    set_emission(inst, 0x1f, if op.code == 0x06 { 1 } else { 2 }, v)
+                }
+            }
+            0x08 | 0x09 => {
+                if let Some(v) = sample(reg, op, x) {
+                    set_emission(inst, 0x1f, if op.code == 0x08 { 6 } else { 7 }, half_turns(v))
+                }
+            }
+            0x0b..=0x0d => {
+                if let Some(v) = sample(reg, op, x) {
+                    set_emission(inst, 0x01, 5 + (op.code - 0x0b) as usize, v)
+                }
+            }
+            0x12..=0x14 => {
+                if let Some(v) = sample(reg, op, x) {
+                    set_emission(inst, 0x02, 1 + (op.code - 0x12) as usize, v)
+                }
+            }
+            0x0a => {
+                let p = inst.streams[1].first().map(|o| Vec3::new(o.f32(5), o.f32(6), o.f32(7))).unwrap_or_default();
+                let wp = inst.matrix.map_or(p, |m| m.transform_point3(p));
+                let d = (f.eye - wp).length();
+                let far = if op.f32(1) == 0.0 { f.draw_distance } else { op.f32(1) };
+                if d > far || d < op.f32(2) {
+                    emit = false;
+                    if op.u32(3) & 1 != 0 {
+                        inst.stopping = true;
+                        inst.flags &= !0x800;
+                    }
+                    break;
+                }
+            }
+            // FUN_100496f0 case 0x15 / FUN_1004a870 / FUN_1006ed10: the unit cube (word 1 is 0 in every file) as
+            // diag(@0xc, @0x10, @0x14) at the emission position, through the generator's matrix, the view and the
+            // projection. Shown when a corner is strictly inside the viewport (x / |w|, y / |w|; |w| = 1 at w = 0: a
+            // box bigger than the view with every corner off it is hidden, no near test); word 6 bit 1 also needs every
+            // corner with w != 0 between near and far (z / w in 0..1, 0.1 / 65535). The occlusion query runs only for
+            // an element's clone (none in the data); op 0x54's +0xa0 is dead (no 0x15 generator keys it).
+            0x15 => {
+                let p = inst.streams[1].first().map(|o| Vec3::new(o.f32(5), o.f32(6), o.f32(7))).unwrap_or_default();
+                let s = Vec3::new(op.f32(3), op.f32(4), op.f32(5));
+                let m = f.view * inst.matrix.unwrap_or(glam::Mat4::IDENTITY);
+                let ys = f.focal / 192.0;
+                let xs = ys / reg.aspect.max(0.1);
+                let mut on = false;
+                let mut deep = true;
+                for k in 0..8 {
+                    let c = Vec3::new([-1.0, 1.0][k & 1], [-1.0, 1.0][k >> 1 & 1], [-1.0, 1.0][k >> 2]);
+                    let v = m.transform_point3(p + s * c);
+                    let w = -v.z;
+                    let aw = if w == 0.0 { 1.0 } else { w.abs() };
+                    on |= (v.x * xs / aw).abs() < 1.0 && (v.y * ys / aw).abs() < 1.0;
+                    if w != 0.0 && !(crate::render::NEAR..=65535.0).contains(&w) {
+                        deep = false;
+                    }
+                }
+                if !on || (op.u32(6) & 2 != 0 && !deep) {
+                    emit = false;
+                    break;
+                }
+            }
+            // 0x11 follow and the 0x0e..0x10 spins are the attachment (fx/mod.rs, every frame); 0x5d is never read.
+            0x11 => inst.flags |= 0x200,
+            0x0e..=0x10 | 0x5d => {}
+            _ => reg.unhandled(0, op.code),
+        }
+    }
+    inst.streams[0] = ops;
+    emit
+}

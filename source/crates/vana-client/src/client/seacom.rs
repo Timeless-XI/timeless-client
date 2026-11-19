@@ -1,0 +1,413 @@
+//! "menu    comment" (FUN_101dd2b0 / FUN_101ddcb0 / FUN_101dde60 / FUN_101dd330): three lines of 40 bytes. Mode 2 the
+//! own search comment (MODLOG "Search: arealist"; searchma's Edit Comment via comgenre), sent on close as c2s 0x0E0
+//! when it or the type changed; mode 0 our bazaar message (MODLOG "Set Bazaar": its Edit Comment), as c2s
+//! 0x0DE; mode 3 the linkshell message (the holder / pearlsack submenu's caption under the mouse, linkshell.rs), sent
+//! on close as c2s 0x0E2. Mode 1 is the /check target's bazaar message, which only shows (inspect.rs).
+
+use super::World;
+use super::game_ui::GameUi;
+use super::net::NetCommand;
+use crate::audio::Ui;
+
+pub const EDITOR: &str = "menu    comment";
+/// The text box's bytes per line (FUN_101c5be0(9, 40, ..)).
+const LINE: usize = 40;
+const WHITE: u32 = 0x8080_8080;
+
+/// Block 2 (the lines), block 5 (what was sent last), +0x17 the type and +0x18 the type sent last (0xff at login).
+#[derive(Clone, Debug)]
+pub struct Store {
+    pub lines: [String; 3],
+    sent: [String; 3],
+    pub kind: u8,
+    sent_kind: u8,
+    /// +0x19: our message came (s2c 0x0CA with MyFlag; the bazaar store only).
+    pub own_in: bool,
+    /// DAT_104df770 +0x136a4 past 0: a zone was entered since the character's login (zone_in).
+    entered: bool,
+}
+
+impl Default for Store {
+    fn default() -> Self {
+        Store {
+            lines: Default::default(),
+            sent: Default::default(),
+            kind: 0,
+            sent_kind: 0xff,
+            own_in: false,
+            entered: false,
+        }
+    }
+}
+
+/// The open editor: +0x15, the line whose box is open; +0x16 the mode (0 bazaar, 2 search comment, 3 linkshell
+/// message).
+#[derive(Clone, Copy, Debug)]
+pub struct Editor {
+    pub line: usize,
+    pub mode: u8,
+}
+
+/// FUN_101dd2b0 (mode 2): the type, line 0 edited at once; stacked on the chat log (window flag 0x1000).
+pub fn open(w: &mut World, kind: u8) {
+    w.seacom.kind = kind;
+    w.seacom_edit = Some(Editor { line: 0, mode: 2 });
+}
+
+/// FUN_101dd2b0 (mode 0, type 0x73): our bazaar message.
+pub fn open_bazaar(w: &mut World) {
+    w.seacom_edit = Some(Editor { line: 0, mode: 0 });
+}
+
+/// Mode 3 (type 0x73) edits the linkshell message's lines, block 3. Nothing opens it: retail's only opener,
+/// menu_comment_fn (FUN_101e7530), is called from case 4 of link2 / link3's handlers, the caption's number, and the
+/// submenus carry registry flag 0x200000, so their caption never takes the cursor. The mode's store and close are kept
+/// as the window class has them.
+fn store(w: &mut World, mode: u8) -> &mut Store {
+    match mode {
+        0 => &mut w.bazaar_msg,
+        3 => &mut w.ls_edit_msg,
+        _ => &mut w.seacom,
+    }
+}
+
+fn store_ref(w: &World, mode: u8) -> &Store {
+    match mode {
+        0 => &w.bazaar_msg,
+        3 => &w.ls_edit_msg,
+        _ => &w.seacom,
+    }
+}
+
+/// FUN_101ddae0(msg, 1): our s2c 0x0CA message (MyFlag) cut into three lines of 40, trailing spaces trimmed, into
+/// the bazaar store's lines and its last-sent copy.
+pub fn own_message(w: &mut World, raw: &[u8]) {
+    let lines: [String; 3] = std::array::from_fn(|k| {
+        let line: Vec<u8> = raw.iter().skip(LINE * k).take(LINE).copied().take_while(|&c| c != 0).collect();
+        crate::dat::font::decode_sjis(&line).trim_end().to_string()
+    });
+    let s = &mut w.bazaar_msg;
+    (s.lines, s.sent, s.own_in) = (lines.clone(), lines, true);
+}
+
+/// The editor has no children: the mouse's only message is the right click, message 6 (FUN_1015def0): Escape.
+pub fn right_click(w: &mut World) {
+    if w.seacom_edit.is_some() {
+        w.sounds.push(Ui::Cancel as u32);
+        close(w);
+    }
+}
+
+/// The box is open the whole time the editor is.
+pub fn typing(w: &World) -> bool {
+    w.seacom_edit.is_some()
+}
+
+/// A line's Shift-JIS bytes (a phrase block 6).
+fn bytes(line: &str) -> usize {
+    crate::dat::font::encode_sjis(line).len()
+}
+
+/// Tab completion at the line's end (ours, fep.rs FieldFep; the box is mode 9, as the macro lines, which takes phrase
+/// blocks): Tab opens the list on the last word, its keys move it, Enter puts the pick in place of the word within 40
+/// bytes, typing closes it. True when the list took the event.
+fn complete(w: &mut World, e: Editor, ev: &egui::Event) -> bool {
+    use super::fep::{self, FieldPick};
+    // The modern UI's (the classic comment box keeps retail's keys).
+    if !w.modern {
+        return false;
+    }
+    let egui::Event::Key { key, pressed: true, modifiers, .. } = ev else {
+        // The space winit sends after the Space key belongs to that key, which moved the open list.
+        if matches!(ev, egui::Event::Text(t) if t == " ") && w.field_fep.is_some() {
+            return true;
+        }
+        if matches!(ev, egui::Event::Text(_) | egui::Event::Paste(_)) {
+            w.field_fep = None;
+        }
+        return false;
+    };
+    let text = store(w, e.mode).lines[e.line].clone();
+    let at = text.chars().count();
+    let Some(mut list) = w.field_fep.take() else {
+        if *key == egui::Key::Tab {
+            w.field_fep = fep::field_open(w, &text);
+            return true;
+        }
+        return false;
+    };
+    match fep::field_key(w, &mut list, *key, modifiers.shift) {
+        FieldPick::Pass => {
+            w.field_fep = Some(list);
+            false
+        }
+        FieldPick::Keep => {
+            w.field_fep = Some(list);
+            true
+        }
+        FieldPick::Close => true,
+        FieldPick::Put(put) => {
+            match fep::field_put(&text, at, &list.word, &put, |t| bytes(t) <= LINE) {
+                Some((next, _)) => {
+                    store(w, e.mode).lines[e.line] = next;
+                    w.sounds.push(Ui::Select as u32);
+                }
+                None => w.sounds.push(Ui::Error as u32),
+            }
+            true
+        }
+    }
+}
+
+/// FUN_101dde60 with the box: text (40 bytes), Backspace (a phrase as one); Tab the auto-translate list; Down /
+/// Enter commit and go to the next line (the last reopens itself), Up the previous; Escape commits and closes (it
+/// keeps the text and sends).
+pub fn text_events(w: &mut World, events: &[egui::Event]) {
+    let Some(mut e) = w.seacom_edit else { return };
+    for ev in events {
+        if complete(w, e, ev) {
+            continue;
+        }
+        let line = &mut store(w, e.mode).lines[e.line];
+        match ev {
+            egui::Event::Text(t) | egui::Event::Paste(t) => {
+                for c in t.chars().filter(|c| (' '..='~').contains(c)) {
+                    if bytes(line) < LINE {
+                        line.push(c);
+                    }
+                }
+            }
+            egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => {
+                // A phrase block (four chars here) goes whole.
+                let n = line.chars().rev().take_while(|&c| c as u32 >= crate::dat::font::PHRASE_BASE).count();
+                for _ in 0..if n >= 4 { 4 } else { 1 } {
+                    line.pop();
+                }
+            }
+            egui::Event::Key { key: egui::Key::ArrowDown | egui::Key::Enter, pressed: true, .. } => {
+                e.line = (e.line + 1).min(2)
+            }
+            egui::Event::Key { key: egui::Key::ArrowUp, pressed: true, .. } => e.line = e.line.saturating_sub(1),
+            egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } => {
+                w.sounds.push(Ui::Cancel as u32);
+                close(w);
+                return;
+            }
+            _ => {}
+        }
+    }
+    w.seacom_edit = Some(e);
+}
+
+/// The lines padded with spaces to 40 each (123 bytes, FUN_101dd5a0).
+fn padded(lines: &[String; 3]) -> Vec<u8> {
+    let mut t = vec![b' '; 123];
+    for (k, l) in lines.iter().enumerate() {
+        let b = crate::dat::font::encode_sjis(l);
+        let n = b.len().min(LINE);
+        t[LINE * k..LINE * k + n].copy_from_slice(&b[..n]);
+    }
+    t
+}
+
+/// FUN_101dd330. Mode 0: when the lines changed, c2s 0x0DE {the 123 bytes, NUL} (FUN_100e55b0, 0x80 bytes). Mode 2:
+/// when the lines or the type changed, all blank sends "" (block 5 line 0 cleared), else the padded lines; then c2s
+/// 0x0E0 (FUN_100e5980). Mode 3 (win_comment_v08, FUN_101de900): when the lines changed (FUN_101deaf0(3, 6)), all
+/// blank sends "" (block 6 line 0 cleared), else the lines that have a first byte joined by a line feed
+/// (FUN_101dec20, DAT_10351e4c) and block 6 takes them; then, with linkshell 1 worn (FUN_100e9870), c2s 0x0E2 with
+/// flag 0x40 (FUN_100eae20), as /lsmes set.
+fn close(w: &mut World) {
+    w.field_fep = None;
+    let Some(e) = w.seacom_edit.take() else { return };
+    if e.mode == 3 {
+        let s = &mut w.ls_edit_msg;
+        if s.lines == s.sent {
+            return;
+        }
+        let text = ls_text(s);
+        super::linkshell::set_message(w, &text);
+        return;
+    }
+    if e.mode == 0 {
+        let s = &mut w.bazaar_msg;
+        if s.lines == s.sent {
+            return;
+        }
+        s.sent = s.lines.clone();
+        let mut b = vec![0u8; 0x7c];
+        b[..123].copy_from_slice(&padded(&s.lines));
+        let _ = w.net.commands.send(NetCommand::Packet { id: 0x0DE, body: b });
+        return;
+    }
+    commit(w);
+}
+
+/// The linkshell message as mode 3's close sends it, the last-sent copy brought up to date.
+fn ls_text(s: &mut Store) -> Vec<u8> {
+    if s.lines.iter().all(|l| l.chars().all(|c| c == ' ')) {
+        s.sent[0].clear();
+        return Vec::new();
+    }
+    s.sent = s.lines.clone();
+    let lines: Vec<Vec<u8>> =
+        s.lines.iter().filter(|l| !l.is_empty()).map(|l| crate::dat::font::encode_sjis(l)).collect();
+    lines.join(&b'\n')
+}
+
+/// The search comment's send (FUN_101dd330 mode 2 / FUN_100e5980): c2s 0x0E0 when the lines or the type changed.
+fn commit(w: &mut World) {
+    let s = &mut w.seacom;
+    if s.lines == s.sent && s.kind == s.sent_kind {
+        return;
+    }
+    let text = if s.lines.iter().all(|l| l.trim_matches(' ').is_empty()) {
+        s.sent[0].clear();
+        Vec::new()
+    } else {
+        s.sent = s.lines.clone();
+        padded(&s.lines)
+    };
+    s.sent_kind = s.kind;
+    let kind = s.kind;
+    send(w, kind, &text);
+}
+
+/// FUN_100e57c0 from netstat's init, once a zone: the first since the character's login (the counter FUN_100f05f0
+/// resets) clears the search comment (ffxiusr.msg saved empty), later ones send the kept one; c2s 0x0E0, then c2s
+/// 0x00F (32 zero bytes; LSB's CLSTAT reads nothing).
+pub fn zone_in(w: &mut World) {
+    let s = &mut w.seacom;
+    if !s.entered {
+        s.entered = true;
+        (s.lines, s.kind) = (Default::default(), 0);
+        (s.sent, s.sent_kind) = (Default::default(), 0);
+    }
+    let text = if s.lines.iter().all(|l| l.trim_matches(' ').is_empty()) { Vec::new() } else { padded(&s.lines) };
+    let kind = s.kind;
+    send(w, kind, &text);
+    let _ = w.net.commands.send(NetCommand::Packet { id: 0x00F, body: vec![0; 0x20] });
+}
+
+/// /seacom N ["text"] (FUN_1007efb0 -> FUN_101ddb30): line N (0..2) set to the text or cleared; nothing while the
+/// editor is open; nothing sent.
+pub fn set_line(w: &mut World, n: usize, text: &str) {
+    if w.seacom_edit.is_some() || n > 2 {
+        return;
+    }
+    w.seacom.lines[n] = text.chars().filter(|c| (' '..='~').contains(c)).take(LINE).collect();
+}
+
+/// /seacomup (FUN_1007f020): the type, then the send as the editor's close does.
+pub fn upload(w: &mut World, kind: u8) {
+    w.seacom.kind = kind;
+    commit(w);
+}
+
+/// c2s 0x0E0 (0x98 bytes): text[128] @4, installTime @0x84, "WIN" @0x88, srvExCode @0x8c, cliExCode @0x90, msgType @0x94.
+/// LSB reads only the text and the type *(inf: the time, platform byte and ex codes)*.
+fn send(w: &World, kind: u8, text: &[u8]) {
+    let mut b = vec![0u8; 0x94];
+    b[..text.len().min(0x7f)].copy_from_slice(&text[..text.len().min(0x7f)]);
+    b[0x80..0x84].copy_from_slice(&install_time().to_le_bytes());
+    b[0x84..0x87].copy_from_slice(b"WIN");
+    b[0x88..0x8c].copy_from_slice(&w.expansions.to_le_bytes());
+    b[0x8c..0x90].copy_from_slice(&w.features.to_le_bytes());
+    b[0x90..0x94].copy_from_slice(&(kind as u32).to_le_bytes());
+    let _ = w.net.commands.send(NetCommand::Packet { id: 0x0E0, body: b });
+}
+
+/// FUN_100e3220: the u32 time() kept in "ffxiusr.sys" (8 bytes {time, -1}), made on first use.
+fn install_time() -> u32 {
+    let path = crate::config::data_dir().join("ffxiusr.sys");
+    if let Ok(b) = std::fs::read(&path)
+        && b.len() >= 4
+    {
+        return u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as u32);
+    let _ = std::fs::write(&path, [now.to_le_bytes(), u32::MAX.to_le_bytes()].concat());
+    now
+}
+
+/// The editor as the modern layer draws it: the mode, the three lines, the line being edited.
+pub(super) fn view(w: &World) -> Option<(u8, [String; 3], usize, Option<(Vec<String>, usize)>)> {
+    let e = w.seacom_edit?;
+    let s = store_ref(w, e.mode);
+    let fep = w.field_fep.as_ref().map(|f| (f.cands.iter().map(|c| c.text.clone()).collect(), f.sel));
+    Some((e.mode, s.lines.clone().map(|l| super::fep::plain(w, &l)), e.line, fep))
+}
+
+/// The mouse onto line `k`.
+pub(super) fn set_edit_line(w: &mut World, k: usize) {
+    if let Some(e) = w.seacom_edit.as_mut().filter(|_| k < 3) {
+        e.line = k;
+    }
+}
+
+/// Help slot 2: 0xe 0x32 while the editor is open; title slot 2 0xd 0x0f "Set Bazaar" in mode 0 (none in modes 2
+/// and 3).
+pub fn bars(gu: &GameUi, w: &World, bars: &mut super::hudtop::BarText) {
+    if let Some(e) = w.seacom_edit {
+        bars.help[2] = gu.menu_msg(0x32, "");
+        if e.mode == 0 {
+            bars.title[2] = gu.title_msg(0x0f).unwrap_or_default();
+        }
+    }
+}
+
+/// FUN_101ddcb0 (30261102_0: win_comment_v10, FUN_101df280): the lines at (x0 + 0x14, y0 + 4 + 16 k), 335 px, the
+/// edited one as the live box, and the genre dot (FUN_1020b4b0) at (x0 + 8, y0 + 8) in mode 2; in the other modes at
+/// x0 + 4, x1 - x0 - 8 wide, no dot. A line not being edited is expanded with the auto-translate brackets
+/// (FUN_101b8850(.., 1, 0)) before it is fitted.
+pub fn draw(gu: &mut GameUi, w: &World, sw: f32, sh: f32) -> Vec<[f32; 4]> {
+    let mut rects = Vec::new();
+    let Some(e) = w.seacom_edit.filter(|_| !w.modern) else {
+        gu.force_flags(EDITOR, None);
+        return rects;
+    };
+    gu.force_flags(EDITOR, Some(0x1000));
+    let Some(win) = gu.lobby_window_off(EDITOR, sw, sh, (0.0, 0.0), None, false, &[]) else { return rects };
+    let [x0, y0, ww, _] = win.frame;
+    let s = store_ref(w, e.mode);
+    let (dx, width) = if e.mode == 2 { (20.0, 335.0) } else { (4.0, ww - 8.0) };
+    for (k, l) in s.lines.iter().enumerate() {
+        let (x, y) = (x0 + dx, y0 + 4.0 + 16.0 * k as f32);
+        if k == e.line {
+            let l = super::fep::plain(w, l);
+            let caret = if (w.started.elapsed().as_secs_f32() * 60.0) as u32 % 30 < 20 { "|" } else { "" };
+            gu.text(&format!("{l}{caret}"), x, y, 0, [0x80; 4]);
+        } else {
+            gu.text_fit(&super::fep::braced(w, l), x, y, width, WHITE);
+        }
+    }
+    let list = w
+        .field_fep
+        .as_ref()
+        .map(|f| super::fep::draw_list(gu, &f.cands, f.sel, x0 + dx - 8.0, y0 + 2.0 + 16.0 * e.line as f32));
+    let g = (w.seacom.kind >> 4 & 0xf) as usize;
+    if e.mode == 2
+        && let Some(&s) = super::search::GENRE.get(g.wrapping_sub(1))
+    {
+        gu.sprite("menu    windowps", s, x0 + 8.0, y0 + 8.0, WHITE);
+    }
+    rects.push(win.frame);
+    rects.extend(list);
+    rects
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FUN_101dec20 / win_comment_v08 mode 3: lines with a first byte joined by a line feed; all blank is "" and only
+    /// clears the sent copy's first line.
+    #[test]
+    fn ls_message_text() {
+        let mut s = Store { lines: ["Meet at".into(), String::new(), " eight".into()], ..Default::default() };
+        assert_eq!(ls_text(&mut s), b"Meet at\n eight");
+        assert_eq!(s.sent, s.lines);
+        s.lines = [" ".into(), String::new(), "  ".into()];
+        assert_eq!(ls_text(&mut s), b"");
+        assert_eq!(s.sent, [String::new(), String::new(), " eight".to_string()]);
+    }
+}

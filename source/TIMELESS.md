@@ -1,0 +1,29 @@
+# Timeless XI client
+
+The Timeless XI build of [vana-client](https://github.com/lenonk/vana-client) (MIT). Branch `timeless` carries our
+changes on top of upstream `master`; every change is marked with a `Timeless XI:` comment so it is easy to find when
+merging upstream.
+
+## What is different from upstream
+
+| Change | Where |
+|---|---|
+| A third interface, **Timeless** (Config > Settings > Client > Interface: Classic / Modern / Timeless). It is the modern layer drawn in the Timeless look; config `timeless_ui` (with `modern_ui` on). | `config.rs`, `client/settings.rs`, `client/mod.rs` (set each frame) |
+| The Timeless palette, over the modern one: `assets/timeless/theme.json` (same keys as `assets/modern/theme.json`). A `timeless-theme.json` beside the client's `config.json` (`%APPDATA%\vana-client\`) replaces it at start-up, for trying colours without a rebuild. | `client/modern/theme.rs` |
+| **Timeless hotbars** (Interface = Timeless): three bars of twelve slots on 1..0 - =, Ctrl + them and Alt + them. A slot holds a spell, ability, weapon skill, item, command line or **Attack** (engages the target, or disengages while engaged; the pack's attack / disengage icon on a red plate, lit while fighting; each job's first bar starts with it in slot 1), run through the same code as the game's menus and text commands. Left-click or the key runs it; right-click opens the picker (Magic / Abilities / Weapon Skills / Items / Commands, the last listing the chat line's recent commands); drag swaps slots, and dropping off the bars clears one. The number row opens the chat line only while the hotbars are off; Ctrl / Alt no longer raise or run the game's macro palette. A recast shows the Timeless logo's hourglass inside the icon, starting the slot's size and shrinking to nothing as its sand drains (seconds left in the corner), a press darkens the slot, and a ready slot flashes. Each bar is either kept per main job (default, FFXIV-style) or shared by every job: the bar's label shows ALL or the job (WAR ...) and a click switches, keeping what it showed. Saved per character as `timeless-hotbar-<name>.json` beside config.json (version 2: `shared_on`, the shared `bars`, `jobs` by job id). Config `timeless_hotbar` (Settings > Controls > Timeless Hotbars, default on) turns them off; the keys then open the chat line and run macros as before. | `client/timeless/` (logic, keys), `client/modern/tlbar.rs` (drawing); hooks in `client/mod.rs` (key arm after the chat line's, key functions), `client/modern/mod.rs`, `client/lua/{mod,actions}.rs` (actions reachable), `client/linehist.rs` (`recent`) |
+| **Actions window** (the Actions button over the hotbars; Escape closes): Ability Book (Job Abilities by job with the level each comes at; Weapon Skills by weapon type with the skill level), Spell Book (White / Black / Summoning / Ninjutsu / Songs / Blue; the tooltip lists every job and level), Item Book (usable items drag straight from the Items list, which drags while the hotbars are on), Misc Book (Attack, Ranged, Check, Assist, Wide Scan, Map, Region Info, menus ...) and Commands. Tiles drag onto a slot. The tables are this server's: `assets/timeless/{abilities,weaponskills,spells}.tsv` from `tools/timeless/book_data.py <Phoenix dir> <out dir>` (base SQL + the era module's UPDATEs and weapon_skills.yaml, enabled expansions only, 75 cap). | `client/timeless/book.rs`, `client/modern/tlbook.rs`; `client/modern/items.rs` (rows drag), `client/lua/actions.rs` (`MENUS` reachable) |
+| **Hotbar lock** (padlock left of Actions): locked = no slot set, swapped, dragged or cleared, no picker, the bars pinned where they stand (`Show.at`); saved in the hotbar file (v3). **Escape order**: our picker / Actions window close only when newer than the game window with the keys (opened or clicked later; modern `focus_panel` made pub(super)). **Misc slots toggle**: a second press closes the menu window it opened (Escapes sent through `UiInput.events`, only while that window or the main menu has the keys); Wide Scan folds its window. **Default places**: Timeless chat window as wide as its tab row (`chat.rs` room_default); the bars right of it, bottoms level (`Panels.retail`, until moved; a pre-v3 file forgets the saved place once). | `client/timeless/hotbar.rs`, `client/modern/{tlbar,chat,tabs,theme,mod}.rs`, `client/mod.rs` (Escape injection) |
+| Client self-updates come from `Timeless-XI/timeless-client` releases, so an upstream release never replaces this build. The mod and DAT catalogues and release notes still come from upstream. | `client/updater.rs` |
+
+## Build (Windows)
+
+`build_timeless.bat` (repository root) finds Visual Studio's 64-bit compiler, runs
+`cargo build --release` and leaves `target\release\vana-client.exe`, which `VanaLocal\Play Timeless Local.bat` uses.
+
+## Merging upstream
+
+```
+git fetch upstream
+git merge upstream/master
+```
+Conflicts, if any, are in the files above. Run `cargo test -p vana-client theme` after a merge.

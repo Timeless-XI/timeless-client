@@ -1,0 +1,544 @@
+//! One effect DAT as the generator system sees it: its folder tree, generators, keyframes and the meshes, sprites
+//! and textures their elements draw. Meshes, sprites and textures are parsed only when a generator names them.
+
+use crate::dat::generator::{D3m, Generator, KeyFrame, Tree, fourcc_u32, kind};
+use crate::dat::zone;
+use anyhow::{Result, bail};
+use std::collections::HashMap;
+
+/// A vertex as every effect mesh is drawn: the D3m layout (FVF 0x152), colour as RGBA bytes.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct MeshVertex {
+    pub pos: [f32; 3],
+    pub normal: [f32; 3],
+    pub rgba: [u8; 4],
+    pub uv: [f32; 2],
+}
+
+/// A run of triangles with one texture: its 16-byte IMG name (None = untextured) and, once resolved, the
+/// texture as (library, index).
+#[derive(Clone, Debug)]
+pub struct MeshGroup {
+    pub name: Option<String>,
+    pub texture: Option<(usize, usize)>,
+    pub range: std::ops::Range<u32>,
+}
+
+/// A triangle-list mesh: a D3m, or an MMB taken in its place (FUN_100485c0's fallback; drawn by the model
+/// renderer FUN_1017c840, element +0x179 = 1).
+#[derive(Clone, Debug)]
+pub struct Mesh {
+    pub verts: Vec<MeshVertex>,
+    pub groups: Vec<MeshGroup>,
+    pub mmb: bool,
+    /// DistModel's ranges (FUN_10040670 untextured): the textured runs, then the tail only with header byte 5, one
+    /// triangle in when there are no texture groups and the format is 5..7 (FUN_1003fcb0).
+    pub dist: Vec<std::ops::Range<u32>>,
+    /// The bounding radius ops 0x2e / 0x48 add (FUN_10041a40): a D3m's header word >> 4 (FUN_1003fcd0), an MMB's half
+    /// box diagonal (its scene node +0xd4, FUN_1016fcd0).
+    pub radius: f32,
+    /// An MMB's header box (min, max), for FUN_10183760's cull.
+    pub bbox: [[f32; 3]; 2],
+}
+
+/// A D3a sprite animation (chunk 0x21, FUN_1003d870; MODLOG "Effect generators"): frames of quads as triangle lists,
+/// one texture. `frames` = (first vertex, quad count).
+#[derive(Clone, Debug)]
+pub struct Sprite {
+    pub verts: Vec<MeshVertex>,
+    pub frames: Vec<(u32, u32)>,
+    pub name: String,
+    pub texture: Option<(usize, usize)>,
+    /// h0 >= 1 and byte 7 == 0: UVs are in texels of the loaded texture (divided once it resolves).
+    pub texel_uv: bool,
+    /// The lens-flare layout (byte 4 != 0, FUN_1003ddb0): one frame of every group's quads, each vertex's group t
+    /// in normal.x.
+    pub flare: bool,
+}
+
+impl Sprite {
+    pub fn parse(d: &[u8]) -> Result<Self> {
+        if d.len() < 0x18 {
+            bail!("d3a: {} bytes", d.len());
+        }
+        let h0 = i16::from_le_bytes([d[0], d[1]]);
+        let count = i16::from_le_bytes([d[2], d[3]]).max(0) as usize;
+        let name = String::from_utf8_lossy(&d[8..24]).into_owned();
+        let f = |o: usize| f32::from_le_bytes(d[o..o + 4].try_into().unwrap());
+        if d[4] != 0 {
+            // Groups (count byte 5): {u8, u8, quads, u8, f32 t, 12 bytes} then quads x 6 vertices.
+            let mut verts = Vec::new();
+            let mut at = 0x18;
+            for _ in 0..d[5] {
+                if at + 0x14 > d.len() {
+                    break;
+                }
+                let (q, t) = (d[at + 2] as usize, f(at + 4));
+                at += 0x14;
+                if at + q * 0x90 > d.len() {
+                    bail!("d3a flare: group out of range");
+                }
+                for k in 0..q * 6 {
+                    let o = at + 24 * k;
+                    let c = &d[o + 12..o + 16];
+                    verts.push(MeshVertex {
+                        pos: [f(o), f(o + 4), f(o + 8)],
+                        normal: [t, 0.0, 0.0],
+                        rgba: [c[2], c[1], c[0], c[3]],
+                        uv: [f(o + 16), f(o + 20)],
+                    });
+                }
+                at += q * 0x90;
+            }
+            let quads = (verts.len() / 6) as u32;
+            return Ok(Self { verts, frames: vec![(0, quads)], name, texture: None, texel_uv: false, flare: true });
+        }
+        let mut verts = Vec::new();
+        let mut frames = Vec::new();
+        let mut at = 0x18;
+        for _ in 0..count {
+            if at + 4 > d.len() {
+                break;
+            }
+            let q = d[at + 2] as usize;
+            at += 4;
+            if at + q * 0x90 > d.len() {
+                bail!("d3a: frame out of range");
+            }
+            frames.push((verts.len() as u32, q as u32));
+            for k in 0..q * 6 {
+                let o = at + 24 * k;
+                let c = &d[o + 12..o + 16];
+                verts.push(MeshVertex {
+                    pos: [f(o), f(o + 4), f(o + 8)],
+                    normal: [0.0, 0.0, 1.0],
+                    rgba: [c[2], c[1], c[0], c[3]],
+                    uv: [f(o + 16), f(o + 20)],
+                });
+            }
+            at += q * 0x90;
+        }
+        Ok(Self { verts, frames, name, texture: None, texel_uv: h0 >= 1 && d[7] == 0, flare: false })
+    }
+}
+
+/// A D3b morph mesh (chunk 0x25, FUN_1003e600 / FUN_1003ea60; MODLOG "D3b morph elements"): K key meshes of V
+/// positions and N packed normals; corners (position index, normal index, colour doubled, uv) of T triangles.
+#[derive(Clone, Debug)]
+pub struct Morph {
+    pub k: u32,
+    pub v: u32,
+    pub n: u32,
+    pub t: u32,
+    /// Per corner: position index, normal index, RGBA (raw; vs_morph doubles it), u, v (as bits).
+    pub corners: Vec<[u32; 5]>,
+    pub positions: Vec<[f32; 3]>,
+    pub normals: Vec<u32>,
+    pub name: String,
+    pub texture: Option<(usize, usize)>,
+    /// Byte 2 bit 7: alpha test (GREATER 0x60).
+    pub alpha_test: bool,
+}
+
+impl Morph {
+    pub fn parse(d: &[u8]) -> Result<Self> {
+        if d.len() < 0x20 {
+            bail!("d3b: {} bytes", d.len());
+        }
+        let u16_at = |o: usize| u16::from_le_bytes([d[o], d[o + 1]]) as usize;
+        let u32_at = |o: usize| d.get(o..o + 4).map_or(0, |b| u32::from_le_bytes(b.try_into().unwrap()));
+        let k = (((d[2] << 1) as i8) >> 1).max(0) as usize;
+        let (v, n) = (u16_at(4), u16_at(6));
+        let idx = u16_at(8) + ((d[3] as usize) << 16);
+        let t = u16_at(0x0a);
+        let col = u16_at(0x0c);
+        let mut uv = u16_at(0x0e);
+        if uv <= col {
+            uv += 0x10000;
+        }
+        if idx + t * 12 > d.len()
+            || col + t * 12 > d.len()
+            || uv + t * 24 > d.len()
+            || 0x20 + k * (v * 12 + n * 4) > d.len()
+        {
+            bail!("d3b: tables out of range");
+        }
+        let mut positions = Vec::with_capacity(k * v);
+        let mut normals = Vec::with_capacity(k * n);
+        for key in 0..k {
+            let base = 0x20 + key * (v * 12 + n * 4);
+            for i in 0..v {
+                let f = |o: usize| f32::from_bits(u32_at(base + i * 12 + o));
+                positions.push([f(0), f(4), f(8)]);
+            }
+            for i in 0..n {
+                normals.push(u32_at(base + v * 12 + i * 4));
+            }
+        }
+        let corners = (0..t * 3)
+            .map(|c| {
+                let b = &d[col + c * 4..col + c * 4 + 4];
+                let rgba = u32::from_le_bytes([b[2], b[1], b[0], b[3]]);
+                [
+                    u16_at(idx + c * 2) as u32,
+                    u16_at(idx + t * 6 + c * 2) as u32,
+                    rgba,
+                    u32_at(uv + c * 8),
+                    u32_at(uv + c * 8 + 4),
+                ]
+            })
+            .collect();
+        Ok(Self {
+            k: k as u32,
+            v: v as u32,
+            n: n as u32,
+            t: t as u32,
+            corners,
+            positions,
+            normals,
+            name: String::from_utf8_lossy(&d[0x10..0x20]).into_owned(),
+            texture: None,
+            alpha_test: d[2] & 0x80 != 0,
+        })
+    }
+}
+
+pub struct Library {
+    pub file_id: u32,
+    pub tree: Tree,
+    pub gens: Vec<Generator>,
+    pub gen_at: HashMap<usize, usize>,
+    pub keys: HashMap<usize, KeyFrame>,
+    pub meshes: HashMap<usize, Mesh>,
+    pub sprites: HashMap<usize, Sprite>,
+    pub morphs: HashMap<usize, Morph>,
+    pub textures: Vec<zone::Texture>,
+    tex_of_node: HashMap<usize, usize>,
+    file: Vec<u8>,
+}
+
+/// IMG names compared as stored: 16 bytes (NULs and spaces kept apart only at the end).
+pub fn tex_name(raw: &str) -> String {
+    raw.trim_end_matches(['\0', ' ']).to_string()
+}
+
+impl Library {
+    pub fn load(file_id: u32, file: Vec<u8>) -> Result<Self> {
+        let tree = Tree::build(&file)?;
+        let mut gens = Vec::new();
+        let mut gen_at = HashMap::new();
+        for i in tree.of_kind(kind::GENERATOR) {
+            match Generator::parse(&tree, i, &file) {
+                Ok(g) => {
+                    gen_at.insert(i, gens.len());
+                    gens.push(g);
+                }
+                Err(e) => log::warn!("effects: DAT {file_id}: {e:#}"),
+            }
+        }
+        let keys =
+            tree.of_kind(kind::KEYFRAME).map(|i| (i, KeyFrame::parse(&file[tree.nodes[i].data.clone()]))).collect();
+        Ok(Self {
+            file_id,
+            tree,
+            gens,
+            gen_at,
+            keys,
+            meshes: HashMap::new(),
+            sprites: HashMap::new(),
+            morphs: HashMap::new(),
+            textures: Vec::new(),
+            tex_of_node: HashMap::new(),
+            file,
+        })
+    }
+
+    pub fn generator(&self, node: usize) -> Option<&Generator> {
+        self.gen_at.get(&node).map(|&g| &self.gens[g])
+    }
+
+    /// The node's payload.
+    pub fn data(&self, node: usize) -> &[u8] {
+        &self.file[self.tree.nodes[node].data.clone()]
+    }
+
+    /// A folder's chunks in the file: from its own header to the end of its last descendant.
+    pub fn folder_range(&self, node: usize) -> std::ops::Range<usize> {
+        fn end(t: &Tree, n: usize) -> usize {
+            t.nodes[n].children.iter().map(|&c| end(t, c)).fold(t.nodes[n].data.end, usize::max)
+        }
+        self.tree.nodes[node].data.start.saturating_sub(16)..end(&self.tree, node).min(self.file.len())
+    }
+
+    /// Parses the mesh at `node` (a D3m, or an MMB with the zone keys) once; textures stay names until the
+    /// registry resolves them.
+    pub fn mesh(&mut self, node: usize, keys: &zone::Keys) -> Option<&mut Mesh> {
+        if !self.meshes.contains_key(&node) {
+            let mesh = match self.tree.nodes[node].kind {
+                kind::D3M => D3m::parse(self.data(node)).map(|m| from_d3m(&m)),
+                kind::MMB => {
+                    let mut d = self.data(node).to_vec();
+                    zone::decode_mmb(keys, &mut d);
+                    // Type 2 (48-byte vertices) draws nothing on the effect path (its VB stays empty).
+                    if d.get(4) == Some(&2) {
+                        Ok(Mesh {
+                            verts: Vec::new(),
+                            groups: Vec::new(),
+                            mmb: true,
+                            dist: Vec::new(),
+                            radius: 0.0,
+                            bbox: [[0.0; 3]; 2],
+                        })
+                    } else {
+                        zone::parse_mmb(&d).map(|m| from_mmb(&m))
+                    }
+                }
+                _ => return None,
+            };
+            match mesh {
+                Ok(m) => {
+                    self.meshes.insert(node, m);
+                }
+                Err(e) => {
+                    log::warn!("effects: DAT {} mesh {}: {e:#}", self.file_id, self.tree.nodes[node].name());
+                    return None;
+                }
+            }
+        }
+        self.meshes.get_mut(&node)
+    }
+
+    pub fn sprite(&mut self, node: usize) -> Option<&mut Sprite> {
+        if !self.sprites.contains_key(&node) {
+            match Sprite::parse(self.data(node)) {
+                Ok(s) => {
+                    self.sprites.insert(node, s);
+                }
+                Err(e) => {
+                    log::debug!("effects: DAT {} sprite {}: {e:#}", self.file_id, self.tree.nodes[node].name());
+                    return None;
+                }
+            }
+        }
+        self.sprites.get_mut(&node)
+    }
+
+    /// Loader-thread work: the meshes, sprites and textures the file's generators name (op 1), so the first
+    /// frame that emits them does not parse them.
+    pub fn prewarm(&mut self, keys: &zone::Keys) {
+        let wanted: Vec<(usize, u8, u32)> =
+            self.gens.iter().filter_map(|g| g.template().map(|o| (g.node, o.byte(0x21), o.u32(3)))).collect();
+        for (from, k, name) in wanted {
+            let node = match k {
+                0x0b | 0x0c | 0x1f => self.find(from, kind::D3M, name).or_else(|| self.find(from, kind::MMB, name)),
+                0x0e | 0x21 | 0x39 => self.find(from, kind::D3A, name),
+                _ => None,
+            };
+            let Some(node) = node else { continue };
+            let names: Vec<String> = match self.tree.nodes[node].kind {
+                kind::D3A => self.sprite(node).map(|s| vec![s.name.clone()]).unwrap_or_default(),
+                _ => self
+                    .mesh(node, keys)
+                    .map(|m| m.groups.iter().filter_map(|g| g.name.clone()).collect())
+                    .unwrap_or_default(),
+            };
+            for n in names {
+                if let Some(i) = self.find_texture(node, &n) {
+                    self.texture_at(i);
+                }
+            }
+        }
+    }
+
+    pub fn morph(&mut self, node: usize) -> Option<&mut Morph> {
+        if !self.morphs.contains_key(&node) {
+            match Morph::parse(self.data(node)) {
+                Ok(m) => {
+                    self.morphs.insert(node, m);
+                }
+                Err(e) => {
+                    log::debug!("effects: DAT {} morph {}: {e:#}", self.file_id, self.tree.nodes[node].name());
+                    return None;
+                }
+            }
+        }
+        self.morphs.get_mut(&node)
+    }
+
+    /// FUN_1003a0d0: the IMG whose 16-byte name matches, from the folder holding `node`: the first IMG of that
+    /// subtree (file order), then the rest of the folder that IMG is in.
+    pub fn find_texture(&self, node: usize, name16: &str) -> Option<usize> {
+        let want = tex_name(name16);
+        let folder = if self.tree.nodes[node].kind == kind::FOLDER { node } else { self.tree.nodes[node].parent? };
+        let mut sub = Vec::new();
+        self.walk(folder, &mut sub);
+        let first = *sub.iter().find(|&&i| self.tree.nodes[i].kind == kind::IMG)?;
+        let mut rest = Vec::new();
+        match self.tree.nodes[first].parent {
+            Some(p) => self.walk(p, &mut rest),
+            None => rest = (0..self.tree.nodes.len()).filter(|&i| self.tree.nodes[i].parent.is_none()).collect(),
+        }
+        let from = rest.iter().position(|&i| i == first)?;
+        rest[from..].iter().copied().find(|&i| self.tree.nodes[i].kind == kind::IMG && self.img_name(i) == want)
+    }
+
+    /// The fallback's candidates: IMGs by their last 8 name bytes (FUN_10074570 step 2).
+    pub fn find_texture_tail(&self, name16: &str) -> Option<usize> {
+        let tail = |s: &str| s.as_bytes().get(8..16).map(|b| tex_name(&String::from_utf8_lossy(b)));
+        let want = tail(&format!("{name16:<16}"))?;
+        self.tree.of_kind(kind::IMG).find(|&i| tail(&format!("{:<16}", self.img_name(i))).as_ref() == Some(&want))
+    }
+
+    /// FUN_1001d940: an IMG named `cubemap ...` becomes a cube texture (only face -Z filled).
+    pub fn is_cubemap(&self, i: usize) -> bool {
+        self.img_name(i).starts_with("cubemap ")
+    }
+
+    /// The IMG whose 16-byte name is `name` (spaces trimmed).
+    pub fn img_named(&self, name: &str) -> Option<usize> {
+        self.tree.of_kind(kind::IMG).find(|&i| self.img_name(i).trim_end() == name)
+    }
+
+    fn img_name(&self, i: usize) -> String {
+        self.data(i).get(1..17).map(|b| tex_name(&String::from_utf8_lossy(b))).unwrap_or_default()
+    }
+
+    /// A folder's descendants in file order.
+    fn walk(&self, folder: usize, out: &mut Vec<usize>) {
+        for &c in &self.tree.nodes[folder].children {
+            out.push(c);
+            if self.tree.nodes[c].kind == kind::FOLDER {
+                self.walk(c, out);
+            }
+        }
+    }
+
+    /// The texture of IMG node `i`, parsed once.
+    pub fn texture_at(&mut self, i: usize) -> Option<usize> {
+        if let Some(&t) = self.tex_of_node.get(&i) {
+            return Some(t);
+        }
+        match zone::parse_img(self.data(i)) {
+            Ok(t) => {
+                // Decoded here, as before the lazy decode: the effects renderer reads every texture's alpha
+                // (soften_alpha) when it first draws it, mid-frame.
+                let _ = t.rgba();
+                let k = self.textures.len();
+                self.textures.push(t);
+                self.tex_of_node.insert(i, k);
+                Some(k)
+            }
+            Err(e) => {
+                log::warn!("effects: DAT {} texture: {e:#}", self.file_id);
+                None
+            }
+        }
+    }
+
+    /// FUN_10071310 from the generator's folder, by type and 4cc.
+    pub fn find(&self, from: usize, kind: u8, name: u32) -> Option<usize> {
+        self.tree.find(from, kind, fourcc_u32(name))
+    }
+
+    /// FUN_10071510: a folder's subtree only, file order.
+    pub fn find_in(&self, folder: usize, kind: u8, name: [u8; 4]) -> Option<usize> {
+        let mut sub = Vec::new();
+        self.walk(folder, &mut sub);
+        sub.into_iter().find(|&i| self.tree.nodes[i].kind == kind && self.tree.nodes[i].name == name)
+    }
+
+    /// The whole file from its root (how DAT 0 is searched once a file's scope runs out).
+    pub fn find_global(&self, kind: u8, name: u32) -> Option<usize> {
+        let n = fourcc_u32(name);
+        self.tree.nodes.iter().position(|x| x.kind == kind && (name == 0 || x.name == n))
+    }
+
+    /// Whether IMG node `i` sits in a `syst/effe` folder (texture entry flag 0x100, FUN_1001cab0).
+    pub fn in_syst_effe(&self, i: usize) -> bool {
+        let p = self.tree.nodes[i].parent;
+        p.is_some_and(|p| {
+            self.tree.nodes[p].name == crate::dat::generator::fourcc("effe")
+                && self.tree.nodes[p]
+                    .parent
+                    .is_some_and(|q| self.tree.nodes[q].name == crate::dat::generator::fourcc("syst"))
+        })
+    }
+}
+
+/// FUN_10040220's groups: triangles per texture (u16s at +8, any format), then the untextured tail when header
+/// byte 5 is set or there is no texture.
+fn from_d3m(m: &D3m) -> Mesh {
+    let verts: Vec<MeshVertex> = m
+        .vertices
+        .iter()
+        .map(|v| MeshVertex {
+            pos: v.pos,
+            normal: v.normal,
+            rgba: [v.bgra[2], v.bgra[1], v.bgra[0], v.bgra[3]],
+            uv: v.uv,
+        })
+        .collect();
+    let total = verts.len() as u32;
+    let mut groups = Vec::new();
+    let mut at = 0u32;
+    for (k, &tris) in m.per_texture.iter().enumerate().take(m.textures.len()) {
+        let end = (at + tris as u32 * 3).min(total);
+        if end > at {
+            groups.push(MeshGroup { name: m.textures.get(k).cloned(), texture: None, range: at..end });
+        }
+        at = end;
+    }
+    if (m.textures.is_empty() || m.untextured_tail) && at < total {
+        groups.push(MeshGroup { name: None, texture: None, range: at..total });
+    }
+    let skip = m.textures.is_empty() && (5..=7).contains(&(m.format & 0xf));
+    let dist =
+        groups
+            .iter()
+            .filter(|g| g.name.is_some() || m.untextured_tail)
+            .map(|g| {
+                if g.name.is_none() && skip {
+                    (g.range.start + 3).min(g.range.end)..g.range.end
+                } else {
+                    g.range.clone()
+                }
+            })
+            .filter(|r| !r.is_empty())
+            .collect();
+    Mesh { verts, groups, mmb: false, dist, radius: m.radius, bbox: [[0.0; 3]; 2] }
+}
+
+/// The MMB node of FUN_10168eb0: every model de-indexed into a triangle list with its texture.
+fn from_mmb(m: &zone::Mmb) -> Mesh {
+    let mut verts = Vec::new();
+    let mut groups = Vec::new();
+    for model in &m.models {
+        let indices = if model.strip { strip_to_list(&model.indices) } else { model.indices.clone() };
+        let start = verts.len() as u32;
+        for &i in &indices[..indices.len() / 3 * 3] {
+            let Some(v) = model.vertices.get(i as usize) else { continue };
+            let [b, g, r, a] = v.color.to_le_bytes();
+            verts.push(MeshVertex { pos: v.pos, normal: v.normal, rgba: [r, g, b, a], uv: v.uv });
+        }
+        let end = verts.len() as u32;
+        if end > start {
+            groups.push(MeshGroup { name: Some(model.texture.clone()), texture: None, range: start..end });
+        }
+    }
+    let d = glam::Vec3::from(m.max) - glam::Vec3::from(m.min);
+    Mesh { verts, groups, mmb: true, dist: Vec::new(), radius: d.length() * 0.5, bbox: [m.min, m.max] }
+}
+
+/// Strip to list, dropping the degenerate triangles that join strips (as render/mod.rs does for scenery).
+fn strip_to_list(strip: &[u16]) -> Vec<u16> {
+    let mut out = Vec::with_capacity(strip.len() * 3);
+    for i in 0..strip.len().saturating_sub(2) {
+        let (a, b, c) = (strip[i], strip[i + 1], strip[i + 2]);
+        if a == b || b == c || a == c {
+            continue;
+        }
+        if i % 2 == 0 { out.extend([a, b, c]) } else { out.extend([b, a, c]) }
+    }
+    out
+}

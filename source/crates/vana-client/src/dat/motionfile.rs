@@ -1,0 +1,376 @@
+//! Motion files an actor loads on top of its model (the model's +0x7e4 list, FUN_100d22a0): event
+//! motion banks (event ops 0x5b / 0x66 / 0x5f) and the PC battle files while engaged (FUN_100cf650).
+
+use super::DatIndex;
+use super::character::{Animation, load_file};
+use anyhow::Result;
+
+/// Animations and type-0x07 schedulers of one motion DAT.
+#[derive(Debug)]
+pub struct MotionFile {
+    pub id: u32,
+    pub animations: Vec<Animation>,
+    pub schedulers: Vec<(String, Vec<u8>)>,
+    /// The animations as GPU words, built by the loader thread.
+    pub packed: Option<std::sync::Arc<super::animpack::Packed>>,
+}
+
+impl MotionFile {
+    pub fn load(index: &DatIndex, id: u32) -> Result<Self> {
+        let f = load_file(&index.read(id)?)?;
+        Ok(MotionFile { id, animations: f.animations, schedulers: f.schedulers, packed: None })
+    }
+}
+
+/// What the PC motion loaders read from a PC-look model's files (FUN_100cd3e0 / FUN_100cea10).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PcMotion {
+    pub race: u8,
+    /// Main weapon info[3] (+0x87b): battle motion set; -1 = none.
+    pub weapon: i8,
+    /// Main weapon info[4] (+0x87c): the "in N" / "out N" draw schedulers.
+    pub draw: i8,
+    /// Body info[9] (+0x881): skirt motion set, 1 or 2 (0 / -1 = none).
+    pub skirt: i8,
+    /// Dual wield (+0x8b5, a weapon in the sub slot): the sub weapon's info[3] (+0x88a), its battle motion set.
+    pub dual: Option<i8>,
+    /// Sub weapon info[4] (+0x87f, FUN_100ceae0 case 7): its hand's draw digit (scheduler op 0x84).
+    pub sub_draw: i8,
+}
+
+/// FUN_100cd3e0: a sub-slot model is a shield when its id (low 12 bits) is in one of these ranges, else a weapon held
+/// in the left hand (dual wield).
+const SHIELDS: [(u16, u16); 4] = [(0, 0x3f), (0x75, 0x8f), (0x1d7, 0x1ff), (0x280, 0x2bf)];
+
+pub fn dual_wield(sub: u16) -> bool {
+    let id = sub & 0xfff;
+    !SHIELDS.iter().any(|&(lo, hi)| (lo..=hi).contains(&id))
+}
+
+/// Op 0x5b / 0x5f sub 3, 5 (FUN_100b3570 -> FUN_100d00a0): one file, val + a base by range.
+pub fn bank0_file(val: i32) -> u32 {
+    let v = val.max(0) as u32;
+    v + match v {
+        0..0x200 => 0x7d68,
+        0x200..0x400 => 0xbfef,
+        0x400..0x800 => 0xdc19,
+        0x800..0xc00 => 0xe95b,
+        _ => 0x10323,
+    }
+}
+
+/// Op 0x66 / 0x5f sub 4, 6 (FUN_100d01b0, PC-look models): the motion file, then the skirt file
+/// when the body has one (skirt 1 / 2 pick the first or second skirt block). Blocks of 0x46 per range.
+pub fn bank1_files(val: i32, skirt: i8) -> Vec<u32> {
+    if !(0..0x118).contains(&val) {
+        return Vec::new();
+    }
+    let v = val as u32;
+    let (base, k) = match v / 0x46 {
+        0 => (0x7fc8, v),
+        1 => (0xef39, v - 0x46),
+        2 => (0x15711, v - 0x8c),
+        _ => (0x18f5f, v - 0xd2),
+    };
+    let mut out = vec![base + k];
+    if skirt > 0 {
+        out.push(base + k + if skirt == 1 { 0x46 } else { 0x8c });
+    }
+    out
+}
+
+/// Upper-body battle file per race 0..8 (0x10352334) and the two skirt blocks (0x10352348).
+const BATTLE_UPPER: [u32; 9] = [9672, 9672, 12848, 16024, 19200, 22376, 22376, 25776, 28952];
+const BATTLE_SKIRT: [[u32; 2]; 9] = [
+    [9800, 9928],
+    [9800, 9928],
+    [12976, 13104],
+    [16152, 16280],
+    [19328, 19456],
+    [22504, 22632],
+    [22504, 22632],
+    [25904, 26032],
+    [29080, 29208],
+];
+
+/// Dual wield's files (FUN_100cf900): upper body by the main weapon (0x103523a4) and by the sub (0x1035236c), the skirt
+/// files likewise (0x103523b8 / 0x10352380). The same tables in 30261006_0 at 0x1035d7c4 / 0x1035d78c.
+const DUAL_MAIN: [u32; 9] = [40815, 40815, 42095, 43375, 44655, 45935, 45935, 47215, 48495];
+const DUAL_SUB: [u32; 9] = [40431, 40431, 41711, 42991, 44271, 45551, 45551, 46831, 48111];
+const DUAL_MAIN_SKIRT: [[u32; 2]; 9] = [
+    [40943, 41071],
+    [40943, 41071],
+    [42223, 42351],
+    [43503, 43631],
+    [44783, 44911],
+    [46063, 46191],
+    [46063, 46191],
+    [47343, 47471],
+    [48623, 48751],
+];
+const DUAL_SUB_SKIRT: [[u32; 2]; 9] = [
+    [40559, 40687],
+    [40559, 40687],
+    [41839, 41967],
+    [43119, 43247],
+    [44399, 44527],
+    [45679, 45807],
+    [45679, 45807],
+    [46959, 47087],
+    [48239, 48367],
+];
+
+/// Engaged (FUN_100cf650; FUN_100cf900 with dual wield): FUN_100d0dc0(race, 0) and FUN_100d0d00(race, 1, 0), or with
+/// dual wield the main's then the sub's upper body, then their skirts; a set of -1 loads nothing.
+pub fn battle_files(pc: &PcMotion) -> Vec<u32> {
+    let r = if pc.race > 8 { 1 } else { pc.race as usize };
+    let skirt = (pc.skirt as i32 - 1).clamp(0, 1) as usize;
+    let Some(sub) = pc.dual else {
+        if pc.weapon < 0 {
+            return Vec::new();
+        }
+        return vec![BATTLE_UPPER[r] + pc.weapon as u32, BATTLE_SKIRT[r][skirt] + pc.weapon as u32];
+    };
+    let set = |base: u32, v: i8| (v >= 0).then(|| base + v as u32);
+    [
+        set(DUAL_MAIN[r], pc.weapon),
+        set(DUAL_SUB[r], sub),
+        set(DUAL_MAIN_SKIRT[r][skirt], pc.weapon),
+        set(DUAL_SUB_SKIRT[r][skirt], sub),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+/// Emote files of PC looks (FUN_100cfc10, model kinds 0 / 1 / 6): 0x103523dc[race] + group and the skirt
+/// file 0x103523ee[race * 2 + skirt] + group.
+const EMOTE_UPPER: [u32; 9] = [10056, 10056, 13232, 16408, 19584, 22760, 22984, 26160, 29336];
+const EMOTE_SKIRT: [u32; 19] = [
+    0, 10120, 10184, 10120, 10184, 13296, 13360, 16472, 16536, 19648, 19712, 22824, 22888, 23048, 23112, 26224, 26288,
+    29400, 29464,
+];
+
+/// A mannequin's pose bank (FUN_100d1f70 on status 0x31): DAT_1035d83c[race] + bank and the skirt file
+/// DAT_1035d84e[skirt + race * 2] + bank, as the emote tables just before them.
+const MANNEQUIN_UPPER: [u32; 9] = [10088, 10088, 13264, 16440, 19616, 22792, 23016, 26192, 29368];
+const MANNEQUIN_SKIRT: [u32; 19] = [
+    0, 10152, 10216, 10152, 10216, 13328, 13392, 16504, 16568, 19680, 19744, 22856, 22920, 23080, 23144, 26256, 26320,
+    29432, 29496,
+];
+/// DAT_1037e028: the pose motions "mq0?".."mq7?".
+const MANNEQUIN_MOTION: [&str; 8] = ["mq0", "mq1", "mq2", "mq3", "mq4", "mq5", "mq6", "mq7"];
+
+pub fn mannequin_files(pc: &PcMotion, bank: u32) -> Vec<u32> {
+    let r = if pc.race > 8 { 1 } else { pc.race as usize };
+    let mut files = vec![MANNEQUIN_UPPER[r] + bank];
+    if pc.skirt > 0
+        && let Some(b) = MANNEQUIN_SKIRT.get(pc.skirt as usize + r * 2).filter(|b| **b != 0)
+    {
+        files.push(b + bank);
+    }
+    files
+}
+
+/// FUN_101cd3b0: exdata[0x13] -> (bank, motion): bank pose >> 3, motion "mq(pose & 7)"; pose 8 is bank 1 by the
+/// weapon class of the look record's item (`class`, 6 bare-handed when none).
+pub fn mannequin_pose(pose: u8, class: Option<u8>) -> (u32, &'static str) {
+    if pose == 8 {
+        return (1, MANNEQUIN_MOTION[(class.unwrap_or(6) & 7) as usize]);
+    }
+    ((pose >> 3) as u32, MANNEQUIN_MOTION[(pose & 7) as usize])
+}
+
+/// FUN_1009f420: emote number -> motion index (table 0x103504a8); -2 none, 0x7a.. computed forms (not handled).
+const EMOTE_MOTION: [i16; 97] = [
+    1, 0, 127, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, -2, 18, -2, 20, 21, 22, 23, 24, -2, 26, 27, 28, -2, -2, 31,
+    -2, 33, 34, 35, 19, 21, 38, 24, 23, 39, 40, 48, 56, 126, 88, 80, 81, 82, 256, 257, 258, 259, 260, 261, 262, 263,
+    125, 272, 273, 274, 275, 276, 277, 278, 289, 96, 97, 98, 99, -2, -2, -2, -2, 124, 123, 123, 123, 123, 123, 123,
+    123, 123, 123, 123, 123, 123, 123, 123, 123, 123, 123, 123, 123, 123, 123, 123, 122,
+];
+
+/// An emote's motion index (FUN_1009f230 refuses numbers above 0x60).
+pub fn emote_motion(n: u32) -> Option<u32> {
+    let m = *EMOTE_MOTION.get(n as usize)?;
+    (0..0x7a).contains(&m).then_some(m as u32).or_else(|| (m >= 0x80).then_some(m as u32))
+}
+
+/// FUN_100a0b90's motion index for emote `n` with the packet's Param: sitting (status 0x2f) or in a chair (0x3f..0x53)
+/// only emotes 4..9, 13 and 37 move (tables 0x1035b7b8 / 0x1035b6f0: 64.. / 232..); else table 0x1035b880 with the
+/// computed forms: salute Param + 2 (nation), /hurray 0x48 + the main weapon's motion class (6 bare-handed), /bell
+/// Param + 0x68, /jobemote (Param & 1) + 0x88 + (Param >> 1) * 8, /aim 0xe0 + the ranged class. Err: /aim failed
+/// (Param 0xffff). Not done: /aim's ranged class (taken as 0).
+pub fn emote_index(n: u32, param: u16, status: u8, weapon_class: u8) -> Result<Option<u32>, ()> {
+    const SEATED: [u32; 8] = [4, 5, 6, 7, 8, 9, 13, 37];
+    if status == 0x2f || (0x3f..=0x53).contains(&status) {
+        let base = if status == 0x2f { 64 } else { 232 };
+        return Ok(SEATED.iter().position(|&e| e == n).map(|k| base + k as u32));
+    }
+    let Some(&m) = EMOTE_MOTION.get(n as usize) else { return Ok(None) };
+    Ok(match m {
+        0x7f => Some(param as u32 + 2),
+        0x7e => Some(0x48 + weapon_class as u32),
+        0x7c => Some(param as u32 + 0x68),
+        0x7b => Some((param as u32 & 1) + 0x88 + (param as u32 >> 1) * 8),
+        0x7a if param == 0xffff => return Err(()),
+        0x7a => Some(0xe0),
+        _ => emote_motion(n),
+    })
+}
+
+/// The files (state 0xc: FUN_100cfbc0(index >> 3)) and scheduler "em0" + (index & 7) (FUN_100d0ea0) of a motion.
+pub fn emote_files(pc: &PcMotion, motion: u32) -> (Vec<u32>, String) {
+    let group = motion >> 3;
+    let r = if pc.race > 8 { 1 } else { pc.race as usize };
+    let mut files = vec![EMOTE_UPPER[r] + group];
+    if pc.skirt > 0
+        && let Some(b) = EMOTE_SKIRT.get(pc.skirt as usize + r * 2).filter(|b| **b != 0)
+    {
+        files.push(b + group);
+    }
+    (files, format!("em0{}", motion & 7))
+}
+
+/// "in N" / "out N" (FUN_100d0e60 / FUN_100d0e80): weapon draw and sheathe schedulers.
+pub fn draw_scheduler(pc: &PcMotion, out: bool) -> String {
+    format!("{}{}", if out { "out" } else { "in " }, pc.draw.max(0))
+}
+
+/// Scheduler op 0x84 (case at 0x10059ae3, dual wield "in 0" / "out0"): one hand's draw or sheathe, "in1" / "ot1"
+/// (main) or "in2" / "ot2" (sub) and that hand's digit (+0x87c / +0x87f, below 0 taken as 0).
+pub fn hand_name(out: bool, sub: bool, digit: i8) -> [u8; 4] {
+    [
+        if out { b'o' } else { b'i' },
+        if out { b't' } else { b'n' },
+        if sub { b'2' } else { b'1' },
+        b'0' + digit.max(0) as u8,
+    ]
+}
+
+pub fn hand_scheduler(pc: &PcMotion, out: bool, sub: bool) -> String {
+    String::from_utf8_lossy(&hand_name(out, sub, if sub { pc.sub_draw } else { pc.draw })).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// MODLOG "Mog House mannequins": pose bytes to (bank, motion) and the bank files.
+    #[test]
+    fn mannequin_poses_and_files() {
+        assert_eq!(mannequin_pose(0, None), (0, "mq0"));
+        assert_eq!(mannequin_pose(1, None), (0, "mq1"));
+        assert_eq!(mannequin_pose(4, None), (0, "mq4"));
+        assert_eq!(mannequin_pose(8, None), (1, "mq6"));
+        assert_eq!(mannequin_pose(8, Some(3)), (1, "mq3"));
+        assert_eq!(mannequin_pose(9, None), (1, "mq1"));
+        assert_eq!(mannequin_pose(0x10, None), (2, "mq0"));
+        assert_eq!(mannequin_pose(25, None), (3, "mq1"));
+        let pc = |race, skirt| PcMotion { race, weapon: -1, draw: 0, skirt, dual: None, sub_draw: 0 };
+        assert_eq!(mannequin_files(&pc(7, 1), 1), vec![26193, 26257]);
+        assert_eq!(mannequin_files(&pc(8, 0), 0), vec![29368]);
+        assert_eq!(mannequin_files(&pc(0, 2), 0), mannequin_files(&pc(1, 2), 0));
+    }
+
+    /// FUN_100a0b90's forms: /wave 10; salute 2 + nation; /hurray bare-handed 0x4e; /jobemote WAR (Param 0) 0x88; /aim
+    /// without a ranged weapon fails; seated emotes from their tables.
+    #[test]
+    fn emote_indices() {
+        assert_eq!(emote_index(8, 0, 0, 6), Ok(Some(10)));
+        assert_eq!(emote_index(2, 1, 0, 6), Ok(Some(3)));
+        assert_eq!(emote_index(43, 0, 0, 6), Ok(Some(0x4e)));
+        assert_eq!(emote_index(74, 0, 0, 6), Ok(Some(0x88)));
+        assert_eq!(emote_index(96, 0xffff, 0, 6), Err(()));
+        assert_eq!(
+            (emote_index(4, 0, 0x2f, 6), emote_index(37, 0, 0x40, 6), emote_index(10, 0, 0x2f, 6)),
+            (Ok(Some(64)), Ok(Some(239)), Ok(None))
+        );
+    }
+
+    fn index() -> Option<DatIndex> {
+        DatIndex::open(&crate::config::Config::load().ffxi_dir()).ok()
+    }
+
+    fn has_sched(f: &MotionFile, n: &str) -> bool {
+        f.schedulers.iter().any(|(s, _)| s == n)
+    }
+
+    /// Zone 230 scripts: 0x66 #29 'tlk0' on an Elvaan, 0x5b #417 'lklr', 0x5b #872 'hi07'.
+    #[test]
+    fn event_motion_files() {
+        let Some(index) = index() else { return };
+        assert_eq!(bank1_files(29, 1), [32741, 32811]);
+        assert_eq!(bank1_files(0x50, 2), [0xef39 + 10, 0xef39 + 10 + 0x8c]);
+        assert!(bank1_files(0x118, 1).is_empty());
+        let f = MotionFile::load(&index, bank1_files(29, 0)[0]).unwrap();
+        assert!(has_sched(&f, "tlk0") && has_sched(&f, "sha0"));
+        // Elvaan skeleton: 99 bones; the upper-body tracks reach bone 98.
+        assert_eq!(f.animations.iter().flat_map(|a| a.tracks.iter().map(|t| t.bone)).max(), Some(98));
+        assert!(has_sched(&MotionFile::load(&index, bank0_file(417)).unwrap(), "lklr"));
+        assert_eq!(bank0_file(872), 50007);
+        assert!(has_sched(&MotionFile::load(&index, bank0_file(872)).unwrap(), "hi07"));
+    }
+
+    /// Rahal's emote 13 in 0x1f7 (op 0x6e): motion 15, Elvaan M file 16408 + 1 with scheduler em07.
+    #[test]
+    fn emote_13() {
+        let Some(index) = index() else { return };
+        assert_eq!(emote_motion(13), Some(15));
+        assert_eq!(emote_motion(15), None);
+        let (files, name) =
+            emote_files(&PcMotion { race: 3, weapon: -1, draw: 0, skirt: 1, dual: None, sub_draw: 0 }, 15);
+        assert_eq!((files.as_slice(), name.as_str()), ([16409, 16473].as_slice(), "em07"));
+        assert!(has_sched(&MotionFile::load(&index, 16409).unwrap(), "em07"));
+    }
+
+    /// Hume M, unarmed (main 0 = file 8392, info[3] 10): battle file 9682 with btl and the swings.
+    #[test]
+    fn pc_battle_files() {
+        let Some(index) = index() else { return };
+        let pc = PcMotion { race: 1, weapon: 10, draw: 0, skirt: 1, dual: None, sub_draw: 0 };
+        assert_eq!(battle_files(&pc), [9682, 9810]);
+        let f = MotionFile::load(&index, 9682).unwrap();
+        assert!(f.animations.iter().any(|a| a.name == "btl1"));
+        assert!(has_sched(&f, "ati0") && has_sched(&f, "atf0") && has_sched(&f, &draw_scheduler(&pc, false)));
+        let s = MotionFile::load(&index, 9810).unwrap();
+        assert!(s.animations.iter().any(|a| a.name == "btl2"));
+        assert!(battle_files(&PcMotion { weapon: -1, ..pc }).is_empty());
+        // Sword (main 1 = file 8393, info[3] 2): 9674; its standing swing hits at "dada".
+        let sword = PcMotion { weapon: 2, skirt: 2, ..pc };
+        assert_eq!(battle_files(&sword), [9674, 9930]);
+        let f = MotionFile::load(&index, 9674).unwrap();
+        let ati0 = &f.schedulers.iter().find(|(n, _)| n == "ati0").unwrap().1;
+        let p = crate::dat::sched::plan(ati0, &["dada"]);
+        assert!(p.hit_at.is_some() && p.motions.first().is_some_and(|m| m.name == "at0"));
+    }
+
+    /// Mithra with a Wakizashi in each hand (main and sub model 310, set 3): the dual wield files, the sub's swings,
+    /// the draw: "in 0" calls the main hand's "in10" (i0c) at tick 6 and the sub's "in20" (i1c) at 40.
+    #[test]
+    fn dual_wield_files() {
+        assert!(
+            dual_wield(310)
+                && dual_wield(0x7136)
+                && !dual_wield(0)
+                && !dual_wield(0x80)
+                && !dual_wield(0x1e0)
+                && !dual_wield(0x2a0)
+        );
+        let pc = PcMotion { race: 7, weapon: 3, draw: 0, skirt: 2, dual: Some(3), sub_draw: 0 };
+        assert_eq!(battle_files(&pc), [47218, 46834, 47474, 47090]);
+        assert_eq!(battle_files(&PcMotion { dual: Some(-1), ..pc }), [47218, 47474]);
+        let Some(index) = index() else { return };
+        let sub = MotionFile::load(&index, 46834).unwrap();
+        assert!(has_sched(&sub, "bti4"));
+        let main = MotionFile::load(&index, 47218).unwrap();
+        let sched = |f: &MotionFile, n: &str| f.schedulers.iter().find(|(m, _)| m == n).unwrap().1.clone();
+        assert_eq!(crate::dat::sched::hand_calls(&sched(&main, "in 0")), [(6, false, false), (40, false, true)]);
+        assert_eq!(crate::dat::sched::hand_calls(&sched(&main, "out0")), [(6, true, true), (40, true, false)]);
+        assert_eq!(
+            [hand_scheduler(&pc, false, false), hand_scheduler(&pc, false, true), hand_scheduler(&pc, true, true)],
+            ["in10", "in20", "ot20"]
+        );
+        assert_eq!(crate::dat::sched::plan(&sched(&main, "in10"), &[]).motions[0].name, "i0c");
+        assert_eq!(crate::dat::sched::plan(&sched(&sub, "in20"), &[]).motions[0].name, "i1c");
+    }
+}

@@ -1,0 +1,674 @@
+//! An element's state as the GPU keeps it: the CMoElem fields the update stream touches (MODLOG "Effect
+//! generators"), one u32 array per element, floats as bits. The emission stream fills it on the CPU (fx/emit.rs);
+//! the update stream runs on the GPU every frame (render/effects.wgsl).
+
+/// Word offsets; each comment names the CMoElem field.
+pub mod w {
+    pub const POS: usize = 0; // +0x54..+0x5c
+    pub const LIFE: usize = 3; // +0x110
+    pub const ROT: usize = 4; // +0xe0..+0xe8
+    pub const MAX_LIFE: usize = 7; // +0x114
+    pub const SCALE: usize = 8; // +0xec..+0xf4
+    pub const FADE: usize = 11; // +0x138
+    pub const COLOR: usize = 12; // +0xf8, D3DCOLOR (B, G, R, A bytes)
+    pub const FLAGS: usize = 13; // +0x10c
+    pub const STREAM: usize = 14; // the update stream's first word in the ops buffer
+    pub const PARENT: usize = 15; // matrix slot (generator +0xa4 or the +0x108 snapshot), NONE = world
+    pub const UV: usize = 16; // +0x120, +0x124
+    pub const BIAS: usize = 18; // +0x128
+    pub const T: usize = 19; // life fraction (update op 0x0e)
+    pub const FRAME_CD: usize = 20; // +0x118
+    pub const FRAME_PERIOD: usize = 21; // +0x11c
+    pub const FRAME: usize = 22; // +0x170
+    pub const ALPHA: usize = 23; // +0x134
+    pub const STATE: usize = 24; // st:: bits
+    pub const BLEND: usize = 25; // +0x16c
+    pub const OP2_SLOT: usize = 26; // slot of the update stream's op 0x02 (FUN_10048380(2)), for ops 0x30..0x32
+    /// Generator +0xdf (zone bits) and +0xde (weather bits): byte 0 / byte 1.
+    pub const GEN_BITS: usize = 27;
+    /// CPU-written control bits (ctl::), cleared by the GPU after it reads them.
+    pub const CTRL: usize = 28;
+    /// Spawn serial, echoed in the readback so a reused slot's stale record is ignored.
+    pub const SERIAL: usize = 29;
+    /// D3a frame count (the draw-time wrap, FUN_1003dad0).
+    pub const FRAMES: usize = 30;
+    /// Draw kind (kind::) and, for batched D3a, the particle block (MODLOG "Effect generators"): first particle in the
+    /// pool, N, elapsed ticks t, gravity, d = drag - 1.
+    pub const KIND: usize = 31;
+    pub const PART_BASE: usize = 32;
+    pub const PART_N: usize = 33;
+    pub const PART_T: usize = 34;
+    pub const GRAVITY: usize = 35;
+    pub const DRAG: usize = 38;
+    /// The sprite's first entry in the GPU frame table.
+    pub const SFRAMES: usize = 39;
+    /// Lens flares: the glare colour of emission op 0x4b (+0x19c, D3DCOLOR; 0 = 0x80808080).
+    pub const GLARE: usize = 40;
+    /// D3b morphs: the five weights +0x194.. (ops 0x1e..0x22) and the previous frame's +0x1a8..
+    pub const MORPH_W: usize = 44;
+    pub const MORPH_PREV: usize = 49;
+    /// CMoDist +0x194: the view-space shift (emission op 0x32, update op 0x24).
+    pub const DIST_OFF: usize = 41;
+    /// +0x12c, the sort key as FUN_100440d0 left it last frame (update op 0x60 reads it before this frame's).
+    pub const KEY_PREV: usize = 42;
+    /// Whether the instance's actor1 / actor2 is our player (bits 0 / 1), for update op 0x60's player factor.
+    pub const ME: usize = 43;
+    /// CMoPointLightProgElem (kind 0x47): +0x19c range base, +0x1a0 intensity base, +0x1a4 intensity scale,
+    /// +0x1a8 range scale, and its light table slot (NONE: no MZB list names its key). Shares the morph words.
+    pub const L_RANGE: usize = 44;
+    pub const L_INT: usize = 45;
+    pub const L_ISCALE: usize = 46;
+    pub const L_RSCALE: usize = 47;
+    pub const L_SLOT: usize = 48;
+    /// RingProg (kind 0x24, emission op 0x3a): radii r0..r3 (+0x194..), colours c0..c3 (+0x1a4.., D3DCOLOR), and
+    /// segments | rings << 8 (+0x1b4 / +0x1b5). Share the morph words.
+    pub const RING_R: usize = 44;
+    pub const RING_C: usize = 48;
+    pub const RING_SR: usize = 52;
+    /// CMoD3mSpecularElem (op 0x55): angles +0x19c..+0x1a4, the specular colour +0x1ac (D3DCOLOR), and bits:
+    /// 0..2 = +0x198 bits 0..2, 3 CLAMP (`!sp`), 4 a cube image, 5 the specular stage on (a D3m of the class).
+    pub const SPEC_ANG: usize = 44;
+    pub const SPEC_COL: usize = 47;
+    pub const SPEC_BITS: usize = 48;
+    /// The ground projection's decal blend (+0x198, emission op 0x43).
+    pub const GP_BLEND: usize = 44;
+    /// Emission op 0x8e: the ground frame FUN_100d3750 multiplied into the local matrix (columns side, down, front).
+    pub const GROUND: usize = 54;
+    /// D3m / ground projection: the mesh's bounding radius (ops 0x2e / 0x48, FUN_10041a40).
+    pub const RADIUS: usize = 63;
+    /// An MMB mesh's box centre (3) and half extents x, y (z from RADIUS), for its cull (FUN_10183760).
+    pub const MMB_BOX: usize = 49;
+    pub const SLOTS: usize = 64;
+    pub const SLOT_COUNT: usize = 64;
+    pub const WORDS: usize = SLOTS + SLOT_COUNT;
+}
+
+/// STATE bits.
+pub mod st {
+    pub const ALIVE: u32 = 1;
+    /// +0x17b bits 0 / 1: U / V offset in use (the texture matrix is set).
+    pub const SCROLL_U: u32 = 2;
+    pub const SCROLL_V: u32 = 4;
+    /// Generator flag 0x20000000 (batched): op 0x03 is skipped.
+    pub const BATCHED: u32 = 16;
+    /// The element has a resource (+0x104 != 0): op 0x0d animates frames.
+    pub const HAS_RES: u32 = 32;
+    /// Emission op 0x8e set GROUND (and cleared +0x187, so the local matrix keeps it).
+    pub const GROUND: u32 = 64;
+}
+
+/// KIND values.
+pub mod dk {
+    pub const NONE: u32 = 0;
+    pub const MESH: u32 = 1;
+    pub const SPRITE: u32 = 2;
+    pub const BATCHED: u32 = 3;
+    /// CMoLfdElem: a lens flare (its draw, FUN_10053920).
+    pub const FLARE: u32 = 4;
+    /// A D3b morph (CMoD3bElem); FRAMES holds its key count, SFRAMES its first word in the morph data.
+    pub const MORPH: u32 = 5;
+    /// CMoDist (MODLOG "Distortion / heat haze").
+    pub const DIST: u32 = 6;
+    /// CMoPointLightProgElem: draws nothing, updates its light.
+    pub const LIGHT: u32 = 7;
+    /// DamValueProg (kind 0x5c): GLARE = message rgb | glyph count << 24, MORPH_W / +1 = glyphs 4 bits each.
+    pub const DAMV: u32 = 8;
+    /// RingProg (FUN_100555f0): untextured rings, built by vs_ring from the vertex index.
+    pub const RING: u32 = 9;
+    /// CMoDistModelElem (D3m + 0x100000): the mesh over the scene copy looked up at shifted screen points.
+    pub const DIST_MODEL: u32 = 10;
+    /// CMoDistRingElem (ring + 0x100000): the S-gon rings over the scene copy at their screen points.
+    pub const DIST_RING: u32 = 11;
+    /// D3m + 0x200000 (FUN_10040e70): drawn top-down into an image painted onto the collision faces around it.
+    pub const GROUND_PROJ: u32 = 12;
+    /// CMoDistMorphElem (D3b + 0x100000, FUN_10043590): the morph shifted over the scene copy.
+    pub const DIST_MORPH: u32 = 13;
+}
+
+/// Particle record in the pool: pos0, dir, vel (9 floats).
+pub const PART_WORDS: usize = 9;
+
+/// CTRL bits.
+pub mod ctl {
+    /// The CPU set LIFE this frame (the expire stream restarted or held it): no decrement.
+    pub const LIFE_SET: u32 = 1;
+    /// Spawned this frame: updated, not drawn, so the t = 0 key sample (a placeholder, as the Heavens Tower waterfalls'
+    /// `tk01`) never shows. Inferred: FUN_10043ca0 counts the life down before sampling (MODLOG "Effect elements").
+    pub const BORN: u32 = 2;
+}
+
+pub const NONE: u32 = u32::MAX;
+
+/// Per element out of the update pass, for drawing: element-to-view matrix (0..16), the TFACTOR colour (bytes
+/// / 255, alpha per FUN_1003d4f0) (16..20), UV offset (20, 21), frame (22), visible (23), projection depth bias
+/// (24), particles drawn (25), particle t (26), d (27), gravity (28..31), particle placement matrix columns
+/// (32..44); morphs: normalised weights (32..37); flares: screen point (25, 26) and vis (27).
+pub const OUT_WORDS: usize = 44;
+/// Per element back to the CPU (a frame late): sort key +0x12c, status bits, world position, rotation, scale,
+/// colour.
+pub const BACK_WORDS: usize = 27;
+pub mod back {
+    pub const KEY: usize = 0;
+    pub const STATUS: usize = 1;
+    pub const WORLD: usize = 2;
+    pub const ROT: usize = 5;
+    pub const SCALE: usize = 8;
+    pub const COLOR: usize = 11;
+    pub const SERIAL: usize = 12;
+    /// The local (emitter-space) position, for op 0x45.
+    pub const LPOS: usize = 13;
+    /// The slot vector at the update stream's op 0x02 (its drift), for emission op 0x46.
+    pub const VEL: usize = 16;
+    /// Update op 0x60's screen flash this frame: the bytes it adds (B, G, R as in +0xf8; FUN_10014f70).
+    pub const FLASH: usize = 19;
+    pub const UV: usize = 20;
+    pub const BIAS: usize = 22;
+    /// A point light's intensity and range (emission ops 0x7e / 0x7f).
+    pub const L_INT: usize = 23;
+    pub const L_RANGE: usize = 24;
+    /// S[k + n] and S[k + 3] for the generator's emission op 0x3e + n (STATUS bits 8..9 = n; ops 0x98..0x9a).
+    pub const SLOT_A: usize = 25;
+    pub const SLOT_B: usize = 26;
+    /// STATUS: op 0x2e / 0x48 asked to expire (life = 1); drawn this frame; SLOT_A / SLOT_B are set.
+    pub const KILL: u32 = 1;
+    pub const DRAWN: u32 = 2;
+    pub const SLOTS: u32 = 4;
+    pub const LIGHT: u32 = 16;
+}
+
+/// Update op 0x59's wrap: retail's float constants, a little short of 2 pi and pi.
+#[cfg(test)]
+#[allow(clippy::approx_constant)]
+const OP59_TURN: f32 = 6.283184;
+#[cfg(test)]
+#[allow(clippy::approx_constant)]
+const OP59_HALF: f32 = 3.141592;
+
+/// Matrix slot (a generator's attach matrix, or an element's spawn snapshot): the matrix, scale vectors
+/// +0x78 (position) and +0x84 (size), and per-generator values the update stream reads.
+pub const SLOT_WORDS: usize = 28;
+pub mod slot {
+    pub const MATRIX: usize = 0;
+    pub const SCALE_A: usize = 16;
+    pub const SCALE_B: usize = 20;
+    /// The owning weather's weight +0x1c (update op 0x50); 1 when not a weather generator.
+    pub const WEATHER: usize = 24;
+    /// Generator +0x37 low nibble != 0: the local matrix takes the size scale (FUN_10043f00).
+    pub const SIZE_SCALED: usize = 25;
+    pub const HAS_MATRIX: usize = 26;
+}
+
+/// One element's words.
+#[derive(Clone)]
+pub struct Elem(pub [u32; w::WORDS]);
+
+impl Default for Elem {
+    fn default() -> Self {
+        let mut e = Elem([0; w::WORDS]);
+        e.0[w::PARENT] = NONE;
+        e.0[w::OP2_SLOT] = NONE;
+        e
+    }
+}
+
+impl Elem {
+    pub fn f(&self, i: usize) -> f32 {
+        f32::from_bits(self.0[i])
+    }
+    pub fn set(&mut self, i: usize, v: f32) {
+        self.0[i] = v.to_bits();
+    }
+    pub fn v3(&self, i: usize) -> glam::Vec3 {
+        glam::Vec3::new(self.f(i), self.f(i + 1), self.f(i + 2))
+    }
+    pub fn set_v3(&mut self, i: usize, v: glam::Vec3) {
+        self.set(i, v.x);
+        self.set(i + 1, v.y);
+        self.set(i + 2, v.z);
+    }
+    /// Slot `s` (a dword of the state block).
+    pub fn s(&self, s: usize) -> u32 {
+        self.0.get(w::SLOTS + s).copied().unwrap_or(0)
+    }
+    pub fn sf(&self, s: usize) -> f32 {
+        f32::from_bits(self.s(s))
+    }
+    pub fn set_s(&mut self, s: usize, v: u32) {
+        if s < w::SLOT_COUNT {
+            self.0[w::SLOTS + s] = v;
+        }
+    }
+    pub fn set_sf(&mut self, s: usize, v: f32) {
+        self.set_s(s, v.to_bits());
+    }
+    pub fn sv3(&self, s: usize) -> glam::Vec3 {
+        glam::Vec3::new(self.sf(s), self.sf(s + 1), self.sf(s + 2))
+    }
+    pub fn set_sv3(&mut self, s: usize, v: glam::Vec3) {
+        self.set_sf(s, v.x);
+        self.set_sf(s + 1, v.y);
+        self.set_sf(s + 2, v.z);
+    }
+    /// Colour byte by D3DCOLOR memory offset: 0 B, 1 G, 2 R, 3 A.
+    pub fn cb(&self, k: usize) -> u8 {
+        self.0[w::COLOR].to_le_bytes()[k]
+    }
+    pub fn set_cb(&mut self, k: usize, v: u8) {
+        let mut b = self.0[w::COLOR].to_le_bytes();
+        b[k] = v;
+        self.0[w::COLOR] = u32::from_le_bytes(b);
+    }
+}
+
+/// The WGSL constants for these offsets, prepended to render/effects.wgsl.
+pub fn wgsl_consts() -> String {
+    let mut s = String::new();
+    let mut c = |n: &str, v: usize| s.push_str(&format!("const {n}: u32 = {v}u;\n"));
+    for (n, v) in [
+        ("E_POS", w::POS),
+        ("E_LIFE", w::LIFE),
+        ("E_ROT", w::ROT),
+        ("E_MAX_LIFE", w::MAX_LIFE),
+        ("E_SCALE", w::SCALE),
+        ("E_RADIUS", w::RADIUS),
+        ("E_MMB_BOX", w::MMB_BOX),
+        ("E_FADE", w::FADE),
+        ("E_COLOR", w::COLOR),
+        ("E_FLAGS", w::FLAGS),
+        ("E_STREAM", w::STREAM),
+        ("E_PARENT", w::PARENT),
+        ("E_UV", w::UV),
+        ("E_BIAS", w::BIAS),
+        ("E_T", w::T),
+        ("E_FRAME_CD", w::FRAME_CD),
+        ("E_FRAME_PERIOD", w::FRAME_PERIOD),
+        ("E_FRAME", w::FRAME),
+        ("E_ALPHA", w::ALPHA),
+        ("E_STATE", w::STATE),
+        ("E_BLEND", w::BLEND),
+        ("E_OP2_SLOT", w::OP2_SLOT),
+        ("E_GEN_BITS", w::GEN_BITS),
+        ("E_FRAMES", w::FRAMES),
+        ("E_KIND", w::KIND),
+        ("E_PART_BASE", w::PART_BASE),
+        ("E_PART_N", w::PART_N),
+        ("E_PART_T", w::PART_T),
+        ("E_GRAVITY", w::GRAVITY),
+        ("E_DRAG", w::DRAG),
+        ("E_SFRAMES", w::SFRAMES),
+        ("E_GLARE", w::GLARE),
+        ("DK_FLARE", dk::FLARE as usize),
+        ("DK_MORPH", dk::MORPH as usize),
+        ("E_MORPH_W", w::MORPH_W),
+        ("E_MORPH_PREV", w::MORPH_PREV),
+        ("E_GROUND", w::GROUND),
+        ("E_DIST_OFF", w::DIST_OFF),
+        ("E_KEY_PREV", w::KEY_PREV),
+        ("E_ME", w::ME),
+        ("E_L_RANGE", w::L_RANGE),
+        ("E_L_INT", w::L_INT),
+        ("E_L_ISCALE", w::L_ISCALE),
+        ("E_L_RSCALE", w::L_RSCALE),
+        ("E_L_SLOT", w::L_SLOT),
+        ("DK_LIGHT", dk::LIGHT as usize),
+        ("DK_DIST", dk::DIST as usize),
+        ("DK_DAMV", dk::DAMV as usize),
+        ("DK_RING", dk::RING as usize),
+        ("DK_DIST_MODEL", dk::DIST_MODEL as usize),
+        ("DK_DIST_RING", dk::DIST_RING as usize),
+        ("DK_GROUND_PROJ", dk::GROUND_PROJ as usize),
+        ("DK_DIST_MORPH", dk::DIST_MORPH as usize),
+        ("E_GP_BLEND", w::GP_BLEND),
+        ("E_RING_R", w::RING_R),
+        ("E_RING_C", w::RING_C),
+        ("E_RING_SR", w::RING_SR),
+        ("E_SPEC_ANG", w::SPEC_ANG),
+        ("E_SPEC_COL", w::SPEC_COL),
+        ("E_SPEC_BITS", w::SPEC_BITS),
+        ("ST_GROUND", st::GROUND as usize),
+        ("DK_MESH", dk::MESH as usize),
+        ("DK_SPRITE", dk::SPRITE as usize),
+        ("DK_BATCHED", dk::BATCHED as usize),
+        ("PART_WORDS", PART_WORDS),
+        ("E_SLOTS", w::SLOTS),
+        ("E_SLOT_COUNT", w::SLOT_COUNT),
+        ("E_WORDS", w::WORDS),
+        ("ST_ALIVE", st::ALIVE as usize),
+        ("ST_SCROLL_U", st::SCROLL_U as usize),
+        ("ST_SCROLL_V", st::SCROLL_V as usize),
+        ("E_CTRL", w::CTRL),
+        ("E_SERIAL", w::SERIAL),
+        ("CTL_LIFE_SET", ctl::LIFE_SET as usize),
+        ("CTL_BORN", ctl::BORN as usize),
+        ("ST_BATCHED", st::BATCHED as usize),
+        ("ST_HAS_RES", st::HAS_RES as usize),
+        ("OUT_WORDS", OUT_WORDS),
+        ("BACK_WORDS", BACK_WORDS),
+        ("B_KILL", back::KILL as usize),
+        ("B_DRAWN", back::DRAWN as usize),
+        ("SLOT_WORDS", SLOT_WORDS),
+        ("S_SCALE_A", slot::SCALE_A),
+        ("S_SCALE_B", slot::SCALE_B),
+        ("S_WEATHER", slot::WEATHER),
+        ("S_SIZE_SCALED", slot::SIZE_SCALED),
+        ("S_HAS_MATRIX", slot::HAS_MATRIX),
+    ] {
+        c(n, v);
+    }
+    s.push_str(&format!("const NONE: u32 = {}u;\n", NONE));
+    s
+}
+
+#[cfg(test)]
+/// Op 0x6e's weight of key 0 at eye distance `d` for the record (a, b, c, e): key 1 below a and from e, key 0 from
+/// b to c, linear between (the retail order of tests).
+pub fn crossfade_ref(d: f32, a: f32, b: f32, c: f32, e: f32) -> f32 {
+    if d < a {
+        0.0
+    } else if d < b {
+        1.0 - (d - b) / (a - b)
+    } else if d < c {
+        1.0
+    } else if d < e {
+        1.0 - (d - c) / (e - c)
+    } else {
+        0.0
+    }
+}
+
+/// FUN_10188e00 mode 0: AMBIENT bytes trunc(min(a, 1) x 128), as colours.
+pub fn ambient_ref(a: glam::Vec3) -> glam::Vec3 {
+    a.min(glam::Vec3::ONE).map(|x| (x * 128.0).trunc() / 255.0)
+}
+
+#[cfg(test)]
+/// FUN_100467e0 + D3D8 fixed function, one light: the light matrix B from the view rotation `v`, a parent `p` (none
+/// with +0xdf bit 1), the travel direction `dir` through it, then sat(Cv Ga + Cv Ld max(N.L, 0)) with N through
+/// `mv`'s inverse transpose, unnormalised.
+pub fn fx_lit_ref(
+    cv: glam::Vec3,
+    ambient: glam::Vec3,
+    light: glam::Vec3,
+    dir: glam::Vec3,
+    v: glam::Mat4,
+    p: Option<glam::Mat4>,
+    mv: glam::Mat3,
+    n: glam::Vec3,
+) -> (glam::Vec3, glam::Vec3) {
+    use glam::{Mat4, Vec4};
+    let mut b = Mat4::from_cols(
+        v.x_axis.truncate().extend(0.0),
+        v.y_axis.truncate().extend(0.0),
+        v.z_axis.truncate().extend(0.0),
+        Vec4::W,
+    );
+    if let Some(p) = p {
+        b = p.inverse() * Mat4::from_rotation_y(4.712389) * b;
+    }
+    let l = (b * dir.extend(1.0)).truncate().normalize();
+    let det = mv.determinant();
+    let nv = if det != 0.0 { mv.inverse().transpose() * n } else { glam::Vec3::ZERO };
+    let s = ambient_ref(ambient) + light * nv.dot(-l).max(0.0);
+    ((cv * s).clamp(glam::Vec3::ZERO, glam::Vec3::ONE), l)
+}
+
+/// The update stream on the CPU, for checking the GPU pass (render/effects.wgsl `update`) in tests; the same ops
+/// and the same order.
+#[cfg(test)]
+pub fn update_ref(
+    e: &mut Elem,
+    ops: &[u32],
+    key: &dyn Fn(u32, f32, bool, Option<f32>) -> f32,
+    slot_words: &[u32],
+    f: &super::Frame,
+) {
+    use glam::Vec3;
+    use std::f32::consts::PI;
+    if e.0[w::STATE] & st::ALIVE == 0 {
+        return;
+    }
+    let dt = f.dt;
+    if e.0[w::CTRL] & ctl::LIFE_SET == 0 && e.f(w::MAX_LIFE) != 0.0 {
+        e.set(w::LIFE, e.f(w::LIFE) - dt);
+        if e.f(w::LIFE) < 1.0 {
+            e.0[w::CTRL] = 0;
+            return;
+        }
+    }
+    e.0[w::CTRL] = 0;
+    e.set(w::FADE, 1.0);
+    let parent = e.0[w::PARENT];
+    let sf = |k: usize| f32::from_bits(slot_words[parent as usize * SLOT_WORDS + k]);
+    let world = |e: &Elem| -> Vec3 {
+        if parent == NONE {
+            return e.v3(w::POS);
+        }
+        let a = Vec3::new(sf(slot::SCALE_A), sf(slot::SCALE_A + 1), sf(slot::SCALE_A + 2));
+        let wp = e.v3(w::POS) * a;
+        if slot_words[parent as usize * SLOT_WORDS + slot::HAS_MATRIX] == 0 {
+            return wp;
+        }
+        let m = glam::Mat4::from_cols_array(&std::array::from_fn(|k| sf(slot::MATRIX + k)));
+        m.transform_point3(wp)
+    };
+    // With the first key's value = S[s+2] (kt), = 0 (k0), or plain (kn); kg / krep at the day fraction.
+    let kt = |e: &Elem, s: usize, t: f32| key(e.s(s), t, e.s(s + 1) & 0xf != 0, Some(e.sf(s + 2)));
+    let k0 = |e: &Elem, s: usize, t: f32| key(e.s(s), t, e.s(s + 1) & 0xf != 0, Some(0.0));
+    let kn = |e: &Elem, s: usize, t: f32| key(e.s(s), t, e.s(s + 1) & 0xf != 0, None);
+    let kg = |e: &Elem, s: usize| kn(e, s, f.dayfrac);
+    let krep = |e: &Elem, s: usize| {
+        let n = (e.s(s + 1) >> 5) & 0x1ff;
+        kn(e, s, if n != 0 { (f.dayfrac * n as f32).fract() } else { f.dayfrac })
+    };
+    let half = |v: f32| {
+        let a = (v - 2.0 * (v / 2.0).trunc()) * PI;
+        if a > PI {
+            a - 2.0 * PI
+        } else if a < -PI {
+            a + 2.0 * PI
+        } else {
+            a
+        }
+    };
+    let wrap = |a: f32| {
+        if a > PI {
+            a - 2.0 * PI
+        } else if a < -PI {
+            a + 2.0 * PI
+        } else {
+            a
+        }
+    };
+    // Below 0 stores 0 (0x1004bc69 / FUN_1004e220), larger values wrap.
+    let byte = |v: f32| if v * 255.0 < 0.0 { 0 } else { ((v * 255.0) as u32 & 0xff) as u8 };
+    // effects.wgsl fade_dist: |view position|, plus a mesh's radius x scale; 0 behind the eye for the others.
+    let fade_dist = |e: &Elem| -> f32 {
+        let fl = e.0[w::FLAGS];
+        let v = if fl & 4 != 0 {
+            if fl & 8 != 0 { e.v3(w::POS) } else { f.view_rot.transform_vector3(e.v3(w::POS)) }
+        } else {
+            f.view.transform_point3(world(e))
+        };
+        let kind = e.0[w::KIND];
+        if kind == dk::MESH || kind == dk::GROUND_PROJ {
+            let kx = if parent != NONE && slot_words[parent as usize * SLOT_WORDS + slot::SIZE_SCALED] != 0 {
+                sf(slot::SCALE_B)
+            } else {
+                1.0
+            };
+            return v.length() + (e.f(w::RADIUS) * e.f(w::SCALE) * kx).abs();
+        }
+        if v.z > 0.0 { 0.0 } else { v.length() }
+    };
+    let mut ip = e.0[w::STREAM] as usize;
+    let mut guard = 0;
+    while ip < ops.len() && guard < 256 {
+        guard += 1;
+        let w0 = ops[ip];
+        let (code, len, s) = (w0 & 0xff, ((w0 >> 8) & 0x1f) as usize, ((w0 >> 13) & 0x3f) as usize);
+        if code == 0 || len == 0 {
+            break;
+        }
+        let of = |k: usize| f32::from_bits(ops[ip + k]);
+        let ov = |k: usize| Vec3::new(of(k), of(k + 1), of(k + 2));
+        let (t, life, maxl) = (e.f(w::T), e.f(w::LIFE), e.f(w::MAX_LIFE));
+        match code {
+            0x01 => e.set_v3(w::POS, e.v3(w::POS) + ov(1) * dt),
+            0x02 => e.set_v3(w::POS, e.v3(w::POS) + e.sv3(s) * dt),
+            0x04 => e.set_v3(w::ROT, e.v3(w::ROT) + ov(1) * dt),
+            0x05 => e.set_v3(w::ROT, e.v3(w::ROT) + e.sv3(s) * dt),
+            0x06 | 0x09 => e.set_sv3(s, e.sv3(s) + ov(1) * dt),
+            0x07 => e.set_v3(w::SCALE, e.v3(w::SCALE) + ov(1) * dt),
+            0x08 => e.set_v3(w::SCALE, e.v3(w::SCALE) + e.sv3(s) * dt),
+            0x0e => e.set(w::T, if maxl == 0.0 { 0.0 } else { 1.0 - life / maxl }),
+            0x0f..=0x11 => {
+                let v = e.sf(s + 2) + k0(e, s, t);
+                e.set(w::POS + (code - 0x0f) as usize, v)
+            }
+            0x15..=0x17 => {
+                let v = kt(e, s, t);
+                e.set(w::SCALE + (code - 0x15) as usize, v)
+            }
+            0x18 => e.set_cb(2, byte(kt(e, s, t))),
+            0x19 => e.set_cb(1, byte(kt(e, s, t))),
+            0x1a => e.set_cb(0, byte(kt(e, s, t))),
+            0x1b => e.set_cb(3, byte(kt(e, s, t))),
+            0x27 => {
+                e.set(w::UV, e.f(w::UV) + of(1) * dt);
+                e.0[w::STATE] |= st::SCROLL_U;
+            }
+            0x28 => {
+                e.set(w::UV + 1, e.f(w::UV + 1) + of(1) * dt);
+                e.0[w::STATE] |= st::SCROLL_V;
+            }
+            0x29..=0x2b => {
+                let v = ((maxl - life) * of(1) / 60.0 + of(2)).sin() * e.sf(s + (code - 0x29) as usize) * dt;
+                let h = e.sf(s + 3);
+                let d = match code {
+                    0x29 => Vec3::new(h.cos(), 0.0, h.sin()) * v,
+                    0x2b => Vec3::new(h.sin(), 0.0, h.cos()) * v,
+                    _ => Vec3::new(0.0, v, 0.0),
+                };
+                e.set_v3(w::POS, e.v3(w::POS) + d);
+            }
+            // Case 0x1004b181: a D3b's keys 0 / 1 by camera distance (0 behind the camera: unchanged).
+            0x6e if e.0[w::KIND] == dk::MORPH => {
+                let wp = world(e);
+                let behind = f.view.transform_point3(wp).z > 0.0;
+                let dd = if behind { 0.0 } else { (f.eye - wp).length() };
+                if dd != 0.0 {
+                    let g = crossfade_ref(dd, of(1), of(2), of(3), of(4));
+                    e.set(w::MORPH_W, g);
+                    e.set(w::MORPH_W + 1, 1.0 - g);
+                }
+            }
+            // FUN_100499d0 case 0x1004a0a2: kept below near, faded to far, else 0 (near is tested first).
+            0x2e => {
+                let d = fade_dist(e);
+                let (near, far) = (of(1), of(2));
+                if d == 0.0 || d >= near && d > far {
+                    e.set(w::FADE, 0.0);
+                } else if d >= near {
+                    e.set(w::FADE, e.f(w::FADE) * (1.0 - (d - near) / (far - near)));
+                }
+            }
+            0x48 => {
+                let d = fade_dist(e);
+                if d == 0.0 {
+                    e.set(w::FADE, 0.0);
+                } else if d >= of(1) && d < of(2) {
+                    e.set(w::FADE, e.f(w::FADE) * (1.0 - (d - of(2)) / (of(1) - of(2))));
+                } else if d >= of(1) && d >= of(3) && d < of(4) {
+                    e.set(w::FADE, e.f(w::FADE) * (1.0 - (d - of(3)) / (of(4) - of(3))));
+                } else if d < of(1) || d >= of(4) {
+                    e.set(w::FADE, 0.0);
+                }
+            }
+            0x3c => e.set_cb(2, byte(kg(e, s))),
+            0x3d => e.set_cb(1, byte(kg(e, s))),
+            0x3e => e.set_cb(0, byte(kg(e, s))),
+            0x3f => e.set(w::FADE, e.f(w::FADE) * krep(e, s)),
+            0x40..=0x42 => {
+                let v = kg(e, s);
+                e.set(w::SCALE + (code - 0x40) as usize, v)
+            }
+            0x50 if parent != NONE => e.set(w::FADE, e.f(w::FADE) * sf(slot::WEATHER)),
+            0x56..=0x58 => {
+                let k = w::ROT + (code - 0x56) as usize;
+                e.set(k, wrap(e.f(k) + half(kn(e, s, t)) * dt))
+            }
+            0x61..=0x63 => {
+                let k = w::ROT + (code - 0x61) as usize;
+                e.set(k, wrap(e.f(k) + half(kg(e, s)) * dt))
+            }
+            0x66..=0x68 => e.set(w::ROT + (code - 0x66) as usize, half(kg(e, s))),
+            0x59 => e.set(w::ROT + 2, (e.f(w::KEY_PREV) * of(1) + of(2)) % OP59_TURN - OP59_HALF),
+            0x5a => {
+                let k = e.f(w::KEY_PREV) - of(4);
+                for i in 0..3 {
+                    e.set(w::SCALE + i, if k > 0.0 { of(1 + i) + k * of(5) } else { of(1 + i) });
+                }
+            }
+            0x6b..=0x6d => {
+                let v = e.sf(s + 2) + k0(e, s, f.dayfrac);
+                e.set(w::POS + (code - 0x6b) as usize, v)
+            }
+            _ => {}
+        }
+        ip += len;
+    }
+}
+
+#[cfg(test)]
+mod lit_tests {
+    use super::{ambient_ref, crossfade_ref, fx_lit_ref};
+    use glam::{Mat3, Mat4, Vec3};
+
+    fn lit(mv: Mat3, n: Vec3, p: Option<Mat4>) -> (f32, Vec3) {
+        let (c, l) = fx_lit_ref(
+            Vec3::splat(128.0 / 255.0),
+            Vec3::splat(80.0 / 255.0),
+            Vec3::splat(192.0 / 255.0 * 1.4),
+            Vec3::Y,
+            Mat4::IDENTITY,
+            p,
+            mv,
+            n,
+        );
+        (c.x, l)
+    }
+
+    /// The worked numbers (MODLOG "Lit D3b / D3m effect elements"): Cv 0x80, ambient 0x50 (Ga 40 / 255), light
+    /// 0xc0 x 1.4.
+    #[test]
+    fn lit_cases() {
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
+        assert!(close(lit(Mat3::IDENTITY, Vec3::NEG_Y, None).0, 0.60786));
+        assert!(close(lit(Mat3::from_diagonal(Vec3::splat(1.5)), Vec3::NEG_Y, None).0, 0.43149));
+        assert!(close(lit(Mat3::IDENTITY, Vec3::Y, None).0, 0.07874));
+        let (c, l) = lit(Mat3::IDENTITY, Vec3::NEG_Y, Some(Mat4::from_translation(Vec3::new(100.0, 0.0, 0.0))));
+        assert!(close(c, 0.08403) && (l - Vec3::new(-0.99995, 0.0099995, 0.0)).length() < 1e-5, "{c} {l}");
+    }
+
+    #[test]
+    fn ambient_bytes() {
+        assert_eq!(ambient_ref(Vec3::splat(80.0 / 255.0)).x * 255.0, 40.0);
+        assert_eq!(ambient_ref(Vec3::ONE).x * 255.0, 128.0);
+        assert!((ambient_ref(Vec3::splat(0.999)).x * 255.0 - 127.0).abs() < 1e-4);
+    }
+
+    /// Op 0x6e: (11, 14, 100, 120) and (11, 13, 22, 28).
+    #[test]
+    fn crossfade_6e() {
+        let r = |d: f32| crossfade_ref(d, 11.0, 14.0, 100.0, 120.0);
+        for (d, w) in
+            [(5.0, 0.0), (11.0, 0.0), (12.5, 0.5), (14.0, 1.0), (50.0, 1.0), (110.0, 0.5), (120.0, 0.0), (130.0, 0.0)]
+        {
+            assert!((r(d) - w).abs() < 1e-5, "{d}: {}", r(d));
+        }
+        let r = |d: f32| crossfade_ref(d, 11.0, 13.0, 22.0, 28.0);
+        for (d, w) in [(12.0, 0.5), (20.0, 1.0), (25.0, 0.5), (30.0, 0.0)] {
+            assert!((r(d) - w).abs() < 1e-5, "{d}: {}", r(d));
+        }
+    }
+}
