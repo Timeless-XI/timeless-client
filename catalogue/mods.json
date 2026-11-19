@@ -3214,6 +3214,7 @@
           "size": 1806
         }
       ],
+      "required": true,
       "commands": {
         "cv": {
           "help": "Shows or hides Companion View: your companions' gear, stats and role.",

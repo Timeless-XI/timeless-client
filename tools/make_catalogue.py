@@ -5,7 +5,9 @@ It holds:
   - vana-client's standard mods, from the client source the build uses (its catalogue/mods.json), each file pinned to
     that source's commit, so the list never drifts from what upstream has on master;
   - TimelessXI's own mods, every folder in mods/ with a mod.toml, served from this repository's main branch.
-    A mod here with the same id as a standard mod replaces it.
+    A mod here with the same id as a standard mod replaces it. They are "required": the TimelessXI client installs
+    and updates them at every start, and switches them on the first time. A mod id listed in catalogue/optional.txt
+    (one per line) is only offered in Settings > Mods instead.
 
 Run it after changing anything in mods/ (raise the mod's version in its mod.toml, so clients see the update), then
 commit mods/ and catalogue/mods.json together and push:
@@ -47,7 +49,7 @@ def upstream_entries(src: pathlib.Path) -> list:
     return listed["mods"]
 
 
-def own_entry(d: pathlib.Path) -> dict:
+def own_entry(d: pathlib.Path, optional: set) -> dict:
     m = tomllib.loads((d / "mod.toml").read_text(encoding="utf-8"))
     files = []
     for p in sorted(d.rglob("*")):
@@ -68,6 +70,7 @@ def own_entry(d: pathlib.Path) -> dict:
         "authors": m.get("authors", []),
         "description": m.get("description", ""),
         "files": files,
+        "required": d.name not in optional,
     }
     if m.get("commands"):
         e["commands"] = m["commands"]
@@ -80,13 +83,16 @@ def main() -> None:
     src = pathlib.Path(sys.argv[1]).resolve()
     if not (src / "catalogue" / "mods.json").is_file():
         sys.exit(f"{src} is not a vana-client source folder (no catalogue/mods.json)")
-    own = [own_entry(d) for d in sorted((here / "mods").iterdir()) if (d / "mod.toml").is_file()]
+    opt_file = here / "catalogue" / "optional.txt"
+    optional = {l.strip() for l in opt_file.read_text(encoding="utf-8").splitlines() if l.strip()} if opt_file.is_file() else set()
+    own = [own_entry(d, optional) for d in sorted((here / "mods").iterdir()) if (d / "mod.toml").is_file()]
     ids = {e["id"] for e in own}
     mods = [e for e in upstream_entries(src) if e["id"] not in ids] + own
     mods.sort(key=lambda e: e["id"])
     out = here / "catalogue" / "mods.json"
     out.write_text(json.dumps({"format": 1, "mods": mods}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
-    print(f"{out}: {len(mods)} mods ({len(own)} TimelessXI: {', '.join(sorted(ids))})")
+    req = sorted(e["id"] for e in own if e["required"])
+    print(f"{out}: {len(mods)} mods ({len(own)} TimelessXI: {', '.join(sorted(ids))}; required: {', '.join(req) or 'none'})")
 
 
 if __name__ == "__main__":
