@@ -3651,7 +3651,7 @@
       "id": "timeless-reputation",
       "name": "Timeless Reputation",
       "kind": "lua",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "authors": [
         "TimelessXI"
       ],
@@ -3690,13 +3690,13 @@
         {
           "path": "lib/window.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-reputation/lib/window.lua",
-          "sha256": "ebbd3d2b7c55a41fca37950208e8979f3d12a1254719ef53767cbbd4f87bdf80",
-          "size": 6807
+          "sha256": "6ffb71079f179e8ed0f70ea170505252624ad03507f63b617e48b2426b9d075a",
+          "size": 7447
         },
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-reputation/mod.toml",
-          "sha256": "b8a39f44951d32f87a912cfafe5dbd0d636110ee7ca1fa4829eaf9b49b38cc8c",
+          "sha256": "88abe80efe945b9c6af6865f6173c517bf74b3b34b5eecfa78f59f088cc208d6",
           "size": 695
         }
       ],

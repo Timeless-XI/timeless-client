@@ -1,5 +1,8 @@
--- The Reputation window: your fame in San d'Oria, Bastok, Windurst, Jeuno, Selbina and Rabao, and Norg, each as a
--- crest, its fame level (1-9, as pips and a word) and how far to the next, plus your nation and rank.
+-- The Reputation window: your fame in San d'Oria, Bastok, Windurst, Jeuno, Selbina and Rabao, and Norg, each with its
+-- emblem, its fame level (1-9, as pips and a word) and how far to the next, plus your nation and rank.
+-- The four with a flag in the game (San d'Oria, Bastok, Windurst, Jeuno) show that flag's own icon, drawn by the client
+-- from the player's game files (items 181-184), so nothing of the game's art is copied here. Selbina & Rabao and Norg
+-- have no emblem in the game, so they get a simple drawn one (a wave, an anchor).
 
 local Canvas = require("lib.canvas")
 local S = require("lib.style")
@@ -13,13 +16,13 @@ R.W = 540
 R.NATIONS = { [0] = "San d'Oria", [1] = "Bastok", [2] = "Windurst" }
 
 R.AREAS = {
-  { id = 0, name = "San d'Oria", colour = { 196, 70, 66, 255 }, glyph = "cross",
+  { id = 0, name = "San d'Oria", colour = { 196, 70, 66, 255 }, glyph = "cross", item = 181, -- San d'Orian Flag
     how = "Quests in San d'Oria: the city's people, its knights and Chateau d'Oraguille." },
-  { id = 1, name = "Bastok", colour = { 82, 132, 214, 255 }, glyph = "gear",
+  { id = 1, name = "Bastok", colour = { 82, 132, 214, 255 }, glyph = "gear", item = 182, -- Bastokan Flag
     how = "Quests in Bastok: the Markets, the Mines, the Port and the Metalworks." },
-  { id = 2, name = "Windurst", colour = { 92, 176, 104, 255 }, glyph = "star",
+  { id = 2, name = "Windurst", colour = { 92, 176, 104, 255 }, glyph = "star", item = 183, -- Windurstian Flag
     how = "Quests in Windurst: the Woods, the Waters, the Walls and Port Windurst." },
-  { id = 3, name = "Jeuno", colour = { 156, 108, 210, 255 }, glyph = "tower",
+  { id = 3, name = "Jeuno", colour = { 156, 108, 210, 255 }, glyph = "tower", item = 184, -- Jeunoan Flag
     how = "Grows with your fame in San d'Oria, Bastok and Windurst together.", shared = true },
   { id = 4, name = "Selbina & Rabao", colour = { 74, 176, 176, 255 }, glyph = "wave",
     how = "Grows with your fame in San d'Oria and Bastok.", shared = true },
@@ -75,9 +78,15 @@ local function card(c, x, y, w, h, info, a)
   c:card(x, y, w, h, { fill = S.fade(info.colour, 0.08), edge = S.fade(info.colour, 0.45) })
   -- The crest
   local cx, cy = x + 30, y + 32
-  c:circle(cx, cy, 21, S.fade(info.colour, 0.85))
-  c:circle(cx, cy, 21, { 255, 240, 205, 160 }, true)
-  glyph(c, info.glyph, cx, cy, S.fade(info.colour, 0.85))
+  if info.item then
+    c:circle(cx, cy, 21, { 0, 0, 0, 110 })
+    c:circle(cx, cy, 21, S.fade(info.colour, 0.9), true)
+    c:icon(cx - 16, cy - 16, 32, "item", info.item)
+  else
+    c:circle(cx, cy, 21, S.fade(info.colour, 0.85))
+    c:circle(cx, cy, 21, { 255, 240, 205, 160 }, true)
+    glyph(c, info.glyph, cx, cy, S.fade(info.colour, 0.85))
+  end
   -- Name and what they make of you
   local level = a and a.level or 1
   c:text(x + 60, y + 10, info.name, { bold = true, colour = S.TEXT, w = w - 70 })

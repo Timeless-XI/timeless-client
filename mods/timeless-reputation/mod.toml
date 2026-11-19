@@ -1,5 +1,5 @@
 name = "Timeless Reputation"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["TimelessXI"]
 description = "Your fame in San d'Oria, Bastok, Windurst, Jeuno, Selbina and Rabao, and Norg: each area's crest, its fame level and what people there think of you, how far to the next level, and your nation and rank. Open it from the Timeless menu. Needs the server's reputation module."
 permissions = ["packets.write"]

@@ -47,6 +47,10 @@ for _, name in ipairs({ "San d'Oria", "Bastok", "Windurst", "Jeuno", "Selbina & 
 ok(all:find("Legendary", 1, true) and all:find("As famous as anyone gets.", 1, true), "Bastok at the top")
 ok(all:find("95 to Respected", 1, true), "San d'Oria: 95 to the next level")
 ok(all:find("Unknown", 1, true), "Windurst unknown")
+local icons = {}
+for _, d in ipairs(H.windows.reputation.el.rep.draw) do if d.type == "icon" then icons[d.id] = d.kind end end
+ok(icons[181] == "item" and icons[182] and icons[183] and icons[184], "the game's own flag icons for the nations and Jeuno")
+ok(not icons[1135], "Selbina & Rabao and Norg keep their drawn emblems")
 H.run(31)
 ok(H.take_sent()[1] == "rp", "asks every 30 s while open")
 H.click("reputation", "rep", "refresh")
