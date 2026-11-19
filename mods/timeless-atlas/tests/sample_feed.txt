@@ -1,0 +1,53 @@
+NA1|H|1|1|1
+NA1|R|17215868|107|10|11|3|0|Leaping Lizzy
+NA1|E
+NA1|H|1|37|739
+NA1|R|17182843|99|80|84|0|0|Aa Xalmo the Savage
+NA1|R|17498545|176|72|74|0|0|Abyss Sahagin
+NA1|R|17031600|62|86|88|0|0|Achamoth
+NA1|R|17285341|124|67|68|0|0|Acolnahuacatl
+NA1|R|17383440|148|72|74|0|0|Adaman Quadav
+NA1|R|17301537|128|70|70|0|0|Adamantoise
+NA1|R|17567901|193|64|66|0|0|Agar Agar
+NA1|R|17125663|85|83|83|0|0|Agrios
+NA1|R|17571903|194|29|30|0|0|Ah Puch
+NA1|R|16900306|30|51|52|0|0|Aiatar
+NA1|R|17121715|84|80|80|0|0|Aither
+NA1|R|17150339|91|80|80|0|0|Aither
+NA1|R|17178925|98|80|80|0|0|Aither
+NA1|R|17207715|105|80|80|0|0|Aither
+NA1|R|17228254|110|80|80|0|0|Aither
+NA1|R|17269119|120|80|80|0|0|Aither
+NA1|R|17072277|72|119|119|0|0|Alexander Strange Happenings
+NA1|R|17424480|158|75|75|0|0|Alkyoneus
+NA1|R|17125661|85|83|83|0|0|All-Seeing Onyx Eye
+NA1|R|16875779|24|83|87|0|0|Amaltheia
+NA1|E
+NA1|D|17215868|107|10|11|328|230|lc|fire||Leaping Lizzy
+NA1|K|lizard|lizard|hill lizard|hearing
+NA1|W|el|fire=0,ice=-3,wind=-3,earth=0,thunder=0,water=-2,light=-2,dark=-2
+NA1|W|st|paralyze=-3,bind=-3,silence=-3,slow=0,poison=-2,light_sleep=-2,dark_sleep=-2,blind=-2,stun=0,gravity=-3
+NA1|S||300||8|3600|Rock Lizard
+NA1|X|3|0|-1
+NA1|G|240|926
+NA1|G|100|15351
+NA1|G|100|852
+NA1|T|4362
+NA1|Z
+NA1|D|17297441|127|85|85|404|80000|atk|water|THF/WAR|King Behemoth
+NA1|K|beast|behemoth|behemoth|sight
+NA1|W|el|fire=2,ice=2,wind=2,earth=2,thunder=2,water=2,light=2,dark=2
+NA1|W|st|paralyze=2,bind=2,silence=2,slow=2,poison=2,light_sleep=2,dark_sleep=2,blind=2,stun=2,gravity=2
+NA1|W|im|stun,silence,light_sleep,dark_sleep,petrify
+NA1|S|scripted|0||0|0|
+NA1|P|qm_behemoth|3341,3342
+NA1|X|2|1200|-1
+NA1|G|1000|860
+NA1|G|150|860
+NA1|G|1000|883
+NA1|G|240|831
+NA1|G|150|883
+NA1|G|240|1527
+NA1|O|1000|1334:31,1328:23,1322:23,1332:23
+NA1|O|100|1334:31,1328:23,1322:23,1332:23
+NA1|Z

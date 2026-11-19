@@ -3120,6 +3120,67 @@
       "version": "1.0.2"
     },
     {
+      "id": "timeless-atlas",
+      "name": "Timeless NM Atlas",
+      "kind": "lua",
+      "version": "1.0.0",
+      "authors": [
+        "TimelessXI"
+      ],
+      "description": "Every notorious monster of the open world, searchable by name, drop or placeholder: whether it's up or how long until it can spawn, how it spawns (lottery, timer, the items for its ???), what it's weak to and what it drops with each chance, and its model turning slowly (TimelessXI client build 6). Open it from the Timeless menu. Needs the server's nm_atlas module.",
+      "files": [
+        {
+          "path": "init.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-atlas/init.lua",
+          "sha256": "196ecc7b0c6d062b570130d4784707d34d3dec234910740cad7c4ca7140cb20e",
+          "size": 2974
+        },
+        {
+          "path": "lib/action.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-atlas/lib/action.lua",
+          "sha256": "bf901bb0c52c1699b54ff9c48f7222227a092a8e13c3f11270ff69fc0cc1cd46",
+          "size": 650
+        },
+        {
+          "path": "lib/atlas.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-atlas/lib/atlas.lua",
+          "sha256": "741c5e0d294bfd2586a56e9aabf89aebe846a5ce28be87503b81d78ebe761112",
+          "size": 18602
+        },
+        {
+          "path": "lib/canvas.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-atlas/lib/canvas.lua",
+          "sha256": "5175f90aa28ce5f428ed0b4cb6cecab2bfbdee721638318689b90793ea11e402",
+          "size": 11085
+        },
+        {
+          "path": "lib/protocol.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-atlas/lib/protocol.lua",
+          "sha256": "afd607fd9d63af4d3416b8ccce3e804d422daecda5b924f12c576cb5d476c81a",
+          "size": 5223
+        },
+        {
+          "path": "lib/style.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-atlas/lib/style.lua",
+          "sha256": "c906bac41070aed7af413fa07cb10bc308baf1ab1be99c9f5e4c24e2ff3961f2",
+          "size": 2753
+        },
+        {
+          "path": "mod.toml",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-atlas/mod.toml",
+          "sha256": "579f5351facaf5ad9be3b4f1cb243381634f68322ba47616a815d08b700a4278",
+          "size": 756
+        }
+      ],
+      "required": true,
+      "commands": {
+        "atlas": {
+          "help": "Opens or closes the NM Atlas (the Timeless menu's NM Atlas card does the same).",
+          "args": ""
+        }
+      }
+    },
+    {
       "id": "timeless-companions",
       "name": "Timeless Companions",
       "kind": "lua",
