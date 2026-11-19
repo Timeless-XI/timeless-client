@@ -30,11 +30,13 @@ end
 
 atlas.setup(model)
 atlas.ask = ask
+atlas.on_forget = function() st.queue = {} end
 
 filters.chat(function(text)
   if type(text) ~= "string" then return nil end
   local line = protocol.extract(text)
   if not line then return nil end
+  if not ui.is_open(atlas.WIN) then return false end -- a late answer after closing: hidden, not kept
   local what = protocol.feed(model, line, os.clock())
   if what == "list" or what == "info" then atlas.render() end
   return false
@@ -62,6 +64,8 @@ mods.provide("timeless_menu", function()
 end)
 
 timer.every(0.1, function()
+  -- Closed with nothing to send: nothing to do
+  if #st.queue == 0 and not atlas.state.typed_at and not ui.is_open(atlas.WIN) then return end
   local t = os.clock()
   -- A search typed: asked a moment after the last key
   if atlas.state.typed_at and t - atlas.state.typed_at >= 0.35 then

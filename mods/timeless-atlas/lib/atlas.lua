@@ -435,7 +435,7 @@ function A.setup(model)
   })
   Canvas.add(A.WIN, "atlas", A.W, A.draw)
   ui.on(A.WIN, function(win, e)
-    if e.kind == "close" then return end
+    if e.kind == "close" then A.forget() return end
     if e.id == "q" and (e.kind == "edit" or e.kind == "change") then
       A.state.query = e.text or ""
       A.state.page = 1
@@ -447,6 +447,17 @@ function A.setup(model)
   end)
 end
 
+-- Closed: let go of the answers (the list, the detail); the search and the pick stay, and are asked again on opening.
+-- The model turning in the portrait goes too (the client drops a preview no window has asked for).
+function A.forget()
+  local m = A.model
+  if not m then return end
+  m.list = { page = 1, pages = 1, total = 0, rows = {}, at = 0 }
+  m.pending_list, m.info, m.pending_info = nil, nil, nil
+  A.state.typed_at = nil
+  if A.on_forget then A.on_forget() end
+end
+
 function A.render()
   if ui.is_open(A.WIN) then Canvas.render(A.WIN, "atlas") end
 end
@@ -454,6 +465,7 @@ end
 function A.toggle()
   if ui.is_open(A.WIN) then
     ui.close(A.WIN)
+    A.forget()
   else
     ui.open(A.WIN)
     A.refresh()

@@ -3123,7 +3123,7 @@
       "id": "timeless-atlas",
       "name": "Timeless NM Atlas",
       "kind": "lua",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "authors": [
         "TimelessXI"
       ],
@@ -3132,8 +3132,8 @@
         {
           "path": "init.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-atlas/init.lua",
-          "sha256": "196ecc7b0c6d062b570130d4784707d34d3dec234910740cad7c4ca7140cb20e",
-          "size": 2974
+          "sha256": "3f317c2f5fba14edf1ff6f6cf8ef5ba12be80474c454fa054122e1b595479471",
+          "size": 3266
         },
         {
           "path": "lib/action.lua",
@@ -3144,8 +3144,8 @@
         {
           "path": "lib/atlas.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-atlas/lib/atlas.lua",
-          "sha256": "3ab60fc5907eede9415fe762e977a6e164f6ac6a52f757332dfb985e75253994",
-          "size": 19473
+          "sha256": "5d306cfadab489b4478cb5ae526f3b4a68b43c47cc8ec7874f7fae64d900549d",
+          "size": 19977
         },
         {
           "path": "lib/canvas.lua",
@@ -3168,7 +3168,7 @@
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-atlas/mod.toml",
-          "sha256": "7349e18f4f16842c7d973191c043cdcc7d04df168d0e406b6745f680d4dbf05c",
+          "sha256": "df35d2d8cad639e90bc049986bf4e262b2a8b1716aad4603dd67407375b74480",
           "size": 762
         }
       ],

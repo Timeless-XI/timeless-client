@@ -132,6 +132,11 @@ local s = H.take_sent()
 ok(#s >= 2 and s[1]:match("^na list") and s[2]:match("^na info "), "fresh statuses every minute: " .. table.concat(s, "; "))
 H.command("/atlas")
 ok(not ui.is_open("atlas"), "closes")
+ok(#A.model.list.rows == 0 and A.model.info == nil, "closed: the answers let go")
+ok(A.state.query == "lizzy" and A.state.selected, "but the search and the pick kept")
+H.line("NA1|H|1|1|1")
+ok(#A.model.list.rows == 0 and H.line("NA1|R|17215868|107|10|11|3|0|Leaping Lizzy") == false and #A.model.list.rows == 0,
+  "a late answer after closing: hidden, not kept")
 H.run(70)
 ok(#H.take_sent() == 0, "quiet while closed")
 
@@ -139,6 +144,10 @@ ok(#H.take_sent() == 0, "quiet while closed")
 mod.model_portraits = nil
 H.command("/atlas")
 H.run(0.2)
+local again = H.take_sent()
+local asked = table.concat(again, "; ")
+ok(asked:find("na list ", 1, true) and asked:find("na info 17215868", 1, true), "opened again: the list and her detail asked afresh: " .. asked)
+play(d1, z1)
 A.render()
 ok(texts():find("Update your TimelessXI client", 1, true), "an older client: a note in place of the model")
 
