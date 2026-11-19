@@ -1,0 +1,59 @@
+name = "Timeless Companions"
+version = "1.4.0"
+authors = ["TimelessXI"]
+description = "TimelessXI companions, live: Companion View (/cv) for gear, stats and role, Companion Manager (/cmgr) to call, keep, save and set them up; role-coloured name plates, rings and speech bubbles in the world."
+permissions = ["packets.write", "actions"]
+
+[settings.auto_refresh]
+type = "int"
+default = 0
+min = 0
+max = 60
+step = 10
+label = "Auto Refresh"
+help = "Ask the server for fresh companion data every this many seconds while a window is open (0: only when you open it, press Refresh or use a button)."
+
+[settings.name_colours]
+type = "bool"
+default = true
+label = "Role Name Plates"
+help = "Companions' name plates in their role's colour: blue tanks, green healers, violet support, red damage."
+
+[settings.rings]
+type = "bool"
+default = true
+label = "Role Rings"
+help = "A ring in their role's colour at each companion's feet."
+
+[settings.bubbles]
+type = "bool"
+default = true
+label = "Speech Bubbles"
+help = "What companions say in party chat shows in a bubble over their head too."
+
+[settings.key_view]
+type = "key"
+default = ""
+label = "Companion View Key"
+help = "A key that shows or hides Companion View."
+
+[settings.key_manager]
+type = "key"
+default = ""
+label = "Companion Manager Key"
+help = "A key that shows or hides Companion Manager."
+
+[commands.cv]
+help = "Shows or hides Companion View: your companions' gear, stats and role."
+args = ""
+forms = [
+  { args = "update", help = "Asks the server for fresh data now." },
+]
+
+[commands.cmgr]
+help = "Shows or hides Companion Manager: call, keep, save and set up your companions."
+args = ""
+forms = [
+  { args = "party|call|kept|presets|tactics|settings", help = "Opens it on that tab." },
+  { args = "update", help = "Asks the server for fresh data now." },
+]
