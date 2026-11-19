@@ -901,6 +901,8 @@ pub struct LoginView {
     pub check: ([f32; 4], &'static str, bool),
     /// Trust this computer (focus n + 6), right of the one-time code; none for PlayOnline.
     pub trust: Option<([f32; 4], &'static str, bool)>,
+    /// Timeless XI: Stay logged in (focus n + 7), right of Remember password.
+    pub stay: ([f32; 4], &'static str, bool),
     pub buttons: Vec<([f32; 4], &'static str, bool)>,
     /// Two-factor (the focus after Exit), left of the box; none for PlayOnline.
     pub twofa: Option<([f32; 4], &'static str, bool)>,
@@ -984,6 +986,7 @@ fn login_window(
     playonline: bool,
     combo: &mut Option<(usize, usize)>,
     remember: &mut bool,
+    stay: &mut bool,
     mut trust: Option<&mut bool>,
     focus: &mut usize,
     busy: bool,
@@ -1002,6 +1005,8 @@ fn login_window(
     let twofa = n + 4;
     let upd = n + 5;
     let trust_at = n + 6;
+    // Timeless XI: Stay logged in, right of Remember password.
+    let stay_at = n + 7;
     let trusting = trust.is_some();
     if (*focus == upd && !update) || (*focus == trust_at && !trusting) {
         *focus = check;
@@ -1010,7 +1015,8 @@ fn login_window(
     // Tab's order: the fields (Trust this computer after the code), the box, the actions, then Two-factor and Update.
     let order: Vec<usize> = (0..n)
         .chain(trusting.then_some(trust_at))
-        .chain(n..first + 3)
+        .chain([n, stay_at])
+        .chain(first..first + 3)
         .chain((!playonline).then_some(twofa))
         .chain(update.then_some(upd))
         .collect();
@@ -1023,15 +1029,20 @@ fn login_window(
     let f = if modern.is_some() { (1.5 * monitor_scale).min(0.4 * sh / base_h).max(1.5) } else { 1.0 };
     const CAPTION: &str = "Remember password";
     const TRUST: &str = "Trust this computer";
+    const STAY: &str = "Stay logged in";
     const UPD: &str = "Update";
     let check_w = lu.text_width(&format!("\u{25a1} {CAPTION}")) + 4.0;
     let trust_w = lu.text_width(&format!("\u{25a1} {TRUST}")) + 4.0;
+    let stay_w = lu.text_width(&format!("\u{25a1} {STAY}")) + 4.0;
     // The one-time code beside Trust this computer: as wide as a code or its hint.
     let code_w = lu.text_width("00000000").max(lu.text_width(fields[n - 1].hint)) + 12.0;
     let upd_w = (lu.label_width(UPD) + 14.0).max(88.0);
     // Room for Update beside the box whether it shows or not, so nothing moves when it appears.
     let (ww, wh) = (
-        380.0f32.max(148.0 + check_w + 8.0 + upd_w + 16.0).max(148.0 + code_w + 16.0 + trust_w + 16.0) * f,
+        380.0f32
+            .max(148.0 + check_w + 12.0 + stay_w + 8.0 + upd_w + 16.0)
+            .max(148.0 + code_w + 16.0 + trust_w + 16.0)
+            * f,
         base_h * f,
     );
     // Centred between the title logo's foot (about half the height) and the copyright line (about 0.8); a larger
@@ -1045,6 +1056,7 @@ fn login_window(
     // Remember password: the game font's box (filled when on) and its caption under the fields.
     let check_rect = [wx + 148.0 * f, row(check), check_w * f, 18.0 * f];
     let trust_rect = [wx + (148.0 + code_w + 16.0) * f, row(n - 1), trust_w * f, 18.0 * f];
+    let stay_rect = [wx + (148.0 + check_w + 12.0) * f, row(check), stay_w * f, 18.0 * f];
     let ay = row(n + 1) + 6.0 * f;
     // Config-page buttons (88 px, wider for a longer caption), centred 24 px apart.
     const ACTIONS: [&str; 3] = ["Log in", "Create account", "Exit"];
@@ -1126,6 +1138,12 @@ fn login_window(
             *focus = trust_at;
         }
     }
+    if input.pointer.is_some_and(|p| inside(&stay_rect, p)) {
+        lu.hover.set(true);
+        if input.moved {
+            *focus = stay_at;
+        }
+    }
     for (i, r) in [(twofa, tf_rect), (upd, upd_rect)] {
         if let Some(r) = r
             && input.pointer.is_some_and(|p| inside(&r, p))
@@ -1136,7 +1154,7 @@ fn login_window(
             }
         }
     }
-    let (mut toggled, mut trust_toggled) = (false, false);
+    let (mut toggled, mut trust_toggled, mut stay_toggled) = (false, false, false);
     if input.clicked
         && !list_click
         && let Some(p) = input.pointer
@@ -1156,6 +1174,10 @@ fn login_window(
         if trusting && inside(&trust_rect, p) && !busy {
             *focus = trust_at;
             trust_toggled = true;
+        }
+        if inside(&stay_rect, p) && !busy {
+            *focus = stay_at;
+            stay_toggled = true;
         }
         if let Some(k) = (0..3).find(|&k| inside(&arects[k], p)) {
             *focus = first + k;
@@ -1252,6 +1274,12 @@ fn login_window(
                 egui::Key::ArrowUp if *focus == trust_at => *focus = n - 2,
                 egui::Key::ArrowDown if *focus == trust_at => *focus = check,
                 egui::Key::Enter | egui::Key::Space if *focus == trust_at => trust_toggled = !busy,
+                // Stay logged in: right of the box; Update (when shown) right of it.
+                egui::Key::Enter | egui::Key::Space if *focus == stay_at => stay_toggled = !busy,
+                egui::Key::ArrowLeft if *focus == stay_at => *focus = check,
+                egui::Key::ArrowRight if *focus == stay_at && update => *focus = upd,
+                egui::Key::ArrowUp if *focus == stay_at => *focus = n - 1,
+                egui::Key::ArrowDown if *focus == stay_at => *focus = first + 1,
                 egui::Key::ArrowDown if *focus == twofa => *focus = first,
                 egui::Key::ArrowDown if *focus == upd => *focus = first + 2,
                 egui::Key::ArrowUp if *focus == twofa || *focus == upd => *focus = n - 1,
@@ -1259,8 +1287,8 @@ fn login_window(
                 egui::Key::ArrowUp => *focus = if *focus > check { check } else { focus.saturating_sub(1) },
                 egui::Key::ArrowLeft if *focus == check && !playonline => *focus = twofa,
                 egui::Key::ArrowRight if *focus == twofa => *focus = check,
-                egui::Key::ArrowRight if *focus == check && update => *focus = upd,
-                egui::Key::ArrowLeft if *focus == upd => *focus = check,
+                egui::Key::ArrowRight if *focus == check => *focus = stay_at,
+                egui::Key::ArrowLeft if *focus == upd => *focus = stay_at,
                 egui::Key::ArrowLeft if (first + 1..=first + 2).contains(&*focus) => *focus -= 1,
                 egui::Key::ArrowRight if (first..first + 2).contains(&*focus) => *focus += 1,
                 egui::Key::Enter | egui::Key::Space if *focus == check && !busy => toggled = true,
@@ -1293,6 +1321,16 @@ fn login_window(
 
     if toggled {
         *remember = !*remember;
+        // Staying logged in needs the remembered password.
+        if !*remember {
+            *stay = false;
+        }
+        sounds.push(crate::audio::Ui::Select);
+    } else if stay_toggled {
+        *stay = !*stay;
+        if *stay {
+            *remember = true;
+        }
         sounds.push(crate::audio::Ui::Select);
     } else if let Some(t) = trust.as_deref_mut().filter(|_| trust_toggled) {
         *t = !*t;
@@ -1317,6 +1355,9 @@ fn login_window(
         "Square Enix accounts are made on Square Enix's website."
     } else if *focus == upd {
         "Update the game files or vana-client."
+    } else if *focus == stay_at {
+        "Log in by itself next time and go straight to the character menu (this also keeps the password). Log out \
+         to this screen to turn it off."
     } else if *focus == trust_at {
         "With two-factor sign-in: log in once with the code, then this computer needs none until the server stops \
          trusting it."
@@ -1366,6 +1407,7 @@ fn login_window(
             }),
             check: (check_rect, CAPTION, *remember),
             trust: trust.as_deref().map(|t| (trust_rect, TRUST, *t)),
+            stay: (stay_rect, STAY, *stay),
             buttons: (0..3).map(|k| (arects[k], ACTIONS[k], enabled[k])).collect(),
             twofa: tf_rect.map(|r| (r, TF, filled)),
             update: upd_rect.map(|r| (r, UPD)),
@@ -1399,11 +1441,15 @@ fn login_window(
     if let Some(t) = trust.as_deref() {
         lu.text(&boxed(*t, TRUST), trust_rect[0], trust_rect[1] + 1.0, 0, if busy { GREY } else { WHITE });
     }
+    lu.text(&boxed(*stay, STAY), stay_rect[0], stay_rect[1] + 1.0, 0, if busy { GREY } else { WHITE });
     // As the Config pages' buttons: the selected one gold (0x80805020) one pixel up-left, the hand over it last;
     // disabled grey.
     let mut hand = (*focus == check && !busy).then_some((check_rect[0], check_rect[1]));
     if *focus == trust_at && trusting && !busy {
         hand = Some((trust_rect[0], trust_rect[1]));
+    }
+    if *focus == stay_at && !busy {
+        hand = Some((stay_rect[0], stay_rect[1]));
     }
     let all = arects
         .iter()
@@ -8876,6 +8922,11 @@ pub struct App {
     window_dirty: bool,
     /// A window size to ask for, and the frames to wait first (see apply_window).
     size_pin: std::cell::Cell<Option<(winit::dpi::PhysicalSize<u32>, u32)>>,
+    /// Timeless XI: the window size and mode apply_window last put into effect (a maximized window is only taken out
+    /// of maximized when one of them changes).
+    window_applied: std::cell::Cell<Option<([u32; 2], u32)>>,
+    /// Timeless XI: Stay logged in has logged in by itself (or a choice was made on the form) this run.
+    auto_login_done: bool,
     /// Frames until the full-screen state is asked for again after the window first shows.
     refullscreen: std::cell::Cell<Option<u32>>,
     /// The monitor the window was last put on, and frames until a monitor move restores the mode.
@@ -9186,6 +9237,8 @@ impl App {
             present_dirty: false,
             window_dirty: false,
             size_pin: Default::default(),
+            window_applied: Default::default(),
+            auto_login_done: false,
             refullscreen: Default::default(),
             // The window is created on the configured monitor (full-screen modes), so nothing to move yet.
             monitor_applied: std::cell::RefCell::new(monitor),
@@ -9366,6 +9419,18 @@ impl App {
         // resize asked for in the same frame: change them only when needed, and ask for the size a few frames on.
         if window.is_decorated() != (mode == 1) {
             window.set_decorations(mode == 1);
+        }
+        // Timeless XI: every settings change (a HUD element resized, logging in to a character ...) comes through
+        // here, and un-maximizing on each one threw a maximized window back to its configured size. Windowed and
+        // maximized (now, or saved from last time) stays maximized until the window's own size or mode changes.
+        let first = self.window_applied.get().is_none();
+        let changed = self.window_applied.replace(Some((size, mode))) != Some((size, mode));
+        if mode == 1 && (window.is_maximized() || self.cfg.window_maximized) && (first || !changed) {
+            if !window.is_maximized() {
+                window.set_maximized(true);
+            }
+            self.size_pin.set(None);
+            return;
         }
         if matches!(mode, 1 | 2) {
             if window.is_maximized() {
@@ -15614,6 +15679,7 @@ impl App {
                     fields[account_field].options = accounts.clone();
                     let remembered = self.cfg.remember_password;
                     let trusted = self.cfg.trust_computer;
+                    let stayed = self.cfg.stay_logged_in;
                     // While an error shows, the fields take no input (the OK window has it).
                     let none = UiInput {
                         pointer: None,
@@ -15647,6 +15713,7 @@ impl App {
                         playonline,
                         combo,
                         &mut self.cfg.remember_password,
+                        &mut self.cfg.stay_logged_in,
                         (!playonline).then_some(&mut self.cfg.trust_computer),
                         focus,
                         busy,
@@ -15659,6 +15726,35 @@ impl App {
                         ctx.native_pixels_per_point().unwrap_or(1.0),
                     );
                     drop(fields);
+                    // Timeless XI: Stay logged in is saved at once.
+                    if stayed != self.cfg.stay_logged_in {
+                        save |= self.drive.login.is_none() || crate::config::is_copy();
+                    }
+                    // Timeless XI: Stay logged in logs in by itself once a run, with the remembered password, when the
+                    // form is free (no error, two-factor or Update window) and nothing else was chosen.
+                    let chosen = if chosen.is_none()
+                        && !self.auto_login_done
+                        && self.cfg.stay_logged_in
+                        && self.cfg.remember_password
+                        && !password.is_empty()
+                        && (!playonline || !pol_password.is_empty())
+                        && !busy
+                        && self.login_error.is_none()
+                        && self.twofa.is_none()
+                        && self.update_ui.is_none()
+                        && self.drive.login.is_none()
+                    {
+                        self.auto_login_done = true;
+                        log::info!("login: Stay logged in, logging in by itself");
+                        Some(LoginChoice::LogIn)
+                    } else {
+                        chosen
+                    };
+                    // Something chosen by hand: no logging in by itself later this run (logging out to this screen
+                    // shows the form, where Stay logged in can be turned off).
+                    if chosen.is_some() {
+                        self.auto_login_done = true;
+                    }
                     // Trust this computer is the account's: unticked, its token goes at once.
                     if trusted != self.cfg.trust_computer {
                         let (server, user, on) =
@@ -20979,6 +21075,8 @@ impl ApplicationHandler for App {
             .with_resizable(!bootstrap)
             .with_inner_size(winit::dpi::PhysicalSize::new(ww, wh))
             .with_decorations(mode == 1)
+            // Timeless XI: opens maximized again when it was maximized last time (Windowed mode).
+            .with_maximized(mode == 1 && !bootstrap && self.cfg.window_maximized)
             .with_visible(false)
             .with_active(!self.drive.driven())
             .with_window_icon(window_icon());
@@ -21149,6 +21247,22 @@ impl ApplicationHandler for App {
                     log::info!("window resized to {}x{}", size.width, size.height);
                 }
                 resize_surface(gfx, now);
+                // Timeless XI: remember a maximized window (Windowed mode only; full screen and borderless report
+                // their own states).
+                if self.cfg.window_mode() == 1
+                    && gfx.window.fullscreen().is_none()
+                    && gfx.window.is_minimized() != Some(true)
+                    && now.width > 0
+                {
+                    let max = gfx.window.is_maximized();
+                    if max != self.cfg.window_maximized {
+                        self.cfg.window_maximized = max;
+                        log::info!("window: maximized {max}");
+                        if let Err(e) = self.cfg.save() {
+                            log::warn!("saving the config: {e:#}");
+                        }
+                    }
+                }
             }
             WindowEvent::RedrawRequested => {
                 self.redraw();

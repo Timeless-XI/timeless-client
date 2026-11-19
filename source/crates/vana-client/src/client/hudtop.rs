@@ -725,6 +725,7 @@ pub fn topbar_shot(
             pol,
             &mut combo,
             &mut remember,
+            &mut false,
             (!pol).then_some(&mut trust),
             &mut 0,
             false,

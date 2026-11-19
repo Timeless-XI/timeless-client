@@ -200,6 +200,9 @@ pub struct Config {
     /// (secret.rs; hex, empty when none) and sent instead of the one-time code.
     pub trust_computer: bool,
     pub trust_token: String,
+    /// Timeless XI: the login screen's Stay logged in: at start the client logs in with the remembered password by
+    /// itself and goes straight to the character menu (once a run; a failed login shows the form).
+    pub stay_logged_in: bool,
     pub auth_port: u16,
     pub data_port: u16,
     pub view_port: u16,
@@ -313,6 +316,9 @@ pub struct Config {
     pub timeless_hotbar: bool,
     /// Timeless XI: the hotbar slots' key labels: 0 always in the corner, 1 only on the slot under the pointer, 2 none.
     pub timeless_key_labels: u32,
+    /// Timeless XI: the window was maximized (Windowed mode). Kept so the window opens maximized again, and so a
+    /// settings change that isn't the window's size or mode leaves it maximized.
+    pub window_maximized: bool,
     /// Timeless XI: a soft sound when a hotbar slot's recast comes back.
     pub timeless_ready_chime: bool,
     /// The modern layer's size in percent of its 1080-line design.
@@ -575,6 +581,7 @@ impl Default for Config {
             saved_password: String::new(),
             trust_computer: false,
             trust_token: String::new(),
+            stay_logged_in: false,
             auth_port: 54231,
             data_port: 54230,
             view_port: 54001,
@@ -616,6 +623,7 @@ impl Default for Config {
             timeless_ui: false,
             timeless_hotbar: true,
             timeless_key_labels: 0,
+            window_maximized: false,
             timeless_ready_chime: true,
             modern_scale: 60,
             modern_opacity: 0.85,

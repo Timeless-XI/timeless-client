@@ -132,7 +132,8 @@ impl Modern {
         }
         let n = v.fields.len();
         // Remember password (focus n) and Trust this computer (n + 6): the box art and its caption, gold with the focus.
-        let boxes = std::iter::once((v.check, n)).chain(v.trust.map(|t| (t, n + 6)));
+        // Timeless XI: Stay logged in (n + 7) right of Remember password.
+        let boxes = [(v.check, n), (v.stay, n + 7)].into_iter().chain(v.trust.map(|t| (t, n + 6)));
         for ((cr, caption, onv), at) in boxes {
             let cr = pt(cr);
             let lit = v.focus == at && !v.busy;
