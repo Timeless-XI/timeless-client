@@ -21,8 +21,16 @@ pub const ABILITY_PAGES: [&str; 3] = ["Job Abilities", "Weapon Skills", "Blood P
 pub const PACTS: [u16; 2] = [6, 10];
 
 /// The Spell Book's pages: the spell record's type and its name.
-pub const MAGIC: [(u16, &str); 6] =
-    [(1, "White Magic"), (2, "Black Magic"), (3, "Summoning"), (4, "Ninjutsu"), (5, "Songs"), (6, "Blue Magic")];
+pub const MAGIC: [(u16, &str); 7] = [
+    (1, "White Magic"),
+    (2, "Black Magic"),
+    (3, "Summoning"),
+    (4, "Ninjutsu"),
+    (5, "Songs"),
+    (6, "Blue Magic"),
+    // Timeless XI: the Trusts the server has (Recruits are built on them), so their icon can go on a bar.
+    (8, "Trust"),
+];
 
 /// The Weapon Skills page's weapon types: the server's skill name and its label.
 pub const WEAPONS: [(&str, &str); 14] = [
@@ -221,13 +229,21 @@ enum Do {
     Scan,
 }
 
-pub const MISC: [Misc; 22] = [
+pub const MISC: [Misc; 28] = [
     Misc {
         key: "attack",
         label: "Attack",
         icon: "attack",
         help: "Engages your target; while you fight, disengages.",
         what: Do::Line(""),
+    },
+    // Timeless XI: Disengage as its own action (the Attack slot also turns into it while fighting).
+    Misc {
+        key: "disengage",
+        label: "Disengage",
+        icon: "disengage",
+        help: "Stops attacking your target.",
+        what: Do::Line("/attackoff"),
     },
     Misc {
         key: "ranged",
@@ -321,6 +337,42 @@ pub const MISC: [Misc; 22] = [
         icon: "key",
         help: "Opens your key items.",
         what: Do::Menu("key_items"),
+    },
+    // Timeless XI: fishing and HELM. The gathering points take the tool as a trade, as the game's macros do it.
+    Misc {
+        key: "fishing",
+        label: "Fishing",
+        icon: "materials",
+        help: "Casts your line (rod and bait equipped).",
+        what: Do::Line("/fish"),
+    },
+    Misc {
+        key: "mining",
+        label: "Mining",
+        icon: "materials",
+        help: "Uses a Pickaxe on the targeted Mining Point.",
+        what: Do::Line("/item \"Pickaxe\" <t>"),
+    },
+    Misc {
+        key: "logging",
+        label: "Logging",
+        icon: "materials",
+        help: "Uses a Hatchet on the targeted Logging Point.",
+        what: Do::Line("/item \"Hatchet\" <t>"),
+    },
+    Misc {
+        key: "harvesting",
+        label: "Harvesting",
+        icon: "materials",
+        help: "Uses a Sickle on the targeted Harvesting Point.",
+        what: Do::Line("/item \"Sickle\" <t>"),
+    },
+    Misc {
+        key: "excavation",
+        label: "Excavation",
+        icon: "materials",
+        help: "Uses a Pickaxe on the targeted Excavation Point.",
+        what: Do::Line("/item \"Pickaxe\" <t>"),
     },
 ];
 
