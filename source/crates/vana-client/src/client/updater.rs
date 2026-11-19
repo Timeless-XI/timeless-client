@@ -402,6 +402,15 @@ impl UpdateUi {
         Self { status, root, pick, cursor, job: None, reloaded: false, zoom: 1.0 }
     }
 
+    /// Timeless XI: the window with only the client program's row ticked (from the character menu's Update: the
+    /// game files stay as they are, a retail file update would undo the Timeless DAT patches).
+    pub fn open_client_only(status: Shared, root: PathBuf) -> Self {
+        let mut u = Self::open(status, root);
+        u.pick[0] = false;
+        u.pick[1] = false;
+        u
+    }
+
     fn available(&self, row: usize) -> bool {
         offered(&self.status.lock().unwrap(), row)
     }

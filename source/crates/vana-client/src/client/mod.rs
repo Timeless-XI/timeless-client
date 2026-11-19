@@ -970,6 +970,86 @@ fn keep_trust_token(cfg: &mut Config, save: bool, server: &str, username: &str, 
     }
 }
 
+/// Timeless XI: the fields the Update window needs, borrowed apart from the phase (the login form and the character
+/// menu both show it).
+struct UpdatePass<'a> {
+    update_ui: &'a mut Option<updater::UpdateUi>,
+    modern: &'a mut Option<modern::Modern>,
+    cfg: &'a mut Config,
+    audio: &'a mut Option<crate::audio::Audio>,
+    index: &'a mut Option<Arc<DatIndex>>,
+    exit_requested: &'a mut bool,
+    ui_k: (f32, f32),
+}
+
+/// The Update window (client/updater.rs) over the title, one frame: its input, drawing, sounds, and what it asks for
+/// (a reload of the game files' index, a restart into the new client, closing).
+#[allow(clippy::too_many_arguments)]
+fn update_window_pass(
+    a: UpdatePass,
+    lu: &mut GameUi,
+    ctx: &egui::Context,
+    input: &UiInput,
+    size: [u32; 2],
+    window: [u32; 2],
+    modern_ui: bool,
+) {
+    let Some(u) = a.update_ui.as_mut() else { return };
+    let (sw, sh) = (size[0] as f32, size[1] as f32);
+    u.zoom = if modern_ui { 1.35 } else { 1.0 };
+    let mut outs = vec![u.poll()];
+    for ev in input.events.iter() {
+        if let egui::Event::Key { key, pressed: true, .. } = ev {
+            outs.push(u.key(*key));
+        }
+    }
+    if let Some(p) = input.pointer {
+        outs.push(u.pointer(p, input.moved, input.clicked, sw, sh));
+        if outs.last().is_some_and(|o| o.hover) {
+            lu.hover.set(true);
+        }
+    }
+    let v = u.view(sw, sh);
+    if modern_ui {
+        let m = a.modern.get_or_insert_with(|| modern::Modern::new(ctx));
+        m.update_window(ctx, window, a.cfg.modern_scale, a.ui_k, &v);
+    } else {
+        updater::UpdateUi::draw(lu, &v);
+    }
+    for out in outs {
+        if let Some(au) = a.audio.as_mut() {
+            for x in &out.sounds {
+                au.ui(*x);
+            }
+        }
+        // New and changed DATs: the next login opens the index again.
+        if out.reload {
+            *a.index = None;
+            // The next login sends the patched files' version.
+            // At once: the restart below starts a client that reads it.
+            if a.cfg.follow_applied_version()
+                && let Err(e) = a.cfg.save()
+            {
+                log::warn!("saving the config: {e:#}");
+            }
+        }
+        if out.restart {
+            match updater::exe().map(|exe| {
+                std::process::Command::new(&exe).args(std::env::args().skip(1)).spawn().map(|c| (exe, c.id()))
+            }) {
+                Some(Ok((exe, pid))) => log::info!("update: restarted as {} (pid {pid})", exe.display()),
+                Some(Err(e)) => log::warn!("update: restart failed: {e}"),
+                None => log::warn!("update: restart failed: no executable path"),
+            }
+            *a.exit_requested = true;
+        }
+        if out.closed {
+            *a.update_ui = None;
+            break;
+        }
+    }
+}
+
 /// The credentials window over the title art (ours: retail logged in through PlayOnline). Focus 0..n-1 are the
 /// fields, n Remember password, n+1..n+3 Log in / Create account / Exit, n+4 Two-factor (client/twofa.rs; not for
 /// PlayOnline, where Create account is off too), n+5 Update (only with `update`: something is out of date; here
@@ -8927,6 +9007,9 @@ pub struct App {
     window_applied: std::cell::Cell<Option<([u32; 2], u32)>>,
     /// Timeless XI: Stay logged in has logged in by itself (or a choice was made on the form) this run.
     auto_login_done: bool,
+    /// Timeless XI: when the app started (Stay logged in waits up to a few seconds from here for the client update
+    /// check, so an out-of-date client lands on the character menu with Update showing).
+    started_at: Instant,
     /// Frames until the full-screen state is asked for again after the window first shows.
     refullscreen: std::cell::Cell<Option<u32>>,
     /// The monitor the window was last put on, and frames until a monitor move restores the mode.
@@ -9239,6 +9322,7 @@ impl App {
             size_pin: Default::default(),
             window_applied: Default::default(),
             auto_login_done: false,
+            started_at: Instant::now(),
             refullscreen: Default::default(),
             // The window is created on the configured monitor (full-screen modes), so nothing to move yet.
             monitor_applied: std::cell::RefCell::new(monitor),
@@ -15743,6 +15827,10 @@ impl App {
                         && self.twofa.is_none()
                         && self.update_ui.is_none()
                         && self.drive.login.is_none()
+                        && (self.started_at.elapsed().as_secs_f32() > 8.0
+                            || !self.updates.as_ref().is_some_and(|u| {
+                                matches!(u.lock().unwrap().client, updater::Client::Checking)
+                            }))
                     {
                         self.auto_login_done = true;
                         log::info!("login: Stay logged in, logging in by itself");
@@ -15860,71 +15948,23 @@ impl App {
                     }
                     // The Update window over the form (client/updater.rs): before the login, so an old client can
                     // always reach it.
-                    if let Some(u) = self.update_ui.as_mut() {
-                        let (sw, sh) = (size[0] as f32, size[1] as f32);
-                        u.zoom = if modern_ui { 1.35 } else { 1.0 };
-                        let mut outs = vec![u.poll()];
-                        for ev in input.events.iter() {
-                            if let egui::Event::Key { key, pressed: true, .. } = ev {
-                                outs.push(u.key(*key));
-                            }
-                        }
-                        if let Some(p) = input.pointer {
-                            outs.push(u.pointer(p, input.moved, input.clicked, sw, sh));
-                            if outs.last().is_some_and(|o| o.hover) {
-                                lu.hover.set(true);
-                            }
-                        }
-                        let v = u.view(sw, sh);
-                        if modern_ui {
-                            self.modern.get_or_insert_with(|| modern::Modern::new(ctx)).update_window(
-                                ctx,
-                                window,
-                                self.cfg.modern_scale,
-                                self.ui_k,
-                                &v,
-                            );
-                        } else {
-                            updater::UpdateUi::draw(lu, &v);
-                        }
-                        for out in outs {
-                            if let Some(a) = self.audio.as_mut() {
-                                for x in &out.sounds {
-                                    a.ui(*x);
-                                }
-                            }
-                            // New and changed DATs: the next login opens the index again.
-                            if out.reload {
-                                self.index = None;
-                                // The next login sends the patched files' version.
-                                // At once: the restart below starts a client that reads it.
-                                if self.cfg.follow_applied_version()
-                                    && let Err(e) = self.cfg.save()
-                                {
-                                    log::warn!("saving the config: {e:#}");
-                                }
-                            }
-                            if out.restart {
-                                match updater::exe().map(|exe| {
-                                    std::process::Command::new(&exe)
-                                        .args(std::env::args().skip(1))
-                                        .spawn()
-                                        .map(|c| (exe, c.id()))
-                                }) {
-                                    Some(Ok((exe, pid))) => {
-                                        log::info!("update: restarted as {} (pid {pid})", exe.display())
-                                    }
-                                    Some(Err(e)) => log::warn!("update: restart failed: {e}"),
-                                    None => log::warn!("update: restart failed: no executable path"),
-                                }
-                                self.exit_requested = true;
-                            }
-                            if out.closed {
-                                self.update_ui = None;
-                                break;
-                            }
-                        }
-                    }
+                    update_window_pass(
+                        UpdatePass {
+                            update_ui: &mut self.update_ui,
+                            modern: &mut self.modern,
+                            cfg: &mut self.cfg,
+                            audio: &mut self.audio,
+                            index: &mut self.index,
+                            exit_requested: &mut self.exit_requested,
+                            ui_k: self.ui_k,
+                        },
+                        lu,
+                        ctx,
+                        &input,
+                        size,
+                        window,
+                        modern_ui,
+                    );
                     // A saved login picked: its account, PlayOnline ID, Remember password and passwords fill the form. A
                     // Server Type takes that type's most recent login (an empty one when none).
                     let picked = match chosen {
@@ -16139,6 +16179,17 @@ impl App {
                             ("Config", "Change settings."),
                             ("Back", "Return to the previous screen."),
                         ];
+                        // Timeless XI: a newer Timeless XI client is out (Stay logged in may have skipped the login
+                        // screen's Update): Select Character becomes Update, Create and Delete Character grey out. Only
+                        // the client program counts, never the game files (a retail file update would undo the Timeless
+                        // DAT patches).
+                        let client_update = self.updates.as_ref().is_some_and(|u| {
+                            matches!(u.lock().unwrap().client, updater::Client::Available(_))
+                        });
+                        let mut items = ITEMS;
+                        if client_update {
+                            items[0] = ("Update", "A newer Timeless XI client is out: update it to play.");
+                        }
                         // FUN_10235fa0: while lobycwin (or our settings screen) is up the title takes no input.
                         // The change notes an update left (or the start asked for) open first, over everything else on the
                         // title. An answer with none marks this version seen.
@@ -16157,8 +16208,10 @@ impl App {
                         {
                             self.notes_ui = Some(notes::NotesUi::open(s));
                         }
-                        let config_open =
-                            self.lobby_cfg.is_some() || self.lobby_settings.is_some() || self.notes_ui.is_some();
+                        let config_open = self.lobby_cfg.is_some()
+                            || self.lobby_settings.is_some()
+                            || self.notes_ui.is_some()
+                            || self.update_ui.is_some();
                         let window_over = config_open;
                         let order: &[usize] = &[0, 1, 2, 3, 4];
                         // FUN_102406d0: Config gives the title back when it closes.
@@ -16181,8 +16234,11 @@ impl App {
                         let mut chosen =
                             ctx.input(|i| i.key_pressed(egui::Key::Enter)).then_some(*menu).filter(|_| !config_open);
                         // FUN_102333b0: Select / Delete need a character, Create a free slot.
-                        let enabled =
-                            [!live.is_empty(), chars.iter().any(|c| c.is_empty_slot()), !live.is_empty(), true, true];
+                        let enabled = if client_update {
+                            [true, false, false, true, true]
+                        } else {
+                            [!live.is_empty(), chars.iter().any(|c| c.is_empty_slot()), !live.is_empty(), true, true]
+                        };
                         if let Some(lu) = self.game_ui.as_mut() {
                             self.ui_drawn = true;
                             let (sw, sh) = (screen_size[0] as f32, screen_size[1] as f32);
@@ -16231,7 +16287,7 @@ impl App {
                             if modern_title {
                                 let buttons: Vec<([f32; 4], &str, bool, bool)> = rects
                                     .iter()
-                                    .map(|&(m, r)| (r, ITEMS[m].0, m == *menu && !window_over, enabled[m]))
+                                    .map(|&(m, r)| (r, items[m].0, m == *menu && !window_over, enabled[m]))
                                     .collect();
                                 let mo = self.modern.get_or_insert_with(|| modern::Modern::new(ctx));
                                 mo.title_buttons(
@@ -16247,7 +16303,10 @@ impl App {
                                     self.notes_ui.as_ref().map(|n| n.help()).unwrap_or_default()
                                 }
                                 // Modern: the Config panel has its help line.
-                                (_, Some(_)) if modern_title => ITEMS[3].1.to_string(),
+                                _ if self.update_ui.is_some() => {
+                                    self.update_ui.as_ref().map(|u| u.help()).unwrap_or_default()
+                                }
+                                (_, Some(_)) if modern_title => items[3].1.to_string(),
                                 (Some(s), _) => s.help(),
                                 (None, Some(c)) => match c.focus() {
                                     Some((_, configui::SETTINGS)) => configui::SETTINGS_HELP.to_string(),
@@ -16263,8 +16322,25 @@ impl App {
                                     }
                                     None => String::new(),
                                 },
-                                _ => ITEMS[*menu].1.to_string(),
+                                _ => items[*menu].1.to_string(),
                             };
+                            // Timeless XI: the classic title's buttons are the game's art: Update is written over
+                            // Select Character's.
+                            if client_update
+                                && !modern_title
+                                && let Some(&(_, r)) = rects.iter().find(|(m, _)| *m == 0)
+                            {
+                                lu.rect(r[0] + 2.0, r[1] + 2.0, r[2] - 4.0, r[3] - 4.0, [0.05, 0.06, 0.12, 0.92]);
+                                let w = lu.text_width("Update");
+                                let lit = *menu == 0 && !window_over;
+                                lu.text(
+                                    "Update",
+                                    r[0] + (r[2] - w) / 2.0,
+                                    r[1] + (r[3] - 16.0) / 2.0,
+                                    0,
+                                    if lit { YELLOW } else { WHITE },
+                                );
+                            }
                             if modern_title {
                                 let mo = self.modern.get_or_insert_with(|| modern::Modern::new(ctx));
                                 if let Some((strip, ver)) = lu.help_rects(screen_size[0] as f32, screen_size[1] as f32)
@@ -16505,11 +16581,42 @@ impl App {
                                 }
                             }
                         }
+                        // Timeless XI: the Update window over the title (opened by Update in place of Select Character).
+                        let modern_ui = self.cfg.modern_ui;
+                        if let Some(lu) = self.game_ui.as_mut() {
+                            update_window_pass(
+                                UpdatePass {
+                                    update_ui: &mut self.update_ui,
+                                    modern: &mut self.modern,
+                                    cfg: &mut self.cfg,
+                                    audio: &mut self.audio,
+                                    index: &mut self.index,
+                                    exit_requested: &mut self.exit_requested,
+                                    ui_k: self.ui_k,
+                                },
+                                lu,
+                                ctx,
+                                &input,
+                                [screen_size[0], screen_size[1]],
+                                window,
+                                modern_ui,
+                            );
+                        }
                         // FUN_10235ec0 case 5: the press counter starts (the generic handler, window +0x5e = 9); a
                         // disabled button (Create excepted) only buzzes, any other is taken with 0002 (the fade hides
                         // the screen change from the UiSnap diff).
+                        // Timeless XI: Update opens the Update window (the client program only) over the title.
+                        if client_update && chosen == Some(0) {
+                            chosen = None;
+                            if let Some(u) = self.updates.clone() {
+                                self.update_ui = Some(updater::UpdateUi::open_client_only(u, self.cfg.ffxi_dir()));
+                            }
+                            if let Some(a) = self.audio.as_mut() {
+                                a.ui(crate::audio::Ui::Select);
+                            }
+                        }
                         if let Some(i) = chosen {
-                            let refused = i != 1 && !enabled[i];
+                            let refused = (i != 1 || client_update) && !enabled[i];
                             self.title_press = Some((i, Instant::now(), !refused));
                             if let Some(a) = self.audio.as_mut() {
                                 a.ui(if refused { crate::audio::Ui::Error } else { crate::audio::Ui::Select });
