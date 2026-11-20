@@ -3181,6 +3181,113 @@
       }
     },
     {
+      "id": "timeless-champions",
+      "name": "Timeless Champions",
+      "kind": "lua",
+      "version": "1.0.0",
+      "authors": [
+        "TimelessXI"
+      ],
+      "description": "Champions you can see coming (/champs): a glowing aura in their rank's colour, their affixes as badges over their heads (hover for what each does), hazards such as an Alpha's rally range, thorns and shields drawn round them, and lines to the monsters an Alpha rallied.",
+      "files": [
+        {
+          "path": "init.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-champions/init.lua",
+          "sha256": "af9f0bc7f31044279b4f3a79c2b92cce634797d010f3ce90e2d53c695d8c91d5",
+          "size": 8097
+        },
+        {
+          "path": "lib/action.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-champions/lib/action.lua",
+          "sha256": "7b037495d9b6ae853efe7108dc906b86b59068df283dcba258eaeb522689af34",
+          "size": 651
+        },
+        {
+          "path": "lib/affixes.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-champions/lib/affixes.lua",
+          "sha256": "c784dd9b2f46d70e9349445b1b8d1bd8d6c07aacd509efe7e3c2afc8f421cbd3",
+          "size": 4374
+        },
+        {
+          "path": "lib/protocol.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-champions/lib/protocol.lua",
+          "sha256": "0417e602525fccd2f6a13ceab91333f71ed0f3dcb8713f5127f10842e8c94a7a",
+          "size": 2365
+        },
+        {
+          "path": "lib/scene.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-champions/lib/scene.lua",
+          "sha256": "dc6869b04ab81c831a4233749ccaa13734e6cc337f84bcb0fcf3c0092fcee547",
+          "size": 10392
+        },
+        {
+          "path": "lib/state.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-champions/lib/state.lua",
+          "sha256": "c6f2c873d0f34f8fa833436d8af5386b55ecb9b606bf713157b330566ba8c8c4",
+          "size": 169
+        },
+        {
+          "path": "mod.toml",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-champions/mod.toml",
+          "sha256": "65d09207b321e753c5ffc5c7a216c6c5072dcb3c27af9a8c3482b7baeca63828",
+          "size": 1343
+        }
+      ],
+      "required": true,
+      "commands": {
+        "champs": {
+          "help": "Turns the Champion auras, badges and hazards on or off.",
+          "args": "",
+          "forms": [
+            {
+              "args": "aura",
+              "help": "The ground rings and lights."
+            },
+            {
+              "args": "lights",
+              "help": "Only the lights (they show with Night Lighting Modern)."
+            },
+            {
+              "args": "badges",
+              "help": "The affix badges over their heads."
+            },
+            {
+              "args": "badges target",
+              "help": "Badges for your target only."
+            },
+            {
+              "args": "badges all",
+              "help": "Badges for every Champion near you."
+            },
+            {
+              "args": "hazards",
+              "help": "Rally range, thorns, shields, haze, drain, healing, shadows."
+            },
+            {
+              "args": "rally",
+              "help": "Lines from an Alpha to the monsters it rallied."
+            },
+            {
+              "args": "labels",
+              "help": "Words such as \"Rally range\" on the ground."
+            },
+            {
+              "args": "opacity <0.2-1>",
+              "help": "How solid the rings and lines are."
+            },
+            {
+              "args": "test",
+              "help": "A sample Legendary Champion on your target for 20 seconds."
+            }
+          ]
+        },
+        "timelesschampions": {
+          "help": "The same as /champs.",
+          "args": ""
+        }
+      }
+    },
+    {
       "id": "timeless-companions",
       "name": "Timeless Companions",
       "kind": "lua",
