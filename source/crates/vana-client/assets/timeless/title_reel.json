@@ -11,6 +11,7 @@
       "logo": "intro",
       "fade_in": 4.0,
       "fade_out": 3.0,
+      "all_scenery": true,
       "note": "Lufaise Meadows at dusk: past the trees, toward the arch the logo shows, the logo coming in above it.",
       "moves": [
         {

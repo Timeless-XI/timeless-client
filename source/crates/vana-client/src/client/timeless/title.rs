@@ -114,6 +114,10 @@ pub struct Shot {
     pub fade_in: f32,
     #[serde(default = "default_fade")]
     pub fade_out: f32,
+    /// Draw all of the zone's scenery, not only the camera list under the camera: the lists are made for players on
+    /// the ground, and a camera high over a valley leaves holes in the distance with them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub all_scenery: bool,
     /// A note for whoever edits the file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
@@ -277,11 +281,12 @@ pub struct Playing {
     pub fade_out: f32,
     /// The reel's logo place, for the overlay and the match cut.
     pub place: LogoPlace,
+    pub all_scenery: bool,
 }
 
 impl Playing {
     pub fn of(s: &Shot, place: LogoPlace) -> Self {
-        Self { logo: s.logo.clone(), seconds: s.seconds(), fade_out: s.fade_out, place }
+        Self { logo: s.logo.clone(), seconds: s.seconds(), fade_out: s.fade_out, place, all_scenery: s.all_scenery }
     }
 }
 
@@ -393,6 +398,7 @@ pub mod cam {
         "/titlecam key [up|down N] [seconds]  add the camera as a key (optionally raised N yalms)",
         "/titlecam move [seconds] [cross]  start a new move in the shot (cross = crossfade seconds, 0 = cut)",
         "/titlecam undo | list | opening <id> | logo <intro|match|none> | filter <memory|film|dusk|off>",
+        "/titlecam scenery all|listed  draw the whole zone (for high cameras) or only what the ground spot shows",
         "/titlecam guide  show where the logo and its crystal sit (frame the match-cut crystal on the cross)",
         "Log out to the title to watch it. The file is timeless-title.json beside config.json.",
     ];
@@ -433,6 +439,7 @@ pub mod cam {
                     logo: None,
                     fade_in: default_fade(),
                     fade_out: default_fade(),
+                    all_scenery: false,
                     note: None,
                     moves: vec![Move { seconds: 20.0, ease: default_ease(), cross: 0.0, keys: Vec::new() }],
                 });
@@ -548,6 +555,17 @@ pub mod cam {
                     shot.logo = args.get(1).map(|s| s.to_ascii_lowercase()).filter(|s| s == "intro" || s == "match");
                     changed = true;
                     out.push(format!("{}: logo {}.", shot.id, shot.logo.as_deref().unwrap_or("none")));
+                }
+            }
+            Some("scenery") => {
+                if let Some(shot) = current.as_ref().and_then(|c| reel.shots.iter_mut().find(|s| &s.id == c)) {
+                    shot.all_scenery = args.get(1).is_some_and(|w| w.eq_ignore_ascii_case("all"));
+                    changed = true;
+                    out.push(format!(
+                        "{}: {} scenery.",
+                        shot.id,
+                        if shot.all_scenery { "all the" } else { "the camera list's" }
+                    ));
                 }
             }
             Some("filter") => {
