@@ -316,6 +316,10 @@ function H.check_draws(win)
         elseif d.type == "icon" then
           assert(type(d.id) == "number" and d.id > 0, "icon id")
         end
+        -- The client reads line widths as numbers: anything else fails the whole canvas.
+        for _, k in ipairs({ "line", "width", "round", "size", "r" }) do
+          assert(d[k] == nil or type(d[k]) == "number", ("%s: %s %s is a %s, not a number"):format(id, d.type, k, type(d[k])))
+        end
       end
     end
   end

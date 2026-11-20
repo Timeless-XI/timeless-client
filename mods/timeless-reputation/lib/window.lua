@@ -42,8 +42,8 @@ local function glyph(c, kind, x, y, col)
     c:rect(x - 2, y - 11, 4, 22, w, { round = 1 })
     c:rect(x - 9, y - 4, 18, 4, w, { round = 1 })
   elseif kind == "gear" then
-    c:circle(x, y, 9, w, true)
-    c:circle(x, y, 4, w, false)
+    c:circle(x, y, 9, w, 2)
+    c:circle(x, y, 4, w)
     for i = 0, 5 do
       local a = i * math.pi / 3
       c:line(x + math.cos(a) * 9, y + math.sin(a) * 9, x + math.cos(a) * 13, y + math.sin(a) * 13, w, 3)
@@ -70,7 +70,7 @@ local function glyph(c, kind, x, y, col)
     c:line(x - 7, y - 6, x + 7, y - 6, w, 2)
     c:line(x - 10, y + 3, x, y + 10, w, 2)
     c:line(x + 10, y + 3, x, y + 10, w, 2)
-    c:circle(x, y - 12, 2.5, w, true)
+    c:circle(x, y - 12, 2.5, w, 1.5)
   end
 end
 
@@ -80,11 +80,11 @@ local function card(c, x, y, w, h, info, a)
   local cx, cy = x + 30, y + 32
   if info.item then
     c:circle(cx, cy, 21, { 0, 0, 0, 110 })
-    c:circle(cx, cy, 21, S.fade(info.colour, 0.9), true)
+    c:circle(cx, cy, 21, S.fade(info.colour, 0.9), 2)
     c:icon(cx - 16, cy - 16, 32, "item", info.item)
   else
     c:circle(cx, cy, 21, S.fade(info.colour, 0.85))
-    c:circle(cx, cy, 21, { 255, 240, 205, 160 }, true)
+    c:circle(cx, cy, 21, { 255, 240, 205, 160 }, 2)
     glyph(c, info.glyph, cx, cy, S.fade(info.colour, 0.85))
   end
   -- Name and what they make of you
@@ -97,7 +97,7 @@ local function card(c, x, y, w, h, info, a)
     if a and i <= level then
       c:circle(px, y + 54, 4.5, info.colour)
     else
-      c:circle(px, y + 54, 4.5, { 255, 255, 255, 60 }, true)
+      c:circle(px, y + 54, 4.5, { 255, 255, 255, 60 }, 1)
     end
   end
   c:text(x + 64 + 9 * 14, y + 47, ("%d/9"):format(level), { size = 0.85, colour = S.MUTED })
