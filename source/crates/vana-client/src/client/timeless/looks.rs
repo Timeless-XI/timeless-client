@@ -455,7 +455,8 @@ fn sample(m: &[u8], u: f32, v: f32) -> [f32; 4] {
 /// with sides of its own (`sides`): every marking on its own side(s) in one texture.
 pub fn compose_race(rl: &RaceLayers, f: &RaceFace, tex: &[u8], w: u32, h: u32, s: &Settings, side: u8) -> Vec<u8> {
     let mut out = tex.to_vec();
-    let level = hair_level(rl, tex, w, h);
+    let k = mask_scale(rl, w);
+    let level = hair_level(rl, tex, w, h, k);
     let level = &level;
     let row_bytes = w as usize * 4;
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 8);
@@ -473,12 +474,19 @@ pub fn compose_race(rl: &RaceLayers, f: &RaceFace, tex: &[u8], w: u32, h: u32, s
 /// The hair's local brightness (LEVEL x LEVEL cells over the texture, hair-weighted mean luma; cells without hair take
 /// their neighbours'), so near-black parts of a mane (Galka 1A's back) recolour as hair, not as black.
 const LEVEL: usize = 32;
-fn hair_level(rl: &RaceLayers, tex: &[u8], w: u32, h: u32) -> Vec<f32> {
+/// A 1024 mask set is laid out for a remapped 2048 face (the old layout in its top-left quarter); on a face that isn't
+/// remapped (the stock 128 face, an older HD one) the masks are read from that quarter: (u, v) x 0.5.
+fn mask_scale(rl: &RaceLayers, w: u32) -> f32 {
+    let big = rl.m.first().is_some_and(|m| m.len() == 1024 * 1024 * 4);
+    if big && w < 2048 { 0.5 } else { 1.0 }
+}
+
+fn hair_level(rl: &RaceLayers, tex: &[u8], w: u32, h: u32, k: f32) -> Vec<f32> {
     let (mut sum, mut wt) = (vec![0f32; LEVEL * LEVEL], vec![0f32; LEVEL * LEVEL]);
     let Some(m1) = rl.m.first() else { return sum };
     for y in (0..h as usize).step_by(2) {
         for x in (0..w as usize).step_by(2) {
-            let a = sample(m1, (x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32)[0];
+            let a = sample(m1, k * (x as f32 + 0.5) / w as f32, k * (y as f32 + 0.5) / h as f32)[0];
             if a < 0.5 {
                 continue;
             }
@@ -564,13 +572,15 @@ fn compose_race_rows(rl: &RaceLayers, f: &RaceFace, out: &mut [u8], w: u32, h: u
     let fl = [20.0, 40.0, 40.0, 40.0, 20.0];
     let [mh, mi, ml, mn, msk] = std::array::from_fn(|k| f.med[k].max(fl[k]) / 255.0);
     let strength = s.mark_strength.clamp(0.0, 1.0);
+    let ks = mask_scale(rl, w);
     for (i, px) in out.chunks_exact_mut(4).enumerate() {
         let (x, y) = (i % w as usize, y0 + i / w as usize);
         let (u, v) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
-        let a = sample(m1, u, v);
-        let b = sample(m2, u, v);
-        let c3 = sample(m3, u, v);
-        let d = sample(m4, u, v);
+        let (mu, mv) = (u * ks, v * ks);
+        let a = sample(m1, mu, mv);
+        let b = sample(m2, mu, mv);
+        let c3 = sample(m3, mu, mv);
+        let d = sample(m4, mu, mv);
         let hw = |n: f32| n.clamp(0.0, 1.0);
         let mut c = [px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0];
         let l = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
@@ -603,7 +613,7 @@ fn compose_race_rows(rl: &RaceLayers, f: &RaceFace, out: &mut [u8], w: u32, h: u
             }
         }
         if right {
-            let (e, g6) = (sample(m5, u, v), sample(m6, u, v));
+            let (e, g6) = (sample(m5, mu, mv), sample(m6, mu, mv));
             // Right-side masks, MARKS order: cheeks, brow, arc, slash, crescent, chevrons, constellation.
             for (k, v) in [(1, e[0]), (2, e[1]), (3, e[2]), (4, e[3]), (6, g6[0]), (7, g6[1]), (8, g6[2])] {
                 if right_on[k] && v > 0.0 && !m6.is_empty() {
