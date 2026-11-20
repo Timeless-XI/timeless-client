@@ -15619,6 +15619,11 @@ impl App {
         // Timeless XI: the hero logo over the Timeless title's reel.
         if self.timeless_title() && self.title_backdrop() {
             let place = self.flyover.as_ref().and_then(|f| f.playing()).map(|p| p.0.place).unwrap_or_default();
+            // Before the reel's first shot has loaded the logo comes up all the same.
+            if self.flyover.is_none() {
+                let dt = ctx.input(|i| i.stable_dt).min(0.1);
+                self.tl_title.advance(None, dt);
+            }
             let look = &self.tl_title;
             let mo = self.modern.get_or_insert_with(|| modern::Modern::new(ctx));
             mo.title_logo(ctx, &place, look.logo, look.glow, look.flare);
@@ -16361,20 +16366,12 @@ impl App {
                                     .collect();
                                 let mo = self.modern.get_or_insert_with(|| modern::Modern::new(ctx));
                                 if tl_title {
-                                    let icons: [&str; 5] = [
-                                        if client_update { "icons/refresh" } else { "icons/party" },
-                                        "icons/job",
-                                        "icons/cancel",
-                                        "icons/settings",
-                                        "icons/back",
-                                    ];
                                     mo.title_buttons_tl(
                                         ctx,
                                         [screen_size[0], screen_size[1]],
                                         self.cfg.modern_scale,
                                         self.ui_k,
                                         &buttons,
-                                        &icons,
                                     );
                                 } else {
                                     mo.title_buttons(
@@ -19104,7 +19101,7 @@ impl App {
             // Timeless XI: the logo's fade and the match cut's light at the logo crystal.
             let playing = fly.playing();
             let place = playing.map(|p| p.0.place).unwrap_or_default();
-            self.tl_title.advance(&place, playing, dt);
+            self.tl_title.advance(playing, dt);
             let uv = place.crystal_uv([bg[0] as f32, bg[1] as f32]);
             fly.tl_flare = [uv[0], uv[1], self.tl_title.flare];
             let alive = self.audio.as_ref().map(|a| a.alive());

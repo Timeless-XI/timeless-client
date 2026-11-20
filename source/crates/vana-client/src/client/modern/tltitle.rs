@@ -8,31 +8,64 @@ use egui::{
     Align2, Color32, Context, FontFamily, FontId, Id, LayerId, Order, Rect, Shape, Stroke, TextureHandle, pos2, vec2,
 };
 
-// The logo without its hourglass, and the hourglass as 64 frames over 7 s (8 a row): the star crystal turning, the sand
-// falling, the wisps. Both from the v4 logo artwork (tools: claude/title_screen.md).
+// The logo with a hole where its hourglass moves, and the hourglass's moving part as 210 frames over 7 s (30 a second,
+// 14 a row): the star crystal turning, the sand falling, the wisps. Frame 0 alone stands in while the sheet decodes off
+// the UI thread, so the logo shows at once. From the v4 logo artwork (how: claude/title_screen.md).
 const BASE_PNG: &[u8] = include_bytes!("../../../assets/timeless/title_logo_base.png");
+const SAND0_PNG: &[u8] = include_bytes!("../../../assets/timeless/title_logo_sand0.png");
 const SAND_PNG: &[u8] = include_bytes!("../../../assets/timeless/title_logo_sand.png");
-const FRAMES: usize = 64;
+const FRAMES: usize = 210;
+const COLS: usize = 14;
+const LOOP_SECS: f32 = 7.0;
+/// Where the hourglass frames sit in the logo, as fractions of it: x0, y0, x1, y1 (logo pixels 556..782 x 158..522).
+const SAND_RECT: [f32; 4] = [556.0 / 1329.0, 158.0 / 846.0, 782.0 / 1329.0, 522.0 / 846.0];
 /// The line under the logo (the website's).
 const TAGLINE: &str = "A LEVEL 75 FINAL FANTASY XI PRIVATE SERVER";
-const COLS: usize = 8;
-const LOOP_SECS: f32 = 7.0;
-/// Where the hourglass frames sit in the logo, as fractions of it: x0, y0, x1, y1.
-const SAND_RECT: [f32; 4] = [0.3616, 0.1206, 0.6429, 0.6832];
 
-fn texture(ctx: &Context, key: &str, png_bytes: &[u8]) -> Option<TextureHandle> {
-    let id = Id::unique(key);
-    if let Some(t) = ctx.data(|d| d.get_temp::<TextureHandle>(id)) {
-        return Some(t);
-    }
+fn decode(png_bytes: &[u8]) -> Option<egui::ColorImage> {
     let mut d = png::Decoder::new(std::io::Cursor::new(png_bytes));
     d.set_transformations(png::Transformations::normalize_to_color8() | png::Transformations::ALPHA);
     let mut r = d.read_info().ok()?;
     let mut buf = vec![0u8; r.output_buffer_size()?];
     let info = r.next_frame(&mut buf).ok()?;
     buf.truncate(info.buffer_size());
-    let img = egui::ColorImage::from_rgba_unmultiplied([info.width as usize, info.height as usize], &buf);
-    let t = ctx.load_texture(key, img, egui::TextureOptions::LINEAR);
+    Some(egui::ColorImage::from_rgba_unmultiplied([info.width as usize, info.height as usize], &buf))
+}
+
+fn texture(ctx: &Context, key: &str, png_bytes: &[u8]) -> Option<TextureHandle> {
+    let id = Id::unique(key);
+    if let Some(t) = ctx.data(|d| d.get_temp::<TextureHandle>(id)) {
+        return Some(t);
+    }
+    let t = ctx.load_texture(key, decode(png_bytes)?, egui::TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+    Some(t)
+}
+
+/// The frame sheet once a worker thread has decoded it (it is large); none until then.
+fn sheet(ctx: &Context) -> Option<TextureHandle> {
+    use std::sync::{Mutex, OnceLock};
+    static DECODED: OnceLock<Mutex<Option<egui::ColorImage>>> = OnceLock::new();
+    let id = Id::unique("timeless/title_logo_sand");
+    if let Some(t) = ctx.data(|d| d.get_temp::<TextureHandle>(id)) {
+        return Some(t);
+    }
+    let started = DECODED.get().is_some();
+    let slot = DECODED.get_or_init(|| Mutex::new(None));
+    if !started {
+        let c = ctx.clone();
+        std::thread::spawn(move || {
+            let img = decode(SAND_PNG);
+            if img.is_none() {
+                log::error!("title logo: the hourglass sheet does not decode");
+            }
+            *slot.lock().unwrap() = img;
+            c.request_repaint();
+        });
+        return None;
+    }
+    let img = slot.lock().unwrap().take()?;
+    let t = ctx.load_texture("timeless/title_logo_sand", img, egui::TextureOptions::LINEAR);
     ctx.data_mut(|d| d.insert_temp(id, t.clone()));
     Some(t)
 }
@@ -54,11 +87,7 @@ impl Modern {
         if alpha <= 0.002 {
             return;
         }
-        let (Some(base), Some(sand)) =
-            (texture(ctx, "timeless/title_logo_base", BASE_PNG), texture(ctx, "timeless/title_logo_sand", SAND_PNG))
-        else {
-            return;
-        };
+        let Some(base) = texture(ctx, "timeless/title_logo_base", BASE_PNG) else { return };
         let r = place.rect([screen.width(), screen.height()]);
         let rect = Rect::from_min_size(pos2(screen.min.x + r[0], screen.min.y + r[1]), vec2(r[2], r[3]));
         let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
@@ -80,16 +109,26 @@ impl Modern {
             },
         );
         let g = p.layout_job(job);
-        let top = rect.max.y + rect.height() * 0.02;
+        let top = rect.max.y + rect.height() * 0.075;
         p.galley(pos2(rect.center().x - g.size().x / 2.0 + spacing / 2.0, top), g, colour);
-        // The hourglass, playing (about 9 frames a second; the crystal's own turn has 36 a loop).
+        // The hourglass, playing at 30 frames a second.
         let at = |f: f32| rect.min + vec2(f * rect.width(), 0.0);
         let glass = Rect::from_min_max(
             pos2(at(SAND_RECT[0]).x, rect.min.y + SAND_RECT[1] * rect.height()),
             pos2(at(SAND_RECT[2]).x, rect.min.y + SAND_RECT[3] * rect.height()),
         );
-        let t = ctx.input(|i| i.time) as f32 % LOOP_SECS / LOOP_SECS * FRAMES as f32;
-        p.image(sand.id(), glass, frame_uv(t as usize), Color32::from_white_alpha((a * 255.0) as u8));
+        let tint = Color32::from_white_alpha((a * 255.0) as u8);
+        match sheet(ctx) {
+            Some(sand) => {
+                let t = ctx.input(|i| i.time) as f32 % LOOP_SECS / LOOP_SECS * FRAMES as f32;
+                p.image(sand.id(), glass, frame_uv(t as usize), tint);
+            }
+            None => {
+                if let Some(still) = texture(ctx, "timeless/title_logo_sand0", SAND0_PNG) {
+                    p.image(still.id(), glass, uv, tint);
+                }
+            }
+        }
         ctx.request_repaint();
         // The crystal's light: soft rings of the focus colour, strongest at the cut, fading after it.
         let light = (glow + flare * 0.6).min(1.2) * alpha.max(flare);

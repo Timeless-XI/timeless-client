@@ -74,9 +74,8 @@ impl Modern {
         }
     }
 
-    /// Timeless XI: the Timeless title's buttons, one row of large tiles under the logo (`buttons` as `title_buttons`,
-    /// with a Pewter icon each): the glass tile, the icon over the label in the title serif, a steel-blue edge and
-    /// glow on the lit one.
+    /// Timeless XI: the Timeless title's buttons, one row of text buttons low on the screen (`buttons` as
+    /// `title_buttons`): the glass, the label in the title serif, a steel-blue edge and soft glow on the lit one.
     pub fn title_buttons_tl(
         &mut self,
         ctx: &Context,
@@ -84,7 +83,6 @@ impl Modern {
         scale: u32,
         ui_k: (f32, f32),
         buttons: &[([f32; 4], &str, bool, bool)],
-        icons: &[&str],
     ) {
         self.zoom_to(ctx, window, scale);
         let k = ctx.pixels_per_point();
@@ -92,7 +90,7 @@ impl Modern {
             ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("timeless title buttons")));
         let hover = ctx.input(|i| i.pointer.hover_pos());
         let focus = self.theme.color("focus");
-        for (i, (r, label, lit, on)) in buttons.iter().enumerate() {
+        for (r, label, lit, on) in buttons {
             let rect = egui::Rect::from_min_size(
                 pos2(r[0] / (k * ui_k.0), r[1] / (k * ui_k.1)),
                 vec2(r[2] / (k * ui_k.0), r[3] / (k * ui_k.1)),
@@ -101,12 +99,12 @@ impl Modern {
             let face = if *lit || hot { "window_focused" } else { "window_normal" };
             p.add(super::borders::window(self, face, rect));
             if *lit {
-                for j in 1..=4 {
+                for j in 1..=3 {
                     let g = j as f32 * 2.0;
                     p.rect_stroke(
                         rect.expand(g),
                         3.0 + g,
-                        egui::Stroke::new(1.5, focus.gamma_multiply(0.22 / j as f32)),
+                        egui::Stroke::new(1.5, focus.gamma_multiply(0.2 / j as f32)),
                         egui::StrokeKind::Outside,
                     );
                 }
@@ -119,19 +117,12 @@ impl Modern {
             } else {
                 self.theme.color("text")
             };
-            let icon_h = rect.height() * 0.34;
-            if let Some(s) = icons.get(i).and_then(|n| self.art.sprite(n)) {
-                let w = icon_h * s.size.x / s.size.y.max(1.0);
-                let at = pos2(rect.center().x - w / 2.0, rect.min.y + rect.height() * 0.17);
-                let tint = if *on { Color32::WHITE } else { Color32::from_white_alpha(110) };
-                p.add(paint::image(&s, at, w, tint));
-            }
-            let size = (rect.height() * 0.17).clamp(self.theme.small, 26.0);
+            let size = (rect.height() * 0.42).clamp(self.theme.small, 24.0);
             p.text(
-                pos2(rect.center().x, rect.min.y + rect.height() * 0.76),
+                rect.center() + vec2(0.0, 1.0),
                 Align2::CENTER_CENTER,
                 *label,
-                FontId::new(size * 1.15, FontFamily::Name(super::theme::SERIF.into())),
+                FontId::new(size, FontFamily::Name(super::theme::SERIF.into())),
                 c,
             );
         }
