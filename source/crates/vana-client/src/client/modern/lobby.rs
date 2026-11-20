@@ -554,23 +554,32 @@ impl Modern {
         p.add(super::borders::window(self, "window_normal", r));
         let c = super::chat::colour(colour);
         p.text(pos2(screen.center().x, cy + 1.0), Align2::CENTER_CENTER, text, FontId::proportional(size), c);
-        p.text(
-            pos2(ver.0 / (k * ui_k.0), r.min.y - 3.0),
-            Align2::LEFT_BOTTOM,
-            format!("ver.{version}"),
-            FontId::proportional(size),
-            self.theme.color("text"),
-        );
-        // Timeless XI: the game's notice the retail title art carried, bottom right beside the version. (The theme's
-        // flag: `timeless_now` is only kept in the world's frame.)
+        // Timeless XI: the Timeless title puts the game's notice the retail title art carried bottom right, with the
+        // version on the line above it, both right-aligned. (The theme's flag: `timeless_now` is only kept in the
+        // world's frame.)
         if self.theme.timeless() {
+            let right = screen.max.x - 16.0;
             p.text(
-                // A line above the version, so they never meet.
-                pos2(screen.max.x - 16.0, r.min.y - 3.0 - size * 1.4),
+                pos2(right, r.min.y - 3.0),
                 Align2::RIGHT_BOTTOM,
                 "FINAL FANTASY XI \u{a9} SQUARE ENIX CO., LTD.",
                 FontId::proportional((size * 0.85).max(11.0)),
                 self.theme.color("muted"),
+            );
+            p.text(
+                pos2(right, r.min.y - 3.0 - size * 1.35),
+                Align2::RIGHT_BOTTOM,
+                format!("ver.{version}"),
+                FontId::proportional(size),
+                self.theme.color("text"),
+            );
+        } else {
+            p.text(
+                pos2(ver.0 / (k * ui_k.0), r.min.y - 3.0),
+                Align2::LEFT_BOTTOM,
+                format!("ver.{version}"),
+                FontId::proportional(size),
+                self.theme.color("text"),
             );
         }
     }
