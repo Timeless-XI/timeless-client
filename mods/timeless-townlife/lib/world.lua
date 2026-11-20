@@ -1,22 +1,22 @@
--- The town in the world: speech bubbles over townsfolk, glowing street lamps, chimney smoke and sounds by place.
+-- The town in the world: speech bubbles over townsfolk, the lamplighter's lamps, chimney smoke and sounds by place.
 
 local W = {}
 
 W.BUBBLE_SECONDS = 5
-W.LAMP_RANGE = 60   -- yalms: lamps further than this aren't drawn
 W.SMOKE_RANGE = 80
 W.SOUND_EVERY = { hammer = 5, crowd = 4.5, gulls = 6 } -- seconds between plays (about the sound's length)
 W.SOUND_VOLUME = { hammer = 0.45, crowd = 0.35, gulls = 0.4 }
 
--- Real lights (TimelessXI's Night Lighting Modern: render.light / render.lamp_zone): the lamplighter's lamps light up
--- one by one and the native lamps beside them follow, his lantern and the guards' torches give light. Without them
--- (Original lighting, an older client) the lamps glow as drawn sprites.
-W.LAMP_LIGHT = { colour = { 255, 186, 110 }, range = 10, intensity = 16, halo = 0.9, height = 2.6, fade = 1.5 }
+-- Real lights (TimelessXI's Night Lighting Modern: render.lamp_zone / render.light): the zone's lamp posts by the
+-- lamplighter's round stay dark at night until he lights them, then fade on; his lantern and the guards' torches give
+-- light. Without them (Original lighting, an older client) the lamps are the game's own.
+W.LAMP_FADE = 1.5 -- seconds a lamp takes to come on
 W.CARRY = {
   lantern = { colour = { 255, 196, 120 }, range = 7, intensity = 7, halo = 0.45, height = 1.3 },
   torch = { colour = { 255, 150, 70 }, range = 9, intensity = 10, halo = 0.6, height = 2.0 },
 }
-W.ZONE_RADIUS = 6 -- yalms round a lamplighter's lamp in which the zone's own lamps follow it
+W.SNAP = 8          -- yalms: a lamplighter's lamp is the zone's own lamp post this close to it (none: nothing shows)
+W.ZONE_RADIUS = 1.5 -- yalms round that lamp post's glow
 
 local drawn = {}    -- draw id -> true
 local lights = {}   -- render.light id -> true
@@ -107,19 +107,25 @@ end
 function W.lights(model, now)
   local keep_l, keep_z = {}, {}
   if W.real_lights() and setting("lamps") then
-    local L = W.LAMP_LIGHT
+    -- Each of the lamplighter's lamps is the zone's own lamp post nearest it (its glow): out until he lights it,
+    -- then fading on. A spot with no lamp post near it shows nothing (no light floating in the air).
+    local glows = {}
+    if type(render.lamps) == "function" then
+      local ok, list = pcall(render.lamps)
+      if ok and type(list) == "table" then glows = list end
+    end
     for i, pos in pairs(model.all_lamps or {}) do
-      local lit = model.lamps[i] ~= nil
-      local zid = "tlz" .. i
-      pcall(render.lamp_zone, zid, { x = pos.x, y = pos.y, z = pos.z, radius = W.ZONE_RADIUS, level = lit and 1 or 0, fade = L.fade })
-      keep_z[zid] = true
-      if lit then
-        local at = model.lit_at and model.lit_at[i]
-        local k = at and math.min(1, math.max(0, now - at) / L.fade) or 1
-        local id = "tll" .. i
-        pcall(render.light, id, { x = pos.x, y = pos.y - L.height, z = pos.z, colour = L.colour, range = L.range,
-          intensity = L.intensity * k, halo = L.halo * k })
-        keep_l[id] = true
+      local best, bd = nil, W.SNAP
+      for _, g in ipairs(glows) do
+        local dx, dz = g.x - pos.x, g.z - pos.z
+        local d = math.sqrt(dx * dx + dz * dz)
+        if d <= bd then best, bd = g, d end
+      end
+      if best then
+        local zid = "tlz" .. i
+        pcall(render.lamp_zone, zid, { x = best.x, y = best.y, z = best.z, radius = W.ZONE_RADIUS,
+          level = model.lamps[i] ~= nil and 1 or 0, fade = W.LAMP_FADE })
+        keep_z[zid] = true
       end
     end
     for index, kind in pairs(model.carry or {}) do
@@ -146,20 +152,6 @@ function W.scene(model, now, me)
   local keep = {}
   W.lights(model, now)
   if me and me.pos then
-    if setting("lamps") and not W.real_lights() then
-      local flicker = 0.9 + 0.1 * math.sin(now * 7.3)
-      for i, pos in pairs(model.lamps) do
-        if dist(pos, me.pos) <= W.LAMP_RANGE then
-          local id = "lamp" .. i
-          local top = { x = pos.x, y = pos.y - 2.6, z = pos.z } -- y points down: up is minus
-          draw.image(id, { path = "img/glow.png", at = top, w = 1.6 * flicker, h = 1.6 * flicker, facing = "camera",
-            colour = { 255, 236, 200, math.floor(230 * flicker) } })
-          draw.ring(id .. "g", { at = { x = pos.x, y = pos.y - 0.05, z = pos.z }, radius = 3.2, filled = true, segments = 32,
-            colour = { 255, 196, 110, math.floor(34 * flicker) } })
-          keep[id], keep[id .. "g"] = true, true
-        end
-      end
-    end
     if setting("smoke") then
       for i, s in pairs(model.scenery) do
         if s.kind == "smoke" and dist(s.pos, me.pos) <= W.SMOKE_RANGE then

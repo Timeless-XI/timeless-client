@@ -4182,11 +4182,11 @@
       "id": "timeless-townlife",
       "name": "Timeless Town Life",
       "kind": "lua",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "authors": [
         "TimelessXI"
       ],
-      "description": "Bastok, lived in: speech bubbles over the townsfolk, street lamps that glow once the lamplighter has been round, chimney smoke, sounds by place (hammering, crowds, gulls) and a Town window (/town) with the headlines, the caravan, market day and the gossip. Needs the server's townlife module.",
+      "description": "Bastok, lived in: speech bubbles over the townsfolk, lamp posts the lamplighter lights at dusk, chimney smoke, sounds by place (hammering, crowds, gulls) and a Town window (/town) with the headlines, the caravan, market day and the gossip. Needs the server's townlife module.",
       "files": [
         {
           "path": "img/glow.png",
@@ -4203,8 +4203,8 @@
         {
           "path": "init.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/init.lua",
-          "sha256": "6a0ba6a7093c68a11cfac176f4141a9fe0ae4975da877cd0e51daaf42898613b",
-          "size": 3000
+          "sha256": "402fc5cd5b1936bc3422a5f703e32ea83c228fad3ab9194216a8a60be04603d4",
+          "size": 3031
         },
         {
           "path": "lib/action.lua",
@@ -4239,14 +4239,14 @@
         {
           "path": "lib/world.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/lib/world.lua",
-          "sha256": "b57ffb793f5dadf12a35cae48622b0488a5fa8099c95ea6d063189908cf27ca4",
-          "size": 8221
+          "sha256": "cef743e434cfe6bb7c69dc1f298cd16d133a392a33b7cb32cad06d8770bcece5",
+          "size": 7642
         },
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/mod.toml",
-          "sha256": "cc2690a8cfc68b5e214f491ec86d223c5f782f3e2b506f15d48ae02eaa96cf3b",
-          "size": 1339
+          "sha256": "7b7fb72376b1a03697b16b65968ff876335b6051f8358437fa3a2e96a038ba3b",
+          "size": 1308
         },
         {
           "path": "sounds/crowd.wav",

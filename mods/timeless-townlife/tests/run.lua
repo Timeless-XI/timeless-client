@@ -47,13 +47,9 @@ ok(m.lamps[1] and m.lamps[2] and m.lamps[1].x == -140.2, "lamps lit")
 ok(m.scenery[2].kind == "hammer" and m.scenery[2].range == 28, "scenery")
 ok(#m.rows == 5, "town rows")
 
--- Lamps glow, smoke rises
+-- No glow sprites floating where no lamp post stands
 H.run(0.3)
-ok(H.draws.lamp1 and H.draws.lamp1.kind == "image" and H.draws.lamp1.facing == "camera", "a lamp glows")
-ok(H.draws.lamp1g and H.draws.lamp1g.kind == "ring", "and lights the ground")
-H.line("TL1|L|2|-147.6,-4.0,-103.7|0")
-H.run(0.3)
-ok(H.draws.lamp2 == nil and H.draws.lamp1, "a lamp put out stops glowing")
+ok(H.draws.lamp1 == nil and H.draws.lamp1g == nil, "no sprite glows")
 
 -- Sounds by distance: the hammer from 28 yalms is out of range at 68 yalms away; walk closer
 ok(#H.sounds == 0, "no sounds far away")
@@ -106,34 +102,35 @@ ok(H.take_sent()[1] == "tl town", "Refresh asks again")
 H.command("/town")
 ok(not ui.is_open("town"), "/town closes it")
 
--- Real lights (TimelessXI's Night Lighting Modern): the lamps light up for real, the lantern and torches give light
+-- Real lights (TimelessXI's Night Lighting Modern): the lamp posts on his round, the lantern and torches
 local L, Z = {}, {}
 render.light = function(id, spec) L[id] = spec end
 render.lamp_zone = function(id, spec) Z[id] = spec end
 local modern = true
 render.night = function() return { modern = modern, amount = 1, darkness = 0.6 } end
-H.line("TL1|L|2|-147.6,-4.0,-103.7|0")
+-- The zone's lamp posts: one 3 yalms from lamp 1, none near lamp 2
+render.lamps = function() return { { x = -142.0, y = -7.0, z = -105.0, level = 1 }, { x = -60.0, y = -7.0, z = -60.0, level = 1 } } end
+H.line("TL1|L|3|-320.6,-15.0,-89.0|1")
 H.line("TL1|A|301|lantern")
 H.line("TL1|A|302|torch")
 H.run(0.3)
-ok(L.tll1 and L.tll1.y < -4 and L.tll1.intensity > 0, "a lit lamp is a real light above it")
-ok(H.draws.lamp1 == nil, "and no sprite glow then")
-ok(Z.tlz1 and Z.tlz1.level == 1 and Z.tlz2 and Z.tlz2.level == 0, "the zone's own lamps beside them follow: lit, out")
-ok(L.tll2 == nil, "an unlit lamp gives no light")
-ok(L.tlc301 and L.tlc301.entity == 301 and L.tlc301.night_only, "the lamplighter's lantern")
+ok(Z.tlz1 and Z.tlz1.x == -142.0 and Z.tlz1.level == 1, "a lit lamp is the lamp post by it, lit")
+ok(Z.tlz3 == nil, "a spot with no lamp post near it shows nothing")
+ok(next(L) and L.tlc301 and L.tlc301.entity == 301 and L.tlc301.night_only, "the lamplighter's lantern")
 ok(L.tlc302 and L.tlc302.range > L.tlc301.range, "a guard's torch")
-H.line("TL1|L|2|-147.6,-4.0,-103.7|1")
+ok(L.tll1 == nil and L.tll3 == nil, "no lights floating at the lamp spots")
+H.line("TL1|L|1|-140.2,-4.0,-107.5|0")
 H.run(0.3)
-ok(L.tll2 and L.tll2.intensity < L.tll1.intensity, "a lamp just lit fades in")
-H.run(2)
-ok(math.abs(L.tll2.intensity - L.tll1.intensity) < 1e-6 and Z.tlz2.level == 1, "then shines as the others")
+ok(Z.tlz1.level == 0, "put out: the lamp post goes dark")
+H.line("TL1|L|1|-140.2,-4.0,-107.5|1")
+H.run(0.3)
+ok(Z.tlz1.level == 1 and Z.tlz1.fade > 0, "lit again: it fades on")
 H.line("TL1|A|301|-")
 H.run(0.3)
 ok(L.tlc301 == nil, "his lantern goes home with him")
 modern = false
 H.run(0.3)
-ok(next(L) == nil and next(Z) == nil, "Original lighting: the real lights go")
-ok(H.draws.lamp1 and H.draws.lamp1.kind == "image", "and the sprite glows come back")
+ok(next(L) == nil and next(Z) == nil, "Original lighting: the game's own lamps")
 modern = true
 H.run(0.3)
 
