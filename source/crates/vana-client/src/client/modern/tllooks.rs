@@ -236,7 +236,7 @@ fn face_label(r: u8, f: u16) -> String {
         const C: [&str; 9] = ["1C", "2C", "2D", "3C", "4C", "5C", "6C", "7C", "8C"];
         return C.get(f as usize - 16).unwrap_or(&"?").to_string();
     }
-    format!("{}{}", f / 2 + 1, if f % 2 == 0 { 'A' } else { 'B' })
+    format!("style {}", f / 2 + 1)
 }
 
 /// Race and face to show our model as (this client only).
@@ -263,14 +263,15 @@ fn preview_ui(ui: &mut egui::Ui, w: &World, out: &mut Option<Option<(u8, u16)>>)
     });
     if let Some((r, f)) = cur {
         ui.add_space(4.0);
-        ui.label(RichText::new(format!("{} faces", race_name(r))).color(muted()));
-        let n: u16 = if r == 7 { 25 } else { 16 };
+        ui.label(RichText::new(format!("{} styles", race_name(r))).color(muted()));
+        // One model per style: the A face of each (the custom look covers the colours).
         egui::Grid::new("tl looks faces").spacing(vec2(4.0, 4.0)).show(ui, |ui| {
-            for k in 0..n {
-                if ui.selectable_label(f == k, face_label(r, k)).clicked() && f != k {
+            for st in 0..8u16 {
+                let k = st * 2;
+                if ui.selectable_label(f / 2 == st && f < 16, format!("Style {}", st + 1)).clicked() && f != k {
                     *out = Some(Some((r, k)));
                 }
-                if k % 8 == 7 {
+                if st == 3 {
                     ui.end_row();
                 }
             }

@@ -188,6 +188,16 @@ pub fn seed(face: u16, keep: &Settings) -> Option<Settings> {
     })
 }
 
+/// One model per style (owner, 2026-11-19: the A and B faces share a hair style and the custom look covers the rest):
+/// with a custom look, the other races' B faces are drawn as their style's A face; Mithra already uses a neutral base
+/// per style.
+pub fn model_face(race: u8, face: u16) -> u16 {
+    match race {
+        1..=6 | 8 if face <= 15 => face & !1,
+        _ => face,
+    }
+}
+
 /// The faces with a custom look (Mithra 0-24, the other races 0-15).
 pub fn supported(race: u8, face: u16) -> bool {
     match race {
@@ -405,20 +415,95 @@ fn sample(m: &[u8], u: f32, v: f32) -> [f32; 4] {
 /// with sides of its own (`sides`): every marking on its own side(s) in one texture.
 pub fn compose_race(rl: &RaceLayers, f: &RaceFace, tex: &[u8], w: u32, h: u32, s: &Settings, side: u8) -> Vec<u8> {
     let mut out = tex.to_vec();
+    let level = hair_level(rl, tex, w, h);
+    let level = &level;
     let row_bytes = w as usize * 4;
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 8);
     let per = (h as usize).div_ceil(threads) * row_bytes;
     std::thread::scope(|sc| {
         for (k, chunk) in out.chunks_mut(per).enumerate() {
             let y0 = k * per / row_bytes;
-            sc.spawn(move || compose_race_rows(rl, f, chunk, w, h, y0, s, side));
+            sc.spawn(move || compose_race_rows(rl, f, chunk, w, h, y0, s, side, level));
         }
     });
     out
 }
 
 #[allow(clippy::too_many_arguments)]
-fn compose_race_rows(rl: &RaceLayers, f: &RaceFace, out: &mut [u8], w: u32, h: u32, y0: usize, s: &Settings, side: u8) {
+/// The hair's local brightness (LEVEL x LEVEL cells over the texture, hair-weighted mean luma; cells without hair take
+/// their neighbours'), so near-black parts of a mane (Galka 1A's back) recolour as hair, not as black.
+const LEVEL: usize = 32;
+fn hair_level(rl: &RaceLayers, tex: &[u8], w: u32, h: u32) -> Vec<f32> {
+    let (mut sum, mut wt) = (vec![0f32; LEVEL * LEVEL], vec![0f32; LEVEL * LEVEL]);
+    let Some(m1) = rl.m.first() else { return sum };
+    for y in (0..h as usize).step_by(2) {
+        for x in (0..w as usize).step_by(2) {
+            let a = sample(m1, (x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32)[0];
+            if a < 0.5 {
+                continue;
+            }
+            let p = &tex[(y * w as usize + x) * 4..];
+            let l = (0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32) / 255.0;
+            let k = (y * LEVEL / h as usize) * LEVEL + x * LEVEL / w as usize;
+            sum[k] += a * l;
+            wt[k] += a;
+        }
+    }
+    let mut lv: Vec<f32> = sum.iter().zip(&wt).map(|(s, w)| if *w > 0.0 { s / w } else { -1.0 }).collect();
+    for _ in 0..LEVEL {
+        let prev = lv.clone();
+        let mut any = false;
+        for k in 0..LEVEL * LEVEL {
+            if prev[k] >= 0.0 {
+                continue;
+            }
+            let (x, y) = ((k % LEVEL) as i32, (k / LEVEL) as i32);
+            let (mut s, mut n) = (0.0, 0);
+            for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let (xx, yy) = (x + dx, y + dy);
+                if (0..LEVEL as i32).contains(&xx) && (0..LEVEL as i32).contains(&yy) {
+                    let v = prev[yy as usize * LEVEL + xx as usize];
+                    if v >= 0.0 {
+                        s += v;
+                        n += 1;
+                    }
+                }
+            }
+            if n > 0 {
+                lv[k] = s / n as f32;
+            } else {
+                any = true;
+            }
+        }
+        if !any {
+            break;
+        }
+    }
+    lv.iter().map(|v| v.max(0.0)).collect()
+}
+
+/// The hair's level at (u, v), bilinear between cell centres.
+fn level_at(lv: &[f32], u: f32, v: f32) -> f32 {
+    let x = (u * LEVEL as f32 - 0.5).clamp(0.0, (LEVEL - 1) as f32);
+    let y = (v * LEVEL as f32 - 0.5).clamp(0.0, (LEVEL - 1) as f32);
+    let (x0, y0) = (x as usize, y as usize);
+    let (x1, y1) = ((x0 + 1).min(LEVEL - 1), (y0 + 1).min(LEVEL - 1));
+    let (fx, fy) = (x - x0 as f32, y - y0 as f32);
+    let p = |xx: usize, yy: usize| lv[yy * LEVEL + xx];
+    (p(x0, y0) * (1.0 - fx) + p(x1, y0) * fx) * (1.0 - fy) + (p(x0, y1) * (1.0 - fx) + p(x1, y1) * fx) * fy
+}
+
+/// The hair's median for a texel: where the hair around it is darker than the face's hair median, mostly its own
+/// level (dark parts keep their strands and take the colour).
+fn hair_med(mh: f32, local: f32) -> f32 {
+    if local >= mh || local <= 0.0 {
+        return mh;
+    }
+    (mh.ln() * 0.3 + local.max(0.012).ln() * 0.7).exp()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compose_race_rows(rl: &RaceLayers, f: &RaceFace, out: &mut [u8], w: u32, h: u32, y0: usize, s: &Settings, side: u8, level: &[f32]) {
     let none = vec![0u8; 0];
     let mk = |k: usize| rl.m.get(k).unwrap_or(&none);
     let (m1, m2, m3, m4) = (mk(0), mk(1), mk(2), mk(3));
@@ -447,12 +532,13 @@ fn compose_race_rows(rl: &RaceLayers, f: &RaceFace, out: &mut [u8], w: u32, h: u
         let mut c = [px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0];
         let l = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
         if a[0] > 0.0 {
-            let mut g = l * 0.5 / mh;
-            if g > 0.5 {
-                g = 0.5 + (g - 0.5) * 0.55;
-            }
+            // The HD strands' contrast halved (their dark gaps went black, their highlights white, whatever the
+            // colour), and the highlights a lighter shade of the colour, not white.
+            let g = l * 0.5 / hair_med(mh, level_at(level, u, v));
+            let g = hw(0.5 + (g - 0.5) * if g > 0.5 { 0.3 } else { 0.55 });
             let col = if s.two_tone { mix(hair, tip, smoothstep(t0, t1, a[1])) } else { hair };
-            c = mix(c, shade(hw(g), col), a[0]);
+            let hc = if g <= 0.5 { col.map(|v| v * g * 2.0) } else { col.map(|v| v + (1.0 - v) * (g - 0.5) * 2.0 * 0.35) };
+            c = mix(c, hc, a[0]);
         }
         // Iris, lips, nose: their highlights eased (a dark layer's median would blow them to white).
         let knee = |g: f32| if g > 0.5 { 0.5 + (g - 0.5) * 0.4 } else { g };
@@ -622,7 +708,7 @@ impl Looks {
     pub fn reset(&mut self) {
         let keep = self.settings.clone();
         self.settings = self
-            .shown
+            .preview
             .or(self.face)
             .and_then(|(r, f)| seed_any(r, f, &keep))
             .unwrap_or(Settings { on: keep.on, try_on: keep.try_on, ..Settings::default() });
@@ -630,7 +716,7 @@ impl Looks {
 
     /// The settings changed (the window): saved a moment later; a try-on change reloads our look.
     pub fn changed(&mut self, before: &Settings) {
-        if before.try_on != self.settings.try_on {
+        if before.try_on != self.settings.try_on || before.on != self.settings.on {
             self.try_on_ver = self.try_on_ver.wrapping_add(1);
         }
         self.dirty_save = Some(std::time::Instant::now());
@@ -657,10 +743,12 @@ pub fn command(w: &mut World, args: &[&str]) {
 /// Our look with the try-on: a Mithra face without a custom look (25-31) shows face 6A here.
 pub fn try_on(l: &Looks, look: crate::dat::character::Look) -> crate::dat::character::Look {
     if let Some((race, face)) = l.preview {
-        return crate::dat::character::Look { race, face, ..look };
+        return crate::dat::character::Look { race, face: model_face(race, face), ..look };
     }
     if l.settings.on && l.settings.try_on && look.race == 7 && !supported(look.race, look.face) {
         crate::dat::character::Look { face: 10, ..look }
+    } else if l.settings.on && supported(look.race, look.face) {
+        crate::dat::character::Look { face: model_face(look.race, look.face), ..look }
     } else {
         look
     }
@@ -749,7 +837,7 @@ pub fn apply(gpu: &crate::render::Gpu, w: &mut World, r: &crate::render::ZoneRen
         l.save();
     }
     l.face = w.look_base.get(&w.my_id).map(|lk| (lk.race, lk.face));
-    l.shown = l.preview.or(l.face);
+    l.shown = l.preview.or(l.face).map(|(r, f)| (r, if l.settings.on || l.preview.is_some() { model_face(r, f) } else { f }));
     let now = std::time::Instant::now();
     if l.cam.on && l.cam.spin
         && let Some(t) = l.cam.last
