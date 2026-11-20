@@ -1165,6 +1165,19 @@ fn login_window(
     let code_w = lu.text_width("00000000").max(lu.text_width(fields[n - 1].hint)) + 12.0;
     let upd_w = (lu.label_width(UPD) + 14.0).max(88.0);
     // Room for Update beside the box whether it shows or not, so nothing moves when it appears.
+    // Timeless XI: the Timeless card's labels in a narrower column.
+    let lab = if tl { 104.0 } else { 148.0 };
+    // Timeless XI: the Timeless card as wide as the three action tiles under it (no Update), its contents scaled to
+    // fit that width.
+    let tl_span = tl_row.map(|(slots, ..)| (slots[1][0], slots[3][0] + slots[3][2] - slots[1][0]));
+    let f = match tl_span {
+        Some((_, span)) => {
+            let need = (lab + check_w + 12.0 + stay_w + 16.0)
+                .max(if trusting { lab + code_w + 16.0 + trust_w + 16.0 } else { 0.0 });
+            f.min(span / need).max(1.0)
+        }
+        None => f,
+    };
     let (ww, wh) = (
         380.0f32
             .max(148.0 + check_w + 12.0 + stay_w + 8.0 + upd_w + 16.0)
@@ -1175,19 +1188,29 @@ fn login_window(
     // Centred between the title logo's foot (about half the height) and the copyright line (about 0.8); a larger
     // form stays below the logo's "ONLINE" line.
     let (wx, wy) = (((sw - ww) / 2.0).round(), (sh * 0.65 - wh / 2.0).max(sh * 0.52).round());
+    let (wx, ww) = match tl_span {
+        Some((x, span)) => {
+            let need = ((lab + check_w + 12.0 + stay_w + 16.0)
+                .max(if trusting { lab + code_w + 16.0 + trust_w + 16.0 } else { 0.0 })
+                * f)
+                .max(span);
+            ((x - (need - span) / 2.0).round(), need.round())
+        }
+        None => (wx, ww),
+    };
     let (wy, wh) = match tl_row {
         Some((_, top, bottom)) => ((top + (bottom - top - card_h(f)) / 2.0).round(), card_h(f)),
         None => (wy, wh),
     };
     let row = |i: usize| wy + 14.0 * f + i as f32 * pitch * f;
     let field_rect = |i: usize| {
-        let w = if trusting && i == n - 1 { code_w * f } else { ww - 164.0 * f };
-        [wx + 148.0 * f, row(i), w, 18.0 * f]
+        let w = if trusting && i == n - 1 { code_w * f } else { ww - (lab + 16.0) * f };
+        [wx + lab * f, row(i), w, 18.0 * f]
     };
     // Remember password: the game font's box (filled when on) and its caption under the fields.
-    let check_rect = [wx + 148.0 * f, row(check), check_w * f, 18.0 * f];
-    let trust_rect = [wx + (148.0 + code_w + 16.0) * f, row(n - 1), trust_w * f, 18.0 * f];
-    let stay_rect = [wx + (148.0 + check_w + 12.0) * f, row(check), stay_w * f, 18.0 * f];
+    let check_rect = [wx + lab * f, row(check), check_w * f, 18.0 * f];
+    let trust_rect = [wx + (lab + code_w + 16.0) * f, row(n - 1), trust_w * f, 18.0 * f];
+    let stay_rect = [wx + (lab + check_w + 12.0) * f, row(check), stay_w * f, 18.0 * f];
     let ay = row(n + 1) + 6.0 * f;
     // Config-page buttons (88 px, wider for a longer caption), centred 24 px apart.
     const ACTIONS: [&str; 3] = ["Log in", "Create account", "Exit"];
@@ -1214,7 +1237,7 @@ fn login_window(
     // Two-factor (also needing them) under the labels, on the box's row.
     const TF: &str = "Account";
     let tf_rect = (!playonline)
-        .then(|| [wx + 16.0 * f, row(check) + 1.0 * f, ((lu.label_width(TF) + 14.0).max(88.0) * f).round(), 16.0 * f]);
+        .then(|| [wx + 16.0 * f, row(check) + 1.0 * f, ((lu.label_width(TF) + 14.0).max(lab - 32.0) * f).round(), 16.0 * f]);
     // Update at the row's other end, under the fields' right edge.
     let upd_rect = update.then(|| {
         let w = (upd_w * f).round();
