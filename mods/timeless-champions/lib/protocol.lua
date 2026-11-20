@@ -1,6 +1,6 @@
 -- Reads the server's Champion lines (modules/champions/lua/champions_feed.lua):
 --   CH1|C                          forget everything
---   CH1|M|<mob index>|r=<c|e|l>,a=<affix keys, dot separated>[,e=<element>][,f=1][,rg=0|1][,ud=0|1][,rn=0|1]
+--   CH1|M|<mob index>|r=<c|e|l>,a=<affix keys, dot separated>[,n=<whole name>][,e=<element>][,f=1][,rg=0|1][,ud=0|1][,rn=0|1]
 --                                  [,sh=0|1][,pk=<yalms>][,rl=<index.index>]
 --   CH1|X|<mob index>              stop showing it
 -- No game or UI code here, so it can be tested on its own.
@@ -36,7 +36,7 @@ local function list(v, number)
 end
 
 -- A table for one line, or nil when it isn't a usable one:
---   {op = "C"} | {op = "X", index} | {op = "M", index, rank, affixes = {keys}, has = {key = true}, element, fighting,
+--   {op = "C"} | {op = "X", index} | {op = "M", index, rank, affixes = {keys}, has = {key = true}, name, element, fighting,
 --    raged, undying, regen, shadows, pack, rallied = {indexes}}
 -- raged, undying, regen and shadows are nil when the Champion lacks that affix.
 function P.parse(line)
@@ -55,6 +55,7 @@ function P.parse(line)
     index = tonumber(index),
     rank = rank,
     affixes = list(f.a),
+    name = (f.n ~= nil and f.n ~= "") and f.n:sub(1, 60) or nil,
     element = (f.e ~= nil and f.e ~= "") and f.e or nil,
     fighting = f.f == "1",
     raged = flag(f.rg),

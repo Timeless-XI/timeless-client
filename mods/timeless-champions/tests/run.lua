@@ -80,7 +80,7 @@ end
 
 -- Lines in chat are taken out (whether on or off) and fill the list
 ok(H.line("CH1|C") == false, "C taken out of chat")
-ok(H.line("\30\1CH1|M|100|r=e,a=thorned.shielded.vampiric,f=1") == false, "M taken out of chat")
+ok(H.line("\30\1CH1|M|100|r=e,a=thorned.shielded.vampiric,f=1,n=Elite Crab of the Very Long Name") == false, "M taken out of chat")
 ok(H.line("CH1|M|101|r=l,a=pack.warded.regen,rn=1,pk=15") == false, "an Alpha before its pull")
 ok(H.line("CH1|M|104|r=c,a=hasted") == false, "a far one")
 ok(H.line("Hello there") == "Hello there", "other chat left alone")
@@ -107,6 +107,11 @@ ok(H.hud["c100_b1"].id == 34 and H.hud["c100_b1"].tip.title:find("Thorned") and 
   "a badge's icon and tooltip")
 ok(H.hud["c101_b1"], "badges for a Champion near us too")
 ok(H.hud["c100_b1d"].visible == false, "an active badge isn't dimmed")
+
+-- Whole names: the cut one gets its plate renamed, the others are left alone
+ok(H.looks[17000100] and H.looks[17000100].name == "Elite Crab of the Very Long Name", "a cut name shown whole")
+ok(H.looks[17000101] == nil, "an uncut name left alone")
+ok(protocol.parse("CH1|M|1|r=c,a=hasted,n=" .. string.rep("x", 90)).name:len() == 60, "a name is capped")
 
 -- Badges stay put between frames (made once, then moved): the tooltip stays up
 local made = H.hud["c100_b1"]
@@ -150,8 +155,18 @@ H.command("/champs badges all")
 H.line("CH1|X|100")
 H.fire("frame")
 ok(count(H.draws, "c100_") == 0 and count(H.hud, "c100_") == 0 and H.lights["c100_light"] == nil, "a dropped Champion leaves nothing")
+ok(H.looks[17000100] == nil, "and its plate gets its own name back")
 
 -- Parts off
+H.line("CH1|M|101|r=l,a=pack.warded.regen.enraged,f=1,rn=0,rg=1,rl=102,n=Legendary Wolf Who Leads the Pack")
+H.fire("frame")
+ok(H.looks[17000101] and H.looks[17000101].name:find("Leads"), "renamed")
+H.command("/champs names")
+H.fire("frame")
+ok(H.looks[17000101] == nil, "names off: the game's own")
+H.command("/champs names")
+H.fire("frame")
+ok(H.looks[17000101], "names back on")
 H.command("/champs hazards")
 H.fire("frame")
 ok(count(H.draws, "c101_h_") == 0 and H.draws["c101_a_edge"], "hazards off, aura stays")
@@ -168,6 +183,7 @@ H.run(0.1)
 ok(H.take_sent()[1] == "ch off", "off tells the server")
 H.fire("frame")
 ok(count(H.draws) == 0 and count(H.hud) == 0 and count(H.lights) == 0, "off: nothing drawn")
+ok(next(H.looks) == nil, "off: every plate its own name")
 H.command("/champs")
 H.run(0.1)
 ok(H.take_sent()[1] == "ch on full", "on asks for everything again")

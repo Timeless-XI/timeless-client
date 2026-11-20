@@ -10,12 +10,14 @@
 --   Hazards    an Alpha's rally range before you pull it, thorns round a Thorned one, a dome over a Shielded (steel) or
 --              Warded (blue) one, a Venomous one's haze, a Vampiric one's drain, a Renewing one healing, shadows up.
 --   Rally      lines from an Alpha to the monsters it rallied.
+--   Names      a Champion's whole name on its plate and in the target window: the game's own is cut at 24 letters
+--              ("Legendary Goblin Pathfi"), so the server sends the rest.
 --
 -- The server sends these only while this mod asks (a packet, not chat, renewed every 20 s); they are taken out of
 -- the chat log. Needs the server's champions module.
 --
 --   /champs                  everything on or off
---   /champs aura|lights|badges|hazards|rally|labels   one part on or off
+--   /champs aura|lights|badges|hazards|rally|labels|names   one part on or off
 --   /champs badges target    badges for your target only (again for every Champion near you)
 --   /champs opacity <0.2-1>
 --   /champs test             a sample Legendary Champion on your target (or on you) for 20 seconds
@@ -34,7 +36,7 @@ st.next_beat = os.clock() + 1.5
 local function prefs()
   storage.character.champions = storage.character.champions or {}
   local p = storage.character.champions
-  for _, k in ipairs({ "enabled", "aura", "lights", "badges", "hazards", "rally", "labels" }) do
+  for _, k in ipairs({ "enabled", "aura", "lights", "badges", "hazards", "rally", "labels", "names" }) do
     if p[k] == nil then p[k] = true end
   end
   if p.badges_target_only == nil then p.badges_target_only = false end
@@ -47,10 +49,27 @@ local function ask(words)
   st.next_beat = os.clock() + BEAT
 end
 
+-- Whole names: the plate (and target window) of each Champion whose name the game had to cut.
+local function rename(want)
+  for id, name in pairs(st.renamed) do
+    if want[id] ~= name then
+      render.entity(id, nil)
+      st.renamed[id] = nil
+    end
+  end
+  for id, name in pairs(want) do
+    if st.renamed[id] ~= name then
+      render.entity(id, { name = name })
+      st.renamed[id] = name
+    end
+  end
+end
+
 local function clear_all()
   st.champs = {}
   st.test = nil
   scene.clear()
+  rename({})
 end
 
 filters.chat(function(text)
@@ -85,8 +104,10 @@ local function frame()
   end
   if not p.enabled or (next(st.champs) == nil and not test) then
     if next(scene.drawn) or next(scene.huds) or next(scene.lights) then scene.clear() end
+    if next(st.renamed) then rename({}) end
     return
   end
+  local names = {}
   local t = os.clock()
   local target = game.target()
   local o = { opacity = p.opacity, lights = p.aura and p.lights, labels = p.labels, clock = t }
@@ -96,6 +117,7 @@ local function frame()
   if test then list[#list + 1] = { index = test.c.index, c = test.c, test = true } end
   for _, item in ipairs(list) do
     local e = find(item.index)
+    if e and p.names and item.c.name and not e.me then names[e.id] = item.c.name end
     if e and (e.hpp or 1) > 0 and (e.distance or 0) <= RANGE then
       local key = (item.test and "t" or "c") .. item.index .. "_"
       if p.aura then scene.aura(key, item.c, e, o, t) end
@@ -108,6 +130,7 @@ local function frame()
     end
   end
   scene.finish()
+  rename(names)
 end
 events.on("frame", frame)
 
@@ -127,7 +150,8 @@ local function test()
   if not me then return end
   local target = game.target()
   local index = (target and not target.me) and target.index or me.index
-  local c = protocol.parse("CH1|M|" .. index .. "|r=l,a=elemental.thorned.shielded.venomous.pack.enraged.regen,e=fire,rg=0,rn=1,pk=12")
+  local c = protocol.parse("CH1|M|" .. index .. "|r=l,a=elemental.thorned.shielded.venomous.pack.enraged.regen,e=fire,rg=0,rn=1,pk=12"
+    .. ",n=Legendary Sample Champion of the Long Name")
   st.test = { c = c, ends = os.clock() + 20 }
   timer.after(6, function()
     if st.test and st.test.c == c then
@@ -138,7 +162,7 @@ local function test()
 end
 
 local PARTS = { aura = "auras", lights = "lights", badges = "badges", hazards = "hazards", rally = "rally lines",
-  labels = "labels" }
+  labels = "labels", names = "whole names" }
 
 local function champs_command(sub, value)
   local p = prefs()
@@ -166,7 +190,7 @@ local function champs_command(sub, value)
   elseif sub == "test" then
     test()
   else
-    msg("/champs | aura | lights | badges [target|all] | hazards | rally | labels | opacity <n> | test")
+    msg("/champs | aura | lights | badges [target|all] | hazards | rally | labels | names | opacity <n> | test")
     return
   end
   storage.save()
