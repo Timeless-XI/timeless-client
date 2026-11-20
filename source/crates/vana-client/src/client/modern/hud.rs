@@ -618,15 +618,36 @@ pub fn party_panel(
             // Past the row frame's left ornament (the Timeless glass has none).
             let mut x = r.min.x + if m.theme.timeless() { 8.0 } else { 22.0 };
             let dim = if row.here.is_some() { Color32::WHITE } else { Color32::from_gray(120) };
-            if let Some(s) = row.icon.as_deref().and_then(|j| m.art.sprite(j)) {
+            // Timeless XI: Timeless View's job plaque (main and sub job codes) in place of the pictograms.
+            let code =
+                |id: &Option<String>| id.as_deref().and_then(|j| j.strip_prefix("jobs/")).map(str::to_ascii_uppercase);
+            let tl_plaque = match (m.theme.timeless(), code(&row.icon)) {
+                (true, Some(main)) => Some(tl_job_plaque(
+                    painter,
+                    m,
+                    // Clear of the party cursor's hourglass at the row's edge.
+                    x + 4.0,
+                    r.center().y,
+                    &main,
+                    code(&row.sub_icon).as_deref(),
+                    row.level,
+                    row.here.is_some(),
+                )),
+                _ => None,
+            };
+            if tl_plaque.is_none()
+                && let Some(s) = row.icon.as_deref().and_then(|j| m.art.sprite(j))
+            {
                 painter.add(paint::image(&s, pos2(x, r.center().y - 12.0), 24.0, dim));
             }
             // The sub job small on the main's upper right corner (the leader stars take the lower left).
-            if let Some(s) = row.sub_icon.as_deref().and_then(|j| m.art.sprite(j)) {
+            if tl_plaque.is_none()
+                && let Some(s) = row.sub_icon.as_deref().and_then(|j| m.art.sprite(j))
+            {
                 painter.add(paint::image(&s, pos2(x + 15.0, r.center().y - 17.0), 15.0, dim));
             }
             // The level on its lower right corner, as the status icons' counts.
-            if row.level > 0 && row.icon.is_some() {
+            if row.level > 0 && row.icon.is_some() && tl_plaque.is_none() {
                 let icon = Rect::from_min_size(pos2(x, r.center().y - 12.0), vec2(24.0, 24.0));
                 super::corner_number(
                     painter,
@@ -639,10 +660,17 @@ pub fn party_panel(
             for (k, (bit, col)) in [(1u8, m.theme.color("gold")), (2u8, m.theme.color("focus"))].into_iter().enumerate()
             {
                 if row.marks & bit != 0 {
-                    painter.add(paint::star(pos2(x + 1.0 + 11.0 * k as f32, r.max.y - 9.0), 6.5, col));
+                    // Timeless XI: beside the plaque's sub job box, clear of it (top left, then bottom left).
+                    let at = if tl_plaque.is_some() {
+                        pos2(x + 3.0, if k == 0 { r.center().y + 9.0 } else { r.center().y - 13.0 })
+                    } else {
+                        pos2(x + 1.0 + 11.0 * k as f32, r.max.y - 9.0)
+                    };
+                    painter.add(paint::star(at, if tl_plaque.is_some() { 5.0 } else { 6.5 }, col));
                 }
             }
-            m.tip_with(ui, Rect::from_min_size(pos2(x - 2.0, r.min.y), vec2(32.0, r.height())), || {
+            let lead_w = tl_plaque.map_or(32.0, |w| w + 4.0);
+            m.tip_with(ui, Rect::from_min_size(pos2(x - 2.0, r.min.y), vec2(lead_w, r.height())), || {
                 let lead = [(1u8, "Party leader"), (2, "Alliance leader")]
                     .iter()
                     .filter(|(b, _)| row.marks & b != 0)
@@ -656,7 +684,7 @@ pub fn party_panel(
                         .join("\n"),
                 )
             });
-            x += 32.0;
+            x += tl_plaque.map_or(32.0, |w| w + 4.0);
             let right = r.max.x - 10.0;
             let Some(v) = &row.here else {
                 let font = FontId::new(m.theme.ui, FontFamily::Name(super::NAME.into()));
@@ -767,6 +795,91 @@ pub fn party_panel(
         exp_bar(p, id, r, e);
     }
     clicked
+}
+
+/// Timeless XI: Timeless View's job plaque (owner, 2026-11-19, the "Job icons" canvas): the main job's code in the
+/// title serif on a small pewter tablet, a bar in the main job's colour coming out from behind its top edge; the sub
+/// job's code on a smaller box hanging under it, a narrower bar in the sub job's colour coming out from behind that
+/// box's bottom; the main job's level at the tablet's right. Centred on `cy` from `x`; dimmed when the member is not
+/// here. Job colours are the Timeless palette's `job_war` .. (from each job's artifact and relic armour); a job
+/// without one takes the pewter edge's. The width it takes.
+fn tl_job_plaque(
+    painter: &egui::Painter,
+    m: &Modern,
+    x: f32,
+    cy: f32,
+    main: &str,
+    sub: Option<&str>,
+    level: u8,
+    here: bool,
+) -> f32 {
+    const S: f32 = 30.0;
+    let (w, h) = (S * 1.2, S * 0.64);
+    let (sw, sh) = (S * 0.74, S * 0.46 * 0.82);
+    let (bar, tuck) = (S * 0.14, S * 0.07);
+    let lift = S * 0.08;
+    let total = lift + h - 1.0 + if sub.is_some() { sh + S * 0.1 } else { 0.0 };
+    let top = cy - total / 2.0 + lift;
+    let fade = |c: Color32| if here { c } else { c.gamma_multiply(0.45) };
+    let colour = |code: &str| {
+        let c = m.theme.color(&format!("job_{}", code.to_ascii_lowercase()));
+        fade(if c == Color32::MAGENTA { m.theme.color("bronze") } else { c })
+    };
+    let edge = Stroke::new(1.0, m.theme.color("gold").gamma_multiply(0.38));
+    let strip = |x0: f32, x1: f32, y: f32, c: Color32| {
+        let r = Rect::from_min_max(pos2(x0, y), pos2(x1, y + bar));
+        painter.rect_filled(r.translate(vec2(0.0, 1.0)), 1.0, Color32::from_black_alpha(120));
+        painter.rect(r, 1.0, c, edge, egui::StrokeKind::Outside);
+    };
+    let tablet = |r: Rect, line: Color32| {
+        painter.add(super::rows::gradient(
+            r,
+            fade(Color32::from_rgb(0x23, 0x2a, 0x3b)),
+            fade(Color32::from_rgb(0x10, 0x13, 0x1b)),
+            false,
+        ));
+        painter.rect_stroke(r, 0.0, Stroke::new(1.0, fade(line)), egui::StrokeKind::Inside);
+        painter.rect_stroke(
+            r.shrink(2.5),
+            0.0,
+            Stroke::new(1.0, m.theme.color("gold").gamma_multiply(0.1)),
+            egui::StrokeKind::Inside,
+        );
+    };
+    let code = |text: &str, size: f32, spacing: f32, c: Color32, at: Rect| {
+        let mut job = egui::text::LayoutJob::default();
+        let font = FontId::new(size, FontFamily::Name(super::SERIF.into()));
+        job.append(
+            text,
+            0.0,
+            egui::TextFormat { font_id: font, color: c, extra_letter_spacing: spacing, ..Default::default() },
+        );
+        let g = painter.layout_job(job);
+        painter.galley(at.center() - g.size() / 2.0 + vec2(spacing / 2.0, 0.0), g, c);
+    };
+    // The bars first, so the boxes cover their inner halves (they come out from behind).
+    strip(x + w * 0.16, x + w * 0.84, top - tuck, colour(main));
+    let plate = Rect::from_min_size(pos2(x, top), vec2(w, h));
+    if let Some(sub) = sub {
+        let b = Rect::from_min_size(pos2(x + (w - sw) / 2.0, top + h - 1.0), vec2(sw, sh));
+        let narrow = sw * 0.62;
+        strip(x + (w - narrow) / 2.0, x + (w + narrow) / 2.0, b.max.y - tuck, colour(sub));
+        tablet(b, m.theme.color("bronze"));
+        // Cormorant runs 1.2 large (theme.rs): these sizes draw it at the canvas's 7.5 and 9.9 px.
+        code(sub, S * 0.25 / 1.2, 0.6, fade(Color32::from_rgb(0xb9, 0xc3, 0xd4)), b);
+    }
+    tablet(plate, super::borders::lighter(m.theme.color("bronze"), 0.25));
+    code(main, S * 0.33 / 1.2, 1.5, fade(m.theme.color("text")), plate);
+    if level > 0 {
+        let at = Rect::from_min_max(plate.min, pos2(plate.max.x + 10.0, plate.max.y + 2.0));
+        super::corner_number(
+            painter,
+            at,
+            &level.to_string(),
+            if here { Color32::WHITE } else { m.theme.color("muted") },
+        );
+    }
+    w + 18.0
 }
 
 /// Timeless XI: a party row in the Timeless interface (style D), right of the job icon (`x` .. `right` in `r`): the

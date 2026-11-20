@@ -51,7 +51,7 @@ pub struct State {
 }
 
 /// A left-to-right (`across`) or top-to-bottom gradient over `r`.
-fn gradient(r: Rect, a: Color32, b: Color32, across: bool) -> Shape {
+pub(super) fn gradient(r: Rect, a: Color32, b: Color32, across: bool) -> Shape {
     let mut m = Mesh::default();
     let (tr, bl) = if across { (b, a) } else { (a, b) };
     m.colored_vertex(r.left_top(), a);
