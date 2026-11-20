@@ -393,7 +393,26 @@ fn png_sized(bytes: &[u8], size: u32) -> Vec<u8> {
     }
 }
 
-/// The other races' mask size.
+/// A square RGBA mask of 512 or 1024 (a style whose texture was remapped to 2048 has 1024 masks); else RACE_SIZE zeros.
+fn png_square(bytes: &[u8]) -> Vec<u8> {
+    let dec = png::Decoder::new(std::io::Cursor::new(bytes));
+    let fail = || vec![0; (RACE_SIZE * RACE_SIZE * 4) as usize];
+    let Ok(mut r) = dec.read_info() else { return fail() };
+    let mut buf = vec![0; r.output_buffer_size().unwrap_or(0)];
+    match r.next_frame(&mut buf) {
+        Ok(info)
+            if info.width == info.height
+                && matches!(info.width, 512 | 1024)
+                && info.color_type == png::ColorType::Rgba =>
+        {
+            buf.truncate(info.buffer_size());
+            buf
+        }
+        _ => fail(),
+    }
+}
+
+/// The other races' mask size (the usual one; see png_square).
 pub const RACE_SIZE: u32 = 512;
 
 /// Another race's style masks (m1..m4, and m5 / m6 when the right side has its own), decoded when first used.
@@ -409,13 +428,16 @@ pub fn race_layers(race: u8, style: u8) -> Option<&'static RaceLayers> {
     let cell = all.get(&(race, style))?;
     Some(cell.get_or_init(|| {
         let files = super::look_files::RACE_MASKS.iter().find(|(r, s, _)| (*r, *s) == (race, style)).map(|x| x.2);
-        RaceLayers { m: files.unwrap_or(&[]).iter().map(|b| png_sized(b, RACE_SIZE)).collect() }
+        RaceLayers { m: files.unwrap_or(&[]).iter().map(|b| png_square(b)).collect() }
     }))
 }
 
 /// A mask's four channels at texture position (u, v) in 0..1, bilinear.
 fn sample(m: &[u8], u: f32, v: f32) -> [f32; 4] {
-    let n = RACE_SIZE as usize;
+    let n = ((m.len() / 4) as f64).sqrt() as usize;
+    if n == 0 {
+        return [0.0; 4];
+    }
     let x = (u * n as f32 - 0.5).clamp(0.0, (n - 1) as f32);
     let y = (v * n as f32 - 0.5).clamp(0.0, (n - 1) as f32);
     let (x0, y0) = (x as usize, y as usize);
@@ -537,7 +559,10 @@ fn compose_race_rows(rl: &RaceLayers, f: &RaceFace, out: &mut [u8], w: u32, h: u
     let (hair, tip, eyes, lips, mark) = (unit(s.hair), unit(s.tip), unit(s.eyes), unit(s.lips), unit(s.mark_colour));
     let nose = [nose_grey(s.nose); 3];
     let (t0, t1) = (s.tip_start - s.tip_blend, s.tip_start + s.tip_blend.max(0.005));
-    let [mh, mi, ml, mn, msk] = f.med.map(|m| m.max(1.0) / 255.0);
+    // Floors (hair and skin 20, iris, lips and nose 40, as the tools' preview): a layer nearly black on the face
+    // (Galka lips) would blow every texel of it to white.
+    let fl = [20.0, 40.0, 40.0, 40.0, 20.0];
+    let [mh, mi, ml, mn, msk] = std::array::from_fn(|k| f.med[k].max(fl[k]) / 255.0);
     let strength = s.mark_strength.clamp(0.0, 1.0);
     for (i, px) in out.chunks_exact_mut(4).enumerate() {
         let (x, y) = (i % w as usize, y0 + i / w as usize);
@@ -1036,7 +1061,7 @@ mod tests {
                 assert!(rl.m.len() >= 4, "race {race} style {}", f.style);
                 assert_eq!(rl.m.len() == 6, f.sides, "race {race} style {}", f.style);
                 for m in &rl.m {
-                    assert_eq!(m.len(), (RACE_SIZE * RACE_SIZE * 4) as usize);
+                    assert!([512usize, 1024].iter().any(|n| m.len() == n * n * 4));
                 }
                 // Hair covers some of every face.
                 assert!(rl.m[0].chunks_exact(4).filter(|p| p[0] > 128).count() > 500, "race {race} face {face}");
