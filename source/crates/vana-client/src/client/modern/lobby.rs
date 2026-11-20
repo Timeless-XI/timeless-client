@@ -561,8 +561,9 @@ impl Modern {
             FontId::proportional(size),
             self.theme.color("text"),
         );
-        // Timeless XI: the game's notice the retail title art carried, bottom right beside the version.
-        if super::timeless_now() {
+        // Timeless XI: the game's notice the retail title art carried, bottom right beside the version. (The theme's
+        // flag: `timeless_now` is only kept in the world's frame.)
+        if self.theme.timeless() {
             p.text(
                 // A line above the version, so they never meet.
                 pos2(screen.max.x - 16.0, r.min.y - 3.0 - size * 1.4),
