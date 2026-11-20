@@ -70,6 +70,7 @@ M.KINDS = {
   W = { colour = { 236, 108, 96, 255 }, letter = "W" },
   F = { colour = { 184, 122, 250, 255 }, letter = "F" },
   C = { colour = { 247, 204, 97, 255 }, letter = "C" },
+  G = { colour = { 255, 232, 120, 255 }, letter = "G" },
 }
 local LEGENDARY = { 255, 140, 60, 255 }
 local CHAMP = { "Champion", "Elite Champion", "Legendary Champion" }
@@ -90,6 +91,7 @@ function M.title(e)
   if e.k == "C" then return ("%s (Lv. %d)"):format(CHAMP[e.c or 1] or "Champion", e.l or 0) end
   if e.k == "W" then return ("Beastman warband (Lv. %d)"):format(e.l or 0) end
   if e.k == "F" then return "Fomor band" end
+  if e.k == "G" then return ("Gilded Champion (Lv. %d)"):format(e.l or 0) end
   return RIFT[e.c or 1] or "Time Rift"
 end
 
@@ -98,6 +100,7 @@ local SHORT_CHAMP = { "Champion", "Elite", "Legendary" }
 function M.short(e)
   if e.k == "C" then return SHORT_CHAMP[e.c or 1] or "Champion" end
   if e.k == "R" then return RIFT[e.c or 1] or "Time Rift" end
+  if e.k == "G" then return "Gilded" end
   return e.k == "W" and "Warband" or "Fomor band"
 end
 
@@ -188,13 +191,13 @@ function M.draw_map(c, now)
       if not seen[e.k] then seen[e.k] = true kinds[#kinds + 1] = e.k end
       if e.k == "C" and e.c == 3 then legendary = true end
     end
-    table.sort(kinds, function(a, b) return ("RWFC"):find(a) < ("RWFC"):find(b) end)
-    local angles = { -0.9, -0.1, 0.7, 1.5 }
+    table.sort(kinds, function(a, b) return ("GRWFC"):find(a) < ("GRWFC"):find(b) end)
+    local angles = { -0.9, -0.1, 0.7, 1.5, 2.3 }
     for i, k in ipairs(kinds) do
       local ang = angles[i]
       local bx, by2 = x + math.cos(ang) * 15, y + math.sin(ang) * 15
       local colour = (k == "C" and legendary) and LEGENDARY or M.KINDS[k].colour
-      badge(c, bx, by2, colour, M.KINDS[k].letter, k == "R" or (k == "C" and legendary))
+      badge(c, bx, by2, colour, M.KINDS[k].letter, k == "R" or k == "G" or (k == "C" and legendary))
     end
   end
 

@@ -3184,17 +3184,17 @@
       "id": "timeless-champions",
       "name": "Timeless Champions",
       "kind": "lua",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "authors": [
         "TimelessXI"
       ],
-      "description": "Champions you can see coming (/champs): a glowing aura in their rank's colour, their affixes as badges over their heads (hover for what each does), hazards such as an Alpha's rally range, thorns and shields drawn round them, lines to the monsters an Alpha rallied, and their whole names (the game cuts them at 24 letters).",
+      "description": "Champions you can see coming (/champs): a glowing aura in their rank's colour, their affixes as badges over their heads (hover for what each does), hazards such as an Alpha's rally range, thorns and shields drawn round them, lines to the monsters an Alpha rallied, their whole names (the game cuts them at 24 letters), a Gilded one's sparkle and clock, a Nightborne one's night glow, a Rift-touched one's rift and a Juggernaut's bigger size.",
       "files": [
         {
           "path": "init.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-champions/init.lua",
-          "sha256": "f4c2e833bf519e01b3d9494d0562116bee6785fe2dd9c98d52430a5d2f1f2f98",
-          "size": 8982
+          "sha256": "410bc836e5e575ffe5f6493d9f0473971b946981594d5697dc0f9ea7db22a833",
+          "size": 9796
         },
         {
           "path": "lib/action.lua",
@@ -3205,20 +3205,20 @@
         {
           "path": "lib/affixes.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-champions/lib/affixes.lua",
-          "sha256": "c784dd9b2f46d70e9349445b1b8d1bd8d6c07aacd509efe7e3c2afc8f421cbd3",
-          "size": 4374
+          "sha256": "a3bb65490fd109fd995b5274c5ee9363a781b921181f000ce42f7a725e719c1c",
+          "size": 5772
         },
         {
           "path": "lib/protocol.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-champions/lib/protocol.lua",
-          "sha256": "9b7cbe235f232a88fe472773f605ccd767497d39191bb4210304c77f6b52b1c0",
-          "size": 2453
+          "sha256": "a618998f545feee15e3b4b9de952e41bf6a3b5d8ba99cd32ecd22b6a725c57cb",
+          "size": 2661
         },
         {
           "path": "lib/scene.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-champions/lib/scene.lua",
-          "sha256": "dc6869b04ab81c831a4233749ccaa13734e6cc337f84bcb0fcf3c0092fcee547",
-          "size": 10392
+          "sha256": "2226245460ad51f7149afef5fef84f0899d6f924057ba35c814b29139faf606c",
+          "size": 12498
         },
         {
           "path": "lib/state.lua",
@@ -3229,8 +3229,8 @@
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-champions/mod.toml",
-          "sha256": "514379105aee2c90e0772af86107f210e91983e437f9c625460a3da01598d355",
-          "size": 1529
+          "sha256": "bc2f2e08f0ed71ed2e7f8afb668dc78c225d87878bcd5c84cc407131c1e4258a",
+          "size": 1648
         }
       ],
       "required": true,
@@ -3598,17 +3598,17 @@
       "id": "timeless-map",
       "name": "Timeless Map",
       "kind": "lua",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "authors": [
         "TimelessXI"
       ],
-      "description": "What is happening across Vana'diel right now (/worldmap): conquest owners, open rifts, beastman warbands, Fomor bands and roaming Champions on a map, with pillars of light over the ones in your zone.",
+      "description": "What is happening across Vana'diel right now (/worldmap): conquest owners, open rifts, beastman warbands, Fomor bands and roaming Champions (Gilded ones too) on a map, with pillars of light over the ones in your zone.",
       "files": [
         {
           "path": "init.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-map/init.lua",
-          "sha256": "917b147d35ae934ea8bcdadf2f889506bf14431efff3399fc690eeeba1270486",
-          "size": 5169
+          "sha256": "bbea8de8073078aae85f9f280f0d4e7cc48f2676b25571578e7f73f5dafab7a6",
+          "size": 5189
         },
         {
           "path": "lib/action.lua",
@@ -3619,8 +3619,8 @@
         {
           "path": "lib/beams.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-map/lib/beams.lua",
-          "sha256": "2c619b4578109e2513c1989e055f82a30bf74394080ba89d294aa730a083df16",
-          "size": 2758
+          "sha256": "99f605a5c278986b5752bac3a84c5d26db160a6ff42cffeedf22c434357785d9",
+          "size": 2866
         },
         {
           "path": "lib/canvas.lua",
@@ -3631,8 +3631,8 @@
         {
           "path": "lib/protocol.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-map/lib/protocol.lua",
-          "sha256": "e89da91ca526cc6cddb9e641de89b57683303f637a940bd1a7fe4bd2e964a4dc",
-          "size": 4005
+          "sha256": "cc4c2adf013337b59fc1eeaf2eaafdc2af7f023c2010f66f5759906bdaa9009c",
+          "size": 4078
         },
         {
           "path": "lib/style.lua",
@@ -3643,14 +3643,14 @@
         {
           "path": "lib/worldmap.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-map/lib/worldmap.lua",
-          "sha256": "1982aa07e713eb7faf5aa44e0582967a45226766f4c02169bb09e237587f0dd8",
-          "size": 13746
+          "sha256": "03a348e293129a8bf6817e9a4bc9fa4c7c7faa6b24e62d10c5179f38feca95c6",
+          "size": 13941
         },
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-map/mod.toml",
-          "sha256": "09dddca0010f20034185c31dc177586d17abe9bbe4258b19b676242003583048",
-          "size": 847
+          "sha256": "b3af0e46bd30fdaa2071e6870af671d0ba8682c7fd808cf9533f98744f09363e",
+          "size": 873
         }
       ],
       "required": true,
@@ -3665,7 +3665,7 @@
             },
             {
               "args": "alerts",
-              "help": "A chat line when a rift, warband, Fomor band or Legendary Champion appears."
+              "help": "A chat line when a rift, warband, Fomor band, Legendary or Gilded Champion appears."
             },
             {
               "args": "update",

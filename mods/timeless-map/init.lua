@@ -4,7 +4,7 @@
 -- markers for what is going on there: open Time, Ancient and Hero's Rifts (with the minutes until they close),
 -- beastman warbands, Fomor bands and roaming Champions. A panel lists them, everywhere or for the region you click,
 -- with the moon and the day. In your own zone, pillars of light stand over each of them, with what and how far.
--- When a rift, a warband, a Fomor band or a Legendary Champion appears anywhere, a line in chat says so.
+-- When a rift, a warband, a Fomor band, a Legendary or a Gilded Champion appears anywhere, a line in chat says so.
 --
 -- The server sends a fresh picture only when something changed (checked every 10 s), and only while this mod asks:
 -- it asks with a packet (not chat), says "still here" every 30 s (the server stops 90 s after the last one), and the
@@ -36,7 +36,7 @@ end
 
 map.setup()
 
-local ALERT = { R = true, W = true, F = true }
+local ALERT = { R = true, W = true, F = true, G = true }
 
 local function alert(fresh)
   if not map.prefs().alerts then return end

@@ -3,7 +3,8 @@
 --                                            (0 San d'Oria, 1 Bastok, 2 Windurst, 3 beastmen, - unknown)
 --   WM1|E|<zone>|r=<region>,k=<kind>,l=<level>,c=<code>,m=<minutes left>
 --        k: C a roaming Champion (c 1 Champion, 2 Elite, 3 Legendary), W a warband (l its captain's level),
---           F a Fomor band, R an open rift (c 1 Time, 2 Ancient, 3 Hero's; m minutes until it closes)
+--           F a Fomor band, R an open rift (c 1 Time, 2 Ancient, 3 Hero's; m minutes until it closes),
+--           G a Gilded (treasure) Champion (l its level)
 --   WM1|D|v=<version>                        the snapshot is complete: it replaces the last one
 --   WM1|H|n=<count>                          what is in your own zone starts over
 --   WM1|P|k=<kind>,i=<index>,x=,y=,z=,l=,c=  one of them, and where it is
@@ -52,7 +53,7 @@ function P.feed(model, line, now)
       local f = fields(body)
       local e = { zone = tonumber(zone), region = tonumber(f.r) or 255, k = f.k, l = tonumber(f.l), c = tonumber(f.c),
         m = tonumber(f.m), at = now }
-      if e.k == "C" or e.k == "W" or e.k == "F" or e.k == "R" then
+      if e.k == "C" or e.k == "W" or e.k == "F" or e.k == "R" or e.k == "G" then
         model.pending.events[#model.pending.events + 1] = e
       end
     end

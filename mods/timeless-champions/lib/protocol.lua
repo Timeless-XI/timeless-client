@@ -1,7 +1,7 @@
 -- Reads the server's Champion lines (modules/champions/lua/champions_feed.lua):
 --   CH1|C                          forget everything
 --   CH1|M|<mob index>|r=<c|e|l>,a=<affix keys, dot separated>[,n=<whole name>][,e=<element>][,f=1][,rg=0|1][,ud=0|1][,rn=0|1]
---                                  [,sh=0|1][,pk=<yalms>][,rl=<index.index>]
+--                                  [,sh=0|1][,nb=0|1][,rw=0|1][,gd=<seconds>][,pk=<yalms>][,rl=<index.index>]
 --   CH1|X|<mob index>              stop showing it
 -- No game or UI code here, so it can be tested on its own.
 
@@ -38,7 +38,8 @@ end
 -- A table for one line, or nil when it isn't a usable one:
 --   {op = "C"} | {op = "X", index} | {op = "M", index, rank, affixes = {keys}, has = {key = true}, name, element, fighting,
 --    raged, undying, regen, shadows, pack, rallied = {indexes}}
--- raged, undying, regen and shadows are nil when the Champion lacks that affix.
+-- raged, undying, regen, shadows, night and rewind are nil when the Champion lacks that affix; gilded is the seconds
+-- before a Gilded one vanishes, once it has been attacked.
 function P.parse(line)
   if type(line) ~= "string" then return nil end
   if line == "CH1|C" then return { op = "C" } end
@@ -62,6 +63,9 @@ function P.parse(line)
     undying = flag(f.ud),
     regen = flag(f.rn),
     shadows = flag(f.sh),
+    night = flag(f.nb),
+    rewind = flag(f.rw),
+    gilded = tonumber(f.gd),
     pack = tonumber(f.pk),
     rallied = list(f.rl, true),
   }

@@ -82,6 +82,17 @@ ok(alerts:find("Ancient Rift in Valkurm Dunes", 1, true) and alerts:find("warban
 ok(not alerts:find("Elite Champion", 1, true) and not alerts:find("(Lv. 70)", 1, true), "no alert for ordinary Champions")
 H.printed = {}
 
+-- A Gilded Champion: an alert, a G badge's title
+H.line("WM1|B|v=6,n=1,o=0000000000000000000")
+H.line("WM1|E|126|r=10,k=G,l=33")
+H.line("WM1|D|v=6")
+ok(H.printed[1] == "World map: Gilded Champion (Lv. 33) in Qufim Island (Qufim Island).", "Gilded alert: " .. tostring(H.printed[1]))
+ok(M.title(M.model.events[1]) == "Gilded Champion (Lv. 33)" and M.short(M.model.events[1]) == "Gilded", "Gilded titles")
+ok(M.kind_colour(M.model.events[1])[2] == 232, "a gold badge")
+H.printed = {}
+for _, line in ipairs(SNAP) do H.line(line) end
+H.printed = {}
+
 -- Counting a rift down
 local rift = M.model.events[1]
 ok(protocol.minutes_left(rift, H.clock) == 30, "30 minutes left")

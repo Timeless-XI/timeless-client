@@ -1,7 +1,7 @@
 name = "Timeless Champions"
-version = "1.1.0"
+version = "1.2.0"
 authors = ["TimelessXI"]
-description = "Champions you can see coming (/champs): a glowing aura in their rank's colour, their affixes as badges over their heads (hover for what each does), hazards such as an Alpha's rally range, thorns and shields drawn round them, lines to the monsters an Alpha rallied, and their whole names (the game cuts them at 24 letters)."
+description = "Champions you can see coming (/champs): a glowing aura in their rank's colour, their affixes as badges over their heads (hover for what each does), hazards such as an Alpha's rally range, thorns and shields drawn round them, lines to the monsters an Alpha rallied, their whole names (the game cuts them at 24 letters), a Gilded one's sparkle and clock, a Nightborne one's night glow, a Rift-touched one's rift and a Juggernaut's bigger size."
 permissions = ["packets.write"]
 
 [commands.champs]

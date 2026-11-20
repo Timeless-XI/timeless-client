@@ -55,6 +55,14 @@ end
 -- The Champion's colour now: its rank's, pulsing toward red while enraged. Also the pulse (0..1).
 function S.colour(c, t)
   local rank = A.RANK[c.rank] or A.RANK.champion
+  if c.has and c.has.gilded then
+    local p = 0.5 + 0.5 * math.sin(t * 5)
+    return mix(A.GOLD, { 255, 250, 210 }, 0.4 * p), p
+  end
+  if c.night and not c.raged then
+    local p = 0.5 + 0.5 * math.sin(t * 1.5)
+    return mix(rank.colour, A.NIGHT, 0.7), p
+  end
   if c.raged then
     local p = 0.5 + 0.5 * math.sin(t * 7)
     return mix(rank.colour, A.RAGE, 0.55 + 0.45 * p), p
@@ -93,9 +101,16 @@ function S.aura(key, c, e, o, t)
     local id = key .. "light"
     now_light[id] = true
     local intensity = rank.intensity * (c.raged and (0.8 + 0.6 * pulse) or 1)
-    local light = { entity = e.id, height = height(e) * 0.5, colour = { clamp(c.raged and colour[1] or rank.light[1]),
-      clamp(c.raged and colour[2] or rank.light[2]), clamp(c.raged and colour[3] or rank.light[3]) }, range = rank.range,
-      intensity = intensity, halo = rank.halo }
+    local tinted = c.raged or c.night or (c.has and c.has.gilded)
+    local range, halo = rank.range, rank.halo
+    if c.has and c.has.gilded then
+      intensity, range, halo = 12 * (0.85 + 0.3 * pulse), 9, 0.9
+    elseif c.night then
+      intensity = intensity * 1.3
+    end
+    local light = { entity = e.id, height = height(e) * 0.5, colour = { clamp(tinted and colour[1] or rank.light[1]),
+      clamp(tinted and colour[2] or rank.light[2]), clamp(tinted and colour[3] or rank.light[3]) }, range = range,
+      intensity = intensity, halo = halo }
     local last = S.lights[id]
     -- Lights are only sent again when they change enough (a rage pulses ten times a second)
     if not last or last.entity ~= e.id or math.abs(last.intensity - intensity) > 0.4 or last.colour[1] ~= light.colour[1]
@@ -194,6 +209,40 @@ function S.hazards(key, c, e, o, t, find)
   end
 end
 
+-- The variants: a Gilded one's sparkles and its clock, a Nightborne one's night ring, a Rift-touched one's turning
+-- rift (while its rewind is to come).
+function S.variants(key, c, e, o, t)
+  local op = o.opacity
+  local R = radius(e)
+  local H = height(e)
+  if c.has.gilded then
+    for i = 1, 8 do
+      local f = ((t * 0.6) + (i - 1) / 8) % 1
+      local h = t * 0.9 + (i - 1) * TAU / 8 + f * 1.5
+      ring(key .. "v_sp" .. i, { at = { x = e.pos.x + math.cos(h) * R * 0.9, y = e.pos.y - H * (0.1 + 0.9 * f), z = e.pos.z - math.sin(h) * R * 0.9 },
+        radius = 0.06 + 0.06 * (1 - f), filled = true, segments = 8, colour = col({ 255, 236, 150 }, 255 * (1 - f) * op) })
+    end
+    if c.gilded_left then
+      text(key .. "v_clock", { at = at(e.pos, H + 0.5), text = ("%d s"):format(math.max(0, math.ceil(c.gilded_left - 0.05))), size = 1.1,
+        colour = { 255, 226, 120, 255 }, outline = { 60, 40, 0, 230 } })
+    end
+  end
+  if c.has.nightborne and c.night then
+    local g = at(e.pos, 0.06)
+    ring(key .. "v_nb", { at = g, radius = R + 0.6 + 0.1 * math.sin(t * 1.5), segments = 64, colour = col(A.NIGHT, 140 * op) })
+  end
+  if c.has.rift and c.rewind then
+    local y = e.pos.y - H * 0.5
+    local r = R + 0.2
+    for i = 1, 6 do
+      local a1 = t * 1.2 + (i - 1) * TAU / 6
+      local a2 = a1 + TAU / 14
+      line(key .. "v_rf" .. i, { from = { x = e.pos.x + math.cos(a1) * r, y = y, z = e.pos.z - math.sin(a1) * r },
+        to = { x = e.pos.x + math.cos(a2) * r, y = y, z = e.pos.z - math.sin(a2) * r }, colour = col(A.RIFT, 200 * op) })
+    end
+  end
+end
+
 -- Lines from an Alpha to the monsters it rallied, and a ring under each.
 function S.rally(key, c, e, o, t, find)
   if #(c.rallied or {}) == 0 then return end
@@ -229,7 +278,7 @@ function S.badges(key, c, e, o)
     local tip = { title = ("%s  (%s)"):format(b.title, rank.name), text = b.text }
     local frame = b.alert and { 255, 70, 50, 240 } or { 0, 0, 0, 190 }
     put("rect", id .. "f", { x = x - 2, y = y - 2, w = size + 4, h = size + 4, colour = frame, line = 2, round = 3, layer = 1 })
-    put("icon", id, { x = x, y = y, kind = "status", id = b.icon, size = size, tip = tip, layer = 2 })
+    put("icon", id, { x = x, y = y, kind = b.kind, id = b.icon, size = size, tip = tip, layer = 2 })
     put("rect", id .. "d", { x = x, y = y, w = size, h = size, colour = { 10, 10, 14, 160 }, visible = b.dim, layer = 3 })
   end
 end

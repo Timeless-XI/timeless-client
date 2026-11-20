@@ -38,14 +38,23 @@ A.AFFIX = {
   elemental = { name = "Elemental", icon = 94, text = "One element's magic heals it." },
   blinking = { name = "Blinking", icon = 36, text = "Whenever it has no shadows it puts up 3 more, every 15 seconds. Area attacks hit through them." },
   pack = { name = "Alpha", icon = 68, text = "On its first fight it rallies up to 2 monsters of its kind within 15 yalms, with +20% attack." },
+  nightborne = { name = "Nightborne", icon = 359, text = "Stronger at night (18:00-6:00): +25% attack and defense. Weaker by day: -15%." },
+  rift = { name = "Rift-touched", icon = 43, text = "Once, at 30% HP, it rewinds to the HP it had 10 seconds earlier. Burst it down past that." },
+  juggernaut = { name = "Juggernaut", icon = 37, text = "Stun, sleep, bind and gravity don't work on it, but it moves slowly. Kite it." },
+  gilded = { name = "Gilded", icon = 65535, kind = "item", text = "A treasure Champion: it never fights back, darts away when you close in and vanishes 60 seconds after the first blow. Catch it for a lot of gil and materials." },
 }
+
+A.GOLD = { 255, 214, 90 }
+A.NIGHT = { 150, 110, 255 }
+A.RIFT = { 90, 230, 220 }
+A.SCALE = { juggernaut = 1.5 }
 
 -- A badge for one affix of Champion c: {name, icon, title, text, dim, alert}
 -- dim: the affix is spent or stopped right now; alert: it is acting right now (rage, shadows up).
 function A.badge(key, c)
   local a = A.AFFIX[key]
   if not a then return nil end
-  local b = { key = key, name = a.name, icon = a.icon, text = a.text, dim = false, alert = false }
+  local b = { key = key, name = a.name, icon = a.icon, kind = a.kind or "status", text = a.text, dim = false, alert = false }
   if key == "elemental" then
     local e = A.ELEMENT[c.element or ""]
     if e then
@@ -62,6 +71,14 @@ function A.badge(key, c)
     b.text = a.text .. " Healing now."
   elseif key == "blinking" and c.shadows then
     b.alert, b.text = true, "Shadows up now. " .. a.text
+  elseif key == "nightborne" and c.night then
+    b.alert, b.text = true, "Night: it is stronger now (+25% attack and defense). By day it weakens."
+  elseif key == "nightborne" and c.night == false then
+    b.dim, b.text = true, "Day: it is weaker now (-15% attack and defense). At night it grows stronger."
+  elseif key == "rift" and c.rewind == false then
+    b.dim, b.text = true, "Its rewind is spent: it stays hurt this time."
+  elseif key == "gilded" and c.gilded then
+    b.alert, b.text = true, ("Catch it! It vanishes in %d seconds."):format(math.max(0, math.floor(c.gilded_left or c.gilded)))
   elseif key == "pack" and #(c.rallied or {}) > 0 then
     b.text = ("It rallied %d of its kind (+20%% attack). The lines show which."):format(#c.rallied)
   end

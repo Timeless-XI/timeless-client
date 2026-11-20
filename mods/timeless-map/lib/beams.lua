@@ -13,6 +13,7 @@ B.LABELS = {
 }
 B.COLOURS = {
   R = { 82, 219, 204, 220 }, W = { 236, 108, 96, 220 }, F = { 184, 122, 250, 220 }, C = { 247, 204, 97, 220 },
+  G = { 255, 232, 120, 240 },
 }
 local LEGENDARY = { 255, 140, 60, 230 }
 
@@ -21,6 +22,7 @@ B.drawn = {} -- id -> true
 function B.label(h)
   if h.k == "W" then return ("Warband captain (Lv. %d)"):format(h.l or 0) end
   if h.k == "F" then return "Fomor band" end
+  if h.k == "G" then return ("Gilded Champion (Lv. %d)"):format(h.l or 0) end
   local names = B.LABELS[h.k] or {}
   local text = names[h.c] or names[1] or "?"
   if h.k == "C" then text = ("%s (Lv. %d)"):format(text, h.l or 0) end

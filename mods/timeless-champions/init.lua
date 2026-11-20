@@ -12,6 +12,9 @@
 --   Rally      lines from an Alpha to the monsters it rallied.
 --   Names      a Champion's whole name on its plate and in the target window: the game's own is cut at 24 letters
 --              ("Legendary Goblin Pathfi"), so the server sends the rest.
+--   Variants   a Gilded (treasure) Champion glitters gold, with sparkles and the seconds before it vanishes; a
+--              Nightborne one turns violet by night; a Rift-touched one has a turning rift round it until it has
+--              rewound; a Juggernaut is drawn half again as big.
 --
 -- The server sends these only while this mod asks (a packet, not chat, renewed every 20 s); they are taken out of
 -- the chat log. Needs the server's champions module.
@@ -25,6 +28,7 @@
 local action = require("lib.action")
 local protocol = require("lib.protocol")
 local scene = require("lib.scene")
+local A = require("lib.affixes")
 
 local BEAT = 20
 local RANGE = 60       -- yalms: Champions farther than this aren't drawn
@@ -49,18 +53,19 @@ local function ask(words)
   st.next_beat = os.clock() + BEAT
 end
 
--- Whole names: the plate (and target window) of each Champion whose name the game had to cut.
+-- How Champions draw (render.entity): the whole name of one the game had to cut, a Juggernaut's size. want: id -> look
+local function look_key(l) return (l.name or "") .. "|" .. tostring(l.scale or 1) end
 local function rename(want)
-  for id, name in pairs(st.renamed) do
-    if want[id] ~= name then
+  for id, l in pairs(st.renamed) do
+    if not want[id] or look_key(want[id]) ~= look_key(l) then
       render.entity(id, nil)
       st.renamed[id] = nil
     end
   end
-  for id, name in pairs(want) do
-    if st.renamed[id] ~= name then
-      render.entity(id, { name = name })
-      st.renamed[id] = name
+  for id, l in pairs(want) do
+    if not st.renamed[id] then
+      render.entity(id, l)
+      st.renamed[id] = l
     end
   end
 end
@@ -83,6 +88,7 @@ filters.chat(function(text)
     elseif c.op == "X" then
       st.champs[c.index] = nil
     elseif c.op == "M" then
+      c.at = os.clock()
       st.champs[c.index] = c
     end
   end
@@ -117,12 +123,21 @@ local function frame()
   if test then list[#list + 1] = { index = test.c.index, c = test.c, test = true } end
   for _, item in ipairs(list) do
     local e = find(item.index)
-    if e and p.names and item.c.name and not e.me then names[e.id] = item.c.name end
+    if e and not e.me then
+      local l = {}
+      if p.names and item.c.name then l.name = item.c.name end
+      for k in pairs(item.c.has or {}) do
+        if A.SCALE[k] and p.aura then l.scale = A.SCALE[k] end
+      end
+      if next(l) then names[e.id] = l end
+    end
+    if item.c.gilded and item.c.at then item.c.gilded_left = item.c.gilded - (t - item.c.at) end
     if e and (e.hpp or 1) > 0 and (e.distance or 0) <= RANGE then
       local key = (item.test and "t" or "c") .. item.index .. "_"
       if p.aura then scene.aura(key, item.c, e, o, t) end
       if p.hazards then scene.hazards(key, item.c, e, o, t, find) end
       if p.rally then scene.rally(key, item.c, e, o, t, find) end
+      if p.aura then scene.variants(key, item.c, e, o, t) end
       local targeted = target ~= nil and target.index == e.index
       if p.badges and (targeted or (not p.badges_target_only and (e.distance or 0) <= BADGE_RANGE)) then
         scene.badges(key, item.c, e, o)
