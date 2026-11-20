@@ -584,21 +584,24 @@ fn fs_actor(in: VertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4
     return actor_colour(in, ff);
 }
 
-// Timeless XI (modes.z = 1, `/look` "Light both sides"): the back of a character's triangle is lit as if it faced us
-// (its normal flipped), so the inside of hair, manes and capes isn't left at the ambient level (near black at night).
-// Retail lights it by the front normal only.
+// Timeless XI (modes.z = 1, `/look` "Soft fill light"): a surface whose normal points away from the camera is seen from
+// behind (the inside of a mane, a cape): its normal is turned toward the camera (by the view, not the triangle's
+// winding, which the models don't keep consistently). Retail lights it by the stored normal (near black).
 fn actor_normal(in: VertexOut, ff: bool) -> vec3<f32> {
     let n = normalize(in.normal);
-    return select(n, -n, u.modes.z > 0.5 && !ff);
+    let v = normalize(u.eye.xyz - in.world);
+    return select(n, -n, u.modes.z > 0.5 && dot(n, v) < 0.0);
 }
 
-// Timeless XI (modes.z = 1): a soft fill light from the camera, so a character's surfaces turned away from the sun
-// (the underside of a mane, a cape's fold) are never left at the ambient level alone; 0 off (retail).
-fn actor_fill(in: VertexOut, ff: bool) -> f32 {
+// The sun term with the fill (modes.z = 1): every surface we see gets at least half the light of one facing the sun,
+// by how much it faces us, so nothing visible is left at the ambient level (black at night). 0 off: retail's N.L.
+fn actor_ndl(in: VertexOut, ff: bool, l: vec3<f32>) -> f32 {
+    let n = actor_normal(in, ff);
+    let ndl = max(dot(n, l), 0.0);
     if (u.modes.z < 0.5) {
-        return 0.0;
+        return ndl;
     }
-    return 0.35 * max(dot(actor_normal(in, ff), normalize(u.eye.xyz - in.world)), 0.0);
+    return max(ndl, 0.5 * max(dot(n, normalize(u.eye.xyz - in.world)), 0.0));
 }
 
 fn actor_colour(in: VertexOut, ff: bool) -> vec4<f32> {
@@ -611,7 +614,7 @@ fn actor_colour(in: VertexOut, ff: bool) -> vec4<f32> {
     if (u.sun.w > 0.5) {
         return vec4<f32>(lit_actor(in, texel, ff).rgb, alpha);
     }
-    let diffuse = min(max(dot(actor_normal(in, ff), normalize(-u.light.xyz)), 0.0) + actor_fill(in, ff), 1.0);
+    let diffuse = actor_ndl(in, ff, normalize(-u.light.xyz));
     let lit = texel.rgb * (u.light.w + (1.0 - u.light.w) * diffuse) * in.tint;
     return vec4<f32>(shade(in, vec4<f32>(lit, 1.0)).rgb, alpha);
 }
@@ -798,7 +801,7 @@ fn lit_actor(in: VertexOut, t: vec4<f32>, ff: bool) -> vec4<f32> {
         fog = a.fog.xy;
     }
     color = boost(color);
-    let ndl = max(dot(actor_normal(in, ff), -sun), 0.0);
+    let ndl = actor_ndl(in, ff, -sun);
     // D3DRS_AMBIENT (ambient_rs); the target flash mixes those bytes toward 220 and scales the fog colour
     // (FUN_100c94a0).
     let amb = floor(mix(ambient_rs(ambient), vec3<f32>(220.0), in.flash.x)) / 255.0;
@@ -808,8 +811,7 @@ fn lit_actor(in: VertexOut, t: vec4<f32>, ff: bool) -> vec4<f32> {
     let cloth = in.color.g > 0.5;
     let ga = select(min(floor(amb * 255.0 * mf) / 255.0, vec3<f32>(1.0)), amb, cloth);
     let em = select(0.0, max(mf - 1.5, 0.0), cloth);
-    let fill = actor_fill(in, ff);
-    let lit = clamp((ga + 0.5 * mf * (color * min(ndl + fill, 1.0) + in.point)) * in.tint + em, vec3<f32>(0.0), vec3<f32>(1.0));
+    let lit = clamp((ga + 0.5 * mf * (color * ndl + in.point)) * in.tint + em, vec3<f32>(0.0), vec3<f32>(1.0));
     let rgb = clamp(to_gamma(t.rgb) * lit * 2.0, vec3<f32>(0.0), vec3<f32>(1.0));
     let f = clamp((fog.y - in.depth) / (fog.y - fog.x), 0.0, 1.0);
     let c = mix(fog_color * in.flash.y, rgb, f);
