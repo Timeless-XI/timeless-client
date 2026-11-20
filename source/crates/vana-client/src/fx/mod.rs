@@ -1,0 +1,3557 @@
+//! The effect generator system (FFXiMain's CMoGenerator / CMoElem; MODLOG "Effect generators"). The CPU
+//! runs generators and builds elements (emit.rs); the GPU runs each element's update stream every frame and
+//! draws it (render/effects.rs). Sort keys and expire requests come back from the GPU a frame late.
+
+pub mod drive;
+pub mod elem;
+pub mod emit;
+mod equip;
+pub mod lib;
+pub mod math;
+pub mod sched;
+pub mod sound;
+pub mod spline;
+mod tasks;
+pub use tasks::is_skill_file;
+pub mod trail;
+pub mod voyage;
+pub use tasks::event_action_file;
+pub use tasks::{HOLD_REACT, HOLD_STATUS};
+pub use tasks::{effects_allowed, filter_class};
+
+use crate::dat::generator::{KeyFrame, Op, kind};
+use crate::dat::zone;
+use elem::{Elem, NONE, SLOT_WORDS, ctl, slot, w};
+use glam::{Mat4, Vec3};
+use lib::Library;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+/// (library, tree node).
+pub type Ref = (usize, usize);
+
+/// What the effect system asks of the world's actors (CXiActor vtable +0x1c4, +0x1ec, FUN_100cc440).
+pub trait Actors {
+    /// Placement: rotation and translation (model space faces +x).
+    fn matrix(&self, id: u32) -> Option<Mat4>;
+    /// The drawn rotation (vt+0x1c0, a model actor's +0x744), what ops 0xa9 / 0xaa turn from; else the placement's yaw.
+    fn rotation(&self, id: u32) -> Option<Vec3> {
+        let m = self.matrix(id)?;
+        Some(Vec3::new(0.0, (-m.x_axis.z).atan2(m.x_axis.x), 0.0))
+    }
+    /// Attach point `k` in model space, model scale included.
+    fn point(&self, id: u32, k: u16) -> Option<Vec3>;
+    /// The model scale (vtable +0x110).
+    fn scale(&self, id: u32) -> f32;
+    /// The sizes (FUN_100d08e0 / 09b0 / 0a80, vtable +0x98 / +0x9c / +0xa0): width, height and depth, each the scale
+    /// times skeleton box 0's extent over a Hume's (1.7 / 1.9 / 1.9); 1.0 for a model without a skeleton.
+    fn sizes(&self, _id: u32) -> [f32; 3] {
+        [1.0; 3]
+    }
+    /// The move quarter (+0x598): 2 right, 3 back, 4 left, else forward.
+    fn move_quarter(&self, _id: u32) -> u8 {
+        1
+    }
+    /// Entity +0x12c bit 22 (0x00E @0x28 bit 0): a trust / pet mark.
+    fn trust_mark(&self, _id: u32) -> bool {
+        false
+    }
+    /// Scheduler variable 0x3d (FUN_10062900): an entity whose model is not 0x92c and that is a pet or trust (index
+    /// above 0x6ff, FUN_1008e130) or a charmed monster (id high byte set, +0x12c bit 13).
+    fn pet_like(&self, _id: u32) -> bool {
+        false
+    }
+    /// Equipment part files (vtable +0x1ec), and the motion files newest first followed by the model's files.
+    fn files(&self, id: u32) -> (Vec<u32>, Vec<u32>);
+    /// Event op 0xac sub 2 (+0x138 bit 31) with the model hidden: the actor's scheduler sounds are skipped.
+    fn sound_muted(&self, _id: u32) -> bool {
+        false
+    }
+    /// The model's files (vtable +0x1e0), without the motion files. None by default: `files` mixes the two, and
+    /// a motion file taken for the model's would pass the lookups that only search the model (op 0x2c's any-name
+    /// Afb, the equipment schedulers).
+    fn model_files(&self, _id: u32) -> Vec<u32> {
+        Vec::new()
+    }
+    /// Vtable +0x1e4 (FUN_100d12d0): the model and every file on its list are in; None without an actor.
+    fn ready(&self, _id: u32) -> Option<bool> {
+        Some(true)
+    }
+    /// The actor's bones have been posed (before that its points are the skeleton's rest pose).
+    fn posed(&self, _id: u32) -> bool {
+        true
+    }
+    /// Hidden actors (+0xb2 bit 1) get no attached effects.
+    fn hidden(&self, id: u32) -> bool;
+    /// Actors whose model is up, with the model's files (FUN_10083970 reads their generators).
+    fn models(&self) -> Vec<(u32, Vec<u32>)>;
+    /// Skeleton actors (CXiSkeletonActor: every actor with a model, PCs, NPCs and monsters alike): FUN_10084420's race
+    /// code and body info byte 9 (+0x881).
+    fn pc(&self, _id: u32) -> Option<(u8, i8)> {
+        None
+    }
+    /// Point `k`'s whole frame in model space (FUN_1002a780: Rx Ry Rz of the point with its offset, times the drawn
+    /// bone; translation with the model scale), for attach modes 9..0xc.
+    fn point_frame(&self, _id: u32, _k: u16) -> Option<Mat4> {
+        None
+    }
+    /// The first collision face on a segment (FUN_10181590's vertical test: attach point 0x30, emission op 0x42).
+    fn ground_hit(&self, _from: Vec3, _to: Vec3) -> Option<Vec3> {
+        None
+    }
+    /// /bellsw: scheduler op 0xb3 (the /bell notes) plays as op 0x0a.
+    fn bells(&self) -> bool {
+        false
+    }
+    /// The ground projection's cells around a world point, and their paintable faces (client/ground.rs).
+    fn decal_cell(&self, _c: Vec3) -> Option<(usize, usize)> {
+        None
+    }
+    fn decal_tris(&self, _c: Vec3) -> Vec<Vec3> {
+        Vec::new()
+    }
+    /// The actor's status (2 / 3 dead, scheduler ops 0xb1 / 0xb2).
+    fn status(&self, _id: u32) -> u8 {
+        0
+    }
+    /// The wade point in the world (actor+0x64c, attach point 0x35): the position, y the water surface while wading.
+    fn wade(&self, _id: u32) -> Option<Vec3> {
+        None
+    }
+    /// The last foot contact in the world (actor+0x63c, attach point 0x34).
+    fn foot(&self, _id: u32) -> Option<Vec3> {
+        None
+    }
+    /// The floor normal under it, pointing into the floor (-vtable +0x210).
+    fn floor(&self, _id: u32) -> Option<Vec3> {
+        None
+    }
+    /// Emission op 0x8f: the tint of the area environment the actor stands in (None = the zone's).
+    fn area_light(&self, _id: u32) -> Option<Vec3> {
+        None
+    }
+    /// FUN_100ac560's class of one actor: 1 you (or your pet), 2 monster, 4 party, 8 not in your party.
+    fn fx_class(&self, _id: u32) -> u8 {
+        8
+    }
+    /// Moving this frame (actor +0xf8, FUN_1005e5d0).
+    fn moving(&self, _id: u32) -> bool {
+        false
+    }
+    /// The model's info bytes +0x878..+0x87a: leg mode, footstep kind, shoe.
+    fn cib(&self, _id: u32) -> Option<[i8; 3]> {
+        None
+    }
+    /// The model's sub-animation (+0x8a5, vtable +0xa4): the `shi<n>` / `ska<n>` sound and swing letter variants.
+    fn sub_anim(&self, _id: u32) -> u8 {
+        0
+    }
+    /// Entity +0x124 bits 8..11: the applied sub-animation before its last change (scheduler var 0x3c; 8 at the
+    /// start, FUN_1008a350's 0x880). None for an actor with no entity (model +0x70 0).
+    fn sub_prev(&self, _id: u32) -> Option<u8> {
+        None
+    }
+    /// Drawobj +0x840 bit 6 (vtable +0x250 / +0x254, FUN_100d6850): this swing is the off-hand one, i.e. a dual-wield
+    /// model playing a `b...` scheduler. Scheduler system value 0x3b (batch 5 item 8).
+    fn off_hand(&self, _id: u32) -> bool {
+        false
+    }
+    /// Our actor (FUN_10081550), for op 0x53's nearest target.
+    fn player(&self) -> Option<u32> {
+        None
+    }
+    /// Actor +0x886 (vtable +0x3d8 byte 0xe): the range part file's class, -1 none.
+    fn ranged_class(&self, _id: u32) -> Option<i8> {
+        None
+    }
+    /// Actor +0x87c / +0x87f: the main / sub hand's draw digit (op 0x84); None for no PC look.
+    fn hand_draw(&self, _id: u32, _sub: bool) -> Option<i8> {
+        None
+    }
+    /// Vtable +0x124 (entity +0x130 bit 1, op 0x9a): the model file's 0x1000 generators stay off.
+    fn model_gens_off(&self, _id: u32) -> bool {
+        false
+    }
+    /// FUN_100d4600's choice: the actor's swing schedulers, `atf?` moving and `ati?` standing (the other set when
+    /// that one is empty); None while its model is not in.
+    fn swings(&self, _id: u32, _moving: bool) -> Option<Vec<String>> {
+        None
+    }
+}
+
+/// No actors (offscreen shots).
+pub struct NoActors;
+
+impl Actors for NoActors {
+    fn matrix(&self, _: u32) -> Option<Mat4> {
+        None
+    }
+    fn point(&self, _: u32, _: u16) -> Option<Vec3> {
+        None
+    }
+    fn scale(&self, _: u32) -> f32 {
+        1.0
+    }
+    fn files(&self, _: u32) -> (Vec<u32>, Vec<u32>) {
+        (Vec::new(), Vec::new())
+    }
+    fn hidden(&self, _: u32) -> bool {
+        false
+    }
+    fn models(&self) -> Vec<(u32, Vec<u32>)> {
+        Vec::new()
+    }
+}
+
+/// What an element draws.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Draw {
+    None,
+    /// A registered mesh (D3m, or an MMB in its place).
+    Mesh(u32),
+    /// A registered D3a sprite animation.
+    Sprite(u32),
+    /// A registered D3b morph.
+    Morph(u32),
+    /// CMoDist (kind 0x22): the background under a diamond redrawn shifted (heat haze).
+    Dist,
+    /// DamValueProg (kind 0x5c): a damage number's glyphs over its target (render/effects.rs vs_damv).
+    DamValue,
+    /// RingProg (kind 0x24): concentric rings from emission op 0x3a (render/effects.rs vs_ring).
+    Ring,
+    /// CMoDistModelElem (D3m + 0x100000, FUN_10043320): a registered mesh drawn over the scene copy.
+    DistModel(u32),
+    /// CMoDistMorphElem (D3b + 0x100000, FUN_10043590): a registered morph drawn shifted over the scene copy.
+    DistMorph(u32),
+    /// CMoVuDist (batched 0x22, FUN_10043110): the element's CMoDist diamond N times, each over a new copy;
+    /// the flag is a weather generator's (+0xde bit 0), whose N from 20 up is scaled by the weather density.
+    VuDist(u32, bool),
+    /// CMoDistRingElem (ring + 0x100000, FUN_10043720).
+    DistRing,
+    /// D3m + 0x200000 (FUN_10040e70): the mesh rendered top-down and painted onto the ground (render/effects.rs).
+    GroundProj(u32),
+}
+
+/// A damage number for kind 0x5c elements: glyphs ('0'..'9' = 0..9, ':' = 10, up to 16) and the message colour
+/// 0xRRGGBB (elem +0x198 / +0x194).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DamValue {
+    pub glyphs: Vec<u8>,
+    pub rgb: u32,
+}
+
+/// This frame's inputs.
+#[derive(Clone, Copy, Debug)]
+pub struct Frame {
+    /// Ticks of 1/60 s (DAT_10469678+0xeb0, at least 1 per frame in retail) and seconds (+0xeac).
+    pub dt: f32,
+    pub seconds: f32,
+    /// Vana'diel day fraction DAT_106175bc.
+    pub dayfrac: f32,
+    pub view: Mat4,
+    /// The view with its translation zeroed (DAT_10469678+0xb90).
+    pub view_rot: Mat4,
+    pub eye: Vec3,
+    pub draw_distance: f32,
+    /// The brighter of sun + ambient and moon + ambient (ops 0x8f / 0x90), 1.0 = unchanged.
+    pub area_light: Vec3,
+    /// Camera focal length on the 384-line reference (cam+0x2f4: fovy = 2 atan(192 / focal)), for sound pan.
+    pub focal: f32,
+    /// FUN_10184dc0: the moon phase 0..11; FUN_10184d70: the weekday 0..7.
+    pub moon_phase: u32,
+    pub weekday: u32,
+}
+
+/// The CPU side of a live element (the GPU holds the rest).
+#[derive(Clone, Debug)]
+pub struct ElemCpu {
+    /// The snapshot's scales A / B (taken at op 1, or the parent's under op 0x86).
+    pub snap_scale: (Vec3, Vec3),
+    /// Element update op 0x5f's inputs (camera shake, rumble), evaluated on the CPU.
+    pub quake: Option<Quake>,
+    /// CMoD3mSpecularElem's specular image.
+    pub spec: Option<SpecTex>,
+    /// A ground projection's decal: its blend (+0x198), the cell its faces were taken for, and those faces.
+    pub gp: Option<GroundDecal>,
+    pub inst: usize,
+    pub serial: u32,
+    /// The tick it was made in (`Effects::ticks`): elements run newest first (`run_order`).
+    pub born: u32,
+    /// Made inside an element's update (an end-stream burst, an element's clone): the factory puts it at the front
+    /// of task bucket 0xb, behind the walk, so its first update is the next frame.
+    pub late: bool,
+    pub life: f32,
+    pub max_life: f32,
+    pub flags: u32,
+    pub blend: u16,
+    pub draw: Draw,
+    /// Sort key +0x12c from the GPU (the bias until the first readback).
+    pub key: f32,
+    pub drawn: bool,
+    /// +0x17a: its actor's model is hidden; it updates but is not drawn (FUN_10046070).
+    pub hidden: bool,
+    pub back: Option<emit::Parent>,
+    /// Generator instance linked to this element (+0x164).
+    pub child: Option<usize>,
+    /// Flag 0x800000: the emitter frame at spawn, in its matrix slot.
+    pub snapshot: Option<Mat4>,
+    pub mslot: u32,
+    /// The matrix slot its parent frame comes from (FUN_10046440), borrowed from another generator by op 0x45.
+    pub frame: u32,
+    pub borrowed: bool,
+    /// Batched D3a: its particles in the pool (first, count).
+    pub parts: Option<(u32, u32)>,
+    /// A point light's table slot.
+    pub light: Option<u32>,
+    /// CMoPointLightProgElem: its intensity / range multipliers (+0x1a4 / +0x1a8) as last written from the CPU, the
+    /// start of scheduler ops 0x6f / 0x70.
+    pub light_scale: Option<[f32; 2]>,
+    /// Its generator's update stream has op 0x02 (FUN_10048380), so the readback's velocity is kept: looked up at
+    /// spawn, not per readback.
+    pub drift: bool,
+}
+
+/// Op 0x25 (reactor actor2) / 0x21 (actor1): amount f32 @8, rate @0xc, count u32 @0x10, blend-in ticks @0x14, fade
+/// @0x18, side u32 @0x1c (0 by position, 1 front, 2 back); level = the current record's scale & 3.
+#[derive(Clone, Copy, Debug)]
+pub struct React {
+    pub reactor: u32,
+    pub other: u32,
+    pub amount: f32,
+    pub rate: f32,
+    pub count: u32,
+    pub blend_in: f32,
+    pub fade: f32,
+    pub side: u32,
+    pub level: u8,
+}
+
+/// Op 0x5a (reactor actor1) / 0x5b (actor2): guard (`gdi?` / `gdm?`) or parry (`pyi?` / `pym?`) with rate f32 @8,
+/// count i16 @0xc, parry u16 @0xe, blend-in f32 @0x10, fade f32 @0x14.
+#[derive(Clone, Copy, Debug)]
+pub struct Guard {
+    pub reactor: u32,
+    pub parry: bool,
+    pub rate: f32,
+    pub count: i16,
+    pub blend_in: f32,
+    pub fade: f32,
+}
+
+/// Op 0x5e / 0xbf: push `reactor` away from `from` (the pusher's position; toward it when `speed` < 0) at `speed`
+/// units a tick for `ticks`, then decaying by `decay` a tick; `motion` "bf0" / "bb0" with `count` (0 loops).
+#[derive(Clone, Debug)]
+pub struct Knock {
+    pub reactor: u32,
+    pub from: Vec3,
+    pub speed: f32,
+    pub decay: f32,
+    pub ticks: f32,
+    pub motion: String,
+    pub count: u8,
+}
+
+/// Scheduler ops for the zone environment (FUN_10057fb0), applied by the client.
+#[derive(Clone, Copy, Debug)]
+pub enum EnvOp {
+    /// Case 0x7c: FUN_101874f0(4cc @8, i16 @6 clock units, 0): the weather becomes `tag`, blended over `blend`.
+    Weather { tag: u32, blend: i16 },
+    /// Case 0x7d: FUN_1018c210(u32 @8): the clock's time of day (216000 units an hour), its day kept.
+    Clock(u32),
+    /// Case 0x7e (0x10058469): the scoped 0x2f block 4cc @8 becomes the env (FUN_1018b010); each frame
+    /// FUN_101874a0 puts a weather object's own back over it, so it holds only where the zone has none for the weather.
+    Static(crate::dat::weather::Env),
+}
+
+/// Scheduler op 0x0c (translate) / 0x0d (rotate) on a door (FUN_10043bb0 / FUN_100439c0): part `part` of actor1's
+/// door group goes linearly to `to` over `ticks`.
+#[derive(Clone, Debug)]
+pub struct DoorMove {
+    pub actor: u32,
+    pub rotate: bool,
+    pub part: u32,
+    pub to: [f32; 3],
+    pub ticks: f32,
+}
+
+/// Scheduler op 0x1d (FUN_10057fb0 case 0x1d): actor1, a lift, goes to `floor` (the running scheduler's name byte 3,
+/// FUN_100c3ce0) by its packet's end time (client/lifts.rs).
+#[derive(Clone, Copy, Debug)]
+pub struct LiftMove {
+    pub actor: u32,
+    pub floor: u8,
+}
+
+/// The actor ids of the effect-made models (CMoSkeletonElem's CXiSkeletonActor), never the server's.
+pub const MODEL_IDS: u32 = 0xfe00_0000;
+
+/// A CMoSkeletonElem's model actor.
+pub struct FxModel {
+    pub id: u32,
+    elem: u32,
+    serial: u32,
+    /// The element's generator: the scheduler of its name plays on the model.
+    source: Ref,
+    started: bool,
+}
+
+/// Who started an instance.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Owner {
+    Zone,
+    /// The loaded sub-area's auto-start generators.
+    SubArea,
+    /// The weather set (index into Effects::weathers' serials).
+    Weather(u32),
+    Element(usize),
+    /// A scheduler task (op 0x02), by its uid: slots are reused, so a later task in the slot never takes the clones of
+    /// one that ended (a doll took Shantotto II's orbs that way and froze them).
+    Task(u64),
+    /// An actor's model files (FUN_10083970).
+    Actor(u32),
+    /// A footstep's dust burst on an actor (FUN_100d41a0).
+    Step(u32),
+}
+
+/// A running generator (the CMoGenerator object, or a CMoGeneratorClone of it): its copy of the streams
+/// (generator-update ops rewrite emission operands) and the FUN_10048740 counters.
+pub struct Instance {
+    pub src: Ref,
+    pub name: [u8; 4],
+    pub streams: [Vec<Op>; 4],
+    /// +0xd8.
+    pub flags: u32,
+    /// +0xdc bit 0: soft-stopped (no emission; live elements finish).
+    pub stopping: bool,
+    /// Its actor's model is hidden and it had no element: no update until shown (then restarted, FUN_100531d0).
+    pub held: bool,
+    /// +0xde weather bits.
+    pub de: u8,
+    pub life: f32,
+    pub elapsed: f32,
+    pub countdown: f32,
+    pub interval: i16,
+    pub interval_rand: i16,
+    /// +0x9c.
+    pub emitted: u32,
+    /// The attach word (gen +0x34; emission op 0x45 copies the parent generator's) and its mode.
+    pub attach: u32,
+    pub mode: u8,
+    /// +0xa4 attach matrix (None = world).
+    pub matrix: Option<Mat4>,
+    /// +0x78 / +0x84 scale vectors, +0x90 two-point distance.
+    pub scale_a: Vec3,
+    pub scale_b: Vec3,
+    pub dist: f32,
+    pub size_scaled: bool,
+    /// Actor2's depth size (vtable +0xa0) for emission op 0x72; 1.0 without one.
+    pub target_depth: f32,
+    pub mslot: u32,
+    pub weather: f32,
+    /// Oldest first (the first is the one `model_hide` and `ramp_light` take); deaths are mostly at the front.
+    pub live: std::collections::VecDeque<u32>,
+    pub finished: bool,
+    /// A CMoGeneratorClone nothing holds (op 0x02's, a model file's): it goes with its last live element whatever its
+    /// life (FUN_10043b30: the elements' references are the clone's count). `emptied`: that happened this frame.
+    pub clone: bool,
+    pub emptied: bool,
+    pub owner: Owner,
+    pub parent_elem: Option<u32>,
+    /// Actor1 / actor2 (gen +0x30: +0x3c / +0x40).
+    pub actors: [sched::Who; 2],
+    /// A clone linked to an element (+0x164): not a separate task; the element runs it (FUN_10048740 from
+    /// emission ops 0x44 / 0x53 / 0x6a once, then update ops 0x25 / 0x33 / 0x46 every frame).
+    pub driven: Option<u32>,
+    /// Emission op 0x8e: the source actor's foot contact and ground frame (FUN_100d3750), when the stream has it.
+    pub ground: Option<(Vec3, [Vec3; 3])>,
+    /// Emission op 0x8f: the source actor's area tint, when the stream has it and the actor is in an area.
+    pub area_light: Option<Vec3>,
+    /// The damage number of the task that started it (gen +0x64 -> task +0xa8 / +0xa4); clones inherit it.
+    pub dam: Option<DamValue>,
+    /// Its start in the serial order: the task list runs unattached generators in start order (FUN_10075120
+    /// appends).
+    pub started: u32,
+}
+
+type RunKey = (u32, (u8, u32), u32);
+
+/// `Effects::run_order`'s key: the tick the element was made in, its generator's place in the walk (attach mode,
+/// start serial), its serial.
+fn run_key(born: u32, mode: u8, started: u32, serial: u32) -> RunKey {
+    (born, if matches!(mode, 0 | 0xe | 0xf | 0x14) { (0, started) } else { (1, !started) }, serial)
+}
+
+/// A word range of an element for the GPU this frame.
+pub enum Write {
+    Full(u32, Box<Elem>),
+    /// One word of an element (its index, the word, the value).
+    Word(u32, usize, u32),
+    /// Particle records from this index of the pool.
+    Parts(u32, Vec<[f32; 9]>),
+    /// A point light switched off (the CMoPointLightProgElem dtor: a black light).
+    LightOff(u32),
+}
+
+/// Libraries and the tables the GPU reads (keyframes, update streams, meshes).
+pub struct Registry {
+    pub libs: Vec<Library>,
+    by_file: HashMap<u32, usize>,
+    /// DAT 0, searched once a file's scope runs out.
+    pub global: Option<usize>,
+    zone_keys: Option<Arc<zone::Keys>>,
+    /// Keyframes: (start, count) into `key_data`, by global id.
+    pub key_data: Vec<[f32; 2]>,
+    pub key_desc: Vec<[u32; 2]>,
+    key_id: HashMap<Ref, u32>,
+    /// `resolve`'s answers by (lib, from, kind, name): the trees never change once loaded, and only a new library can
+    /// make DAT 0 the fallback (add clears them).
+    resolved: std::cell::RefCell<HashMap<(usize, usize, u8, u32), Option<Ref>>>,
+    pub keys_dirty: bool,
+    /// The zone's point-light table keys by slot (render ZoneGeometry::light_keys).
+    pub light_keys: Vec<u32>,
+    /// The scene projection's aspect (width / height), for generator op 0x15's view gate.
+    pub aspect: f32,
+    /// Vtx paths as splines (fx/spline.rs gpu_words), back to back; an element slot holds first vec4 + 1.
+    pub path_data: Vec<[f32; 4]>,
+    path_id: HashMap<Ref, (u32, Vec<spline::Seg>)>,
+    pub paths_dirty: bool,
+    /// Element update streams back to back (op words).
+    pub ops: Vec<u32>,
+    stream_at: HashMap<Ref, (u32, Option<usize>)>,
+    pub ops_dirty: bool,
+    /// Meshes and sprites by GPU id; ids not yet uploaded wait in `new_*`.
+    pub meshes: Vec<Ref>,
+    mesh_id: HashMap<Ref, u32>,
+    pub new_meshes: Vec<u32>,
+    pub sprites: Vec<Ref>,
+    sprite_id: HashMap<Ref, u32>,
+    pub new_sprites: Vec<u32>,
+    /// Every sprite's vertices (MeshVertex words) and frames (first vertex, quads) back to back for the GPU; per
+    /// sprite its first frame entry and most quads in a frame.
+    pub sprite_verts: Vec<[u32; 9]>,
+    pub sprite_frame_table: Vec<[u32; 2]>,
+    pub sprite_at: Vec<(u32, u32)>,
+    pub sprites_dirty: bool,
+    /// Morphs: their GPU words back to back ([K, V, N, T], corners, key positions, key normals) and first word.
+    pub morphs: Vec<Ref>,
+    morph_id: HashMap<Ref, u32>,
+    pub morph_data: Vec<u32>,
+    pub morph_at: Vec<u32>,
+    pub morphs_dirty: bool,
+    pub new_morphs: Vec<u32>,
+    zone: Option<usize>,
+    logged: HashSet<(u8, u8)>,
+    missed: HashSet<(usize, u32)>,
+    /// fx-sweep's record of what runs skipped or could not resolve (off in the client).
+    pub audit: Option<Audit>,
+}
+
+/// `Effects::draw_items` marks an after-image slot with this bit.
+pub const TRAIL_ITEM: u32 = 0x8000_0000;
+
+/// A ground projection's decal (FUN_10182700): blend +0x198, and the collision faces of the 3x3 cells around the
+/// element (world vertices), taken again when it moves into another cell.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GroundDecal {
+    pub blend: u16,
+    pub cell: Option<(usize, usize)>,
+    pub verts: Vec<Vec3>,
+}
+
+/// CMoD3mSpecularElem's specular image (op 0x55, else DAT 0's `cubemap spec`): (library, texture index), a cube
+/// (face -Z only), CLAMP addressing (a `!sp` 4cc).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpecTex {
+    pub tex: (usize, usize),
+    pub cube: bool,
+    pub clamp: bool,
+}
+
+/// Element update op 0x5f (FUN_1004a980 0x1004c0d9): the slot's key and sampler flags, the player factor (op 0x82),
+/// the spawn position, near / far, the shake factor (0 for the three-word form), op-1 flag bit 2 (eye-relative).
+#[derive(Clone, Copy, Debug)]
+pub struct Quake {
+    pub key: u32,
+    pub prm: u32,
+    pub s2: f32,
+    pub pos: Vec3,
+    pub near: f32,
+    pub far: f32,
+    pub factor: f32,
+    pub eye_rel: bool,
+}
+
+/// The actor shine overlay (CXiSkeletonActor +0x734 bit 0): the image (+0x750; with the drive that set it), U / V
+/// (+0x73c / +0x740) and TFACTOR (+0x74c, ARGB). U / V / colour stay on the actor when the overlay goes. The
+/// refraction pass (+0x734 bit 1) and its level (+0x744, 0.1 from the actor's constructor).
+#[derive(Clone, Copy, Debug)]
+pub struct Shine {
+    pub tex: Option<(Ref, u64)>,
+    pub u: f32,
+    pub v: f32,
+    pub tf: u32,
+    pub refract: bool,
+    pub level: f32,
+}
+
+impl Default for Shine {
+    fn default() -> Self {
+        Shine { tex: None, u: 0.0, v: 0.0, tf: 0, refract: false, level: 0.1 }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ShineKind {
+    Overlay,
+    Uv { v: bool, start: f32, target: f32, total: f32 },
+    Tf { start: u32, target: u32, total: f32 },
+    Refract { start: f32, target: f32, total: f32 },
+}
+
+/// A model colour change for the client.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ColorOp {
+    /// Toward ARGB over ticks from where it is.
+    Drive { actor: u32, argb: u32, ticks: f32 },
+    /// Stops where it is (its scheduler ended, or a newer drive deleted it).
+    Freeze(u32),
+    /// At once.
+    Snap(u32, u32),
+}
+
+/// An actor's footstep folder (model +0x800, library and node) and its set (+0x804: true = 'fser').
+#[derive(Clone, Copy, Debug)]
+struct Foot {
+    rain: bool,
+    at: (usize, usize),
+}
+
+/// FUN_10060990 (vtable 0x1032bb80): a point light's intensity (`k` 0, +0x1a4) or range (1, +0x1a8) multiplier
+/// linearly from `from` to `to` over `total` ticks; the end (or the scheduler's death) writes `to` (FUN_10060960).
+/// `light` (element, serial, start value) is None until the instance `inst`'s light is out (ours: a generator started
+/// in the same step emits after the scheduler ops); an unbound ramp that ended waits for it, then writes `to`.
+#[derive(Clone, Copy, Debug)]
+struct LightRamp {
+    owner: u64,
+    src: Ref,
+    inst: usize,
+    light: Option<(u32, u32, f32)>,
+    k: usize,
+    to: f32,
+    total: f32,
+    left: f32,
+}
+
+/// A running colour drive: its scheduler task, ticks left, target, and whether its destructor lands on the target
+/// (op 0xa0, +0x86).
+#[derive(Clone, Copy, Debug)]
+struct ColorDrive {
+    actor: u32,
+    owner: u64,
+    left: f32,
+    target: u32,
+    snap: bool,
+}
+
+/// A timed shine change, a child of its scheduler task (`owner`, the task uid): it ends with it.
+#[derive(Clone, Copy, Debug)]
+struct ShineDrive {
+    id: u64,
+    owner: u64,
+    actor: u32,
+    left: f32,
+    kind: ShineKind,
+}
+
+/// Scheduler ops 0x75 / 0xa3 (FUN_100d60e0 hide, FUN_100d5f10 show) on actor1's `wepN` meshes, hide byte 0 / 1;
+/// a timed hide's end shows byte 0.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WeaponOp {
+    pub actor: u32,
+    pub n: u8,
+    pub byte: u8,
+    pub hide: bool,
+}
+
+pub use equip::{EquipCall, EquipState};
+
+/// A camera path an event's task asked for: its file and scheduler, the path's 4cc, its length in ticks, the actors.
+#[derive(Clone, Debug)]
+pub struct EventCamera {
+    pub file: u32,
+    pub tag: [u8; 4],
+    pub path: u32,
+    pub ticks: f32,
+    pub who: [sched::Who; 2],
+}
+
+/// What effect runs skipped or could not resolve (the fx-sweep command, main.rs).
+#[derive(Default, Debug)]
+pub struct Audit {
+    /// Task VM ops run, and those that fell to its default arm, by code.
+    pub ops: std::collections::BTreeMap<u8, u32>,
+    pub sched: std::collections::BTreeMap<u8, u32>,
+    /// Generator (0) / emission (1) stream ops not handled.
+    pub stream: std::collections::BTreeMap<(u8, u8), u32>,
+    /// Schedulers asked for and not found, and resources not found (file, 4cc, kind).
+    pub no_sched: std::collections::BTreeMap<u32, u32>,
+    pub missing: std::collections::BTreeMap<(u32, u32, u8), u32>,
+    /// Attachments started: (mode, caster point, target point), and modes that placed nothing.
+    pub attach: std::collections::BTreeMap<(u8, u16, u16), u32>,
+    pub no_attach: std::collections::BTreeMap<u8, u32>,
+}
+
+impl Registry {
+    fn new() -> Self {
+        Self {
+            libs: Vec::new(),
+            by_file: HashMap::new(),
+            global: None,
+            zone_keys: None,
+            key_data: Vec::new(),
+            key_desc: Vec::new(),
+            key_id: HashMap::new(),
+            resolved: Default::default(),
+            keys_dirty: false,
+            light_keys: Vec::new(),
+            aspect: 16.0 / 9.0,
+            path_data: Vec::new(),
+            path_id: HashMap::new(),
+            paths_dirty: false,
+            ops: vec![0],
+            stream_at: HashMap::new(),
+            ops_dirty: true,
+            meshes: Vec::new(),
+            mesh_id: HashMap::new(),
+            new_meshes: Vec::new(),
+            sprites: Vec::new(),
+            sprite_id: HashMap::new(),
+            new_sprites: Vec::new(),
+            sprite_verts: Vec::new(),
+            sprite_frame_table: Vec::new(),
+            sprite_at: Vec::new(),
+            sprites_dirty: false,
+            morphs: Vec::new(),
+            morph_id: HashMap::new(),
+            morph_data: Vec::new(),
+            morph_at: Vec::new(),
+            morphs_dirty: false,
+            new_morphs: Vec::new(),
+            zone: None,
+            logged: HashSet::new(),
+            missed: HashSet::new(),
+            audit: None,
+        }
+    }
+
+    pub fn lib_of(&self, file_id: u32) -> Option<usize> {
+        self.by_file.get(&file_id).copied()
+    }
+
+    fn add(&mut self, l: Library) -> usize {
+        self.resolved.borrow_mut().clear();
+        let i = self.libs.len();
+        self.by_file.insert(l.file_id, i);
+        if l.file_id == 0 {
+            self.global = Some(i);
+        }
+        self.libs.push(l);
+        i
+    }
+
+    /// FUN_100712e0: the file's folder scope, then DAT 0.
+    pub fn resolve(&self, lib: usize, from: usize, kind: u8, name: u32) -> Option<Ref> {
+        let key = (lib, from, kind, name);
+        if let Some(&r) = self.resolved.borrow().get(&key) {
+            return r;
+        }
+        let r = self.libs[lib].find(from, kind, name).map(|n| (lib, n)).or_else(|| {
+            let g = self.global.filter(|&g| g != lib)?;
+            self.libs[g].find_global(kind, name).map(|n| (g, n))
+        });
+        self.resolved.borrow_mut().insert(key, r);
+        r
+    }
+
+    pub fn keyframe(&self, r: Ref) -> Option<&KeyFrame> {
+        self.libs[r.0].keys.get(&r.1)
+    }
+
+    /// A keyframe's GPU id by 4cc from the generator's scope (NONE when it does not resolve).
+    pub fn key_ref(&mut self, lib: usize, from: usize, name: u32) -> u32 {
+        let Some(r) = self.resolve(lib, from, kind::KEYFRAME, name) else { return NONE };
+        if let Some(&id) = self.key_id.get(&r) {
+            return id;
+        }
+        let Some(k) = self.keyframe(r) else { return NONE };
+        let start = self.key_data.len() as u32;
+        let keys = k.keys.clone();
+        self.key_data.extend(keys.iter().map(|&(t, v)| [t, v]));
+        let id = self.key_desc.len() as u32;
+        self.key_desc.push([start, keys.len() as u32]);
+        self.key_id.insert(r, id);
+        self.keys_dirty = true;
+        id
+    }
+
+    /// A Vtx path by 4cc from the generator's scope: its GPU reference (first vec4 + 1) and p(0); None when it does
+    /// not resolve or has fewer than two points.
+    pub fn path_ref(&mut self, lib: usize, from: usize, name: u32) -> Option<(u32, Vec3)> {
+        let r = self.resolve(lib, from, kind::VTX, name)?;
+        if !self.path_id.contains_key(&r) {
+            let segs = spline::build(&spline::points(self.libs[r.0].data(r.1)))?;
+            let at = self.path_data.len() as u32 + 1;
+            self.path_data.extend(spline::gpu_words(&segs));
+            self.path_id.insert(r, (at, segs));
+            self.paths_dirty = true;
+        }
+        let (at, segs) = &self.path_id[&r];
+        Some((*at, spline::eval(segs, 0.0)))
+    }
+
+    /// The generator's element update stream in the ops buffer: (first word, slot of its op 0x02).
+    pub fn stream(&mut self, src: Ref) -> (u32, Option<usize>) {
+        if let Some(&s) = self.stream_at.get(&src) {
+            return s;
+        }
+        let Some(g) = self.libs[src.0].generator(src.1) else { return (0, None) };
+        let at = self.ops.len() as u32;
+        let mut op2 = None;
+        for op in &g.streams[2] {
+            if op.code == 0x02 && op2.is_none() {
+                op2 = Some(op.slot as usize);
+            }
+            self.ops.extend_from_slice(&op.words);
+        }
+        self.ops.push(0);
+        self.stream_at.insert(src, (at, op2));
+        self.ops_dirty = true;
+        (at, op2)
+    }
+
+    /// FUN_10048380: the slot of the first `code` op in the generator's element update stream.
+    pub fn update_op_slot(&self, src: Ref, code: u8) -> Option<usize> {
+        self.libs[src.0].generator(src.1)?.streams[2].iter().find(|o| o.code == code).map(|o| o.slot as usize)
+    }
+
+    /// FUN_10074570: a texture name from a resource's folder (16 bytes), else by its last 8 bytes among the
+    /// zone's and DAT 0's `syst/effe` textures (newest first: the zone's).
+    fn texture(&mut self, lib: usize, node: usize, name: &str) -> Option<(usize, usize)> {
+        if let Some(i) = self.libs[lib].find_texture(node, name) {
+            return self.libs[lib].texture_at(i).map(|t| (lib, t));
+        }
+        for l in [self.zone, self.global].into_iter().flatten() {
+            let hit =
+                self.libs[l].find_texture_tail(name).filter(|&i| Some(l) == self.zone || self.libs[l].in_syst_effe(i));
+            if let Some(i) = hit {
+                return self.libs[l].texture_at(i).map(|t| (l, t));
+            }
+        }
+        None
+    }
+
+    /// A mesh's GPU id, parsing it and resolving its textures on first use.
+    pub fn mesh(&mut self, r: Ref) -> Option<u32> {
+        if let Some(&id) = self.mesh_id.get(&r) {
+            return Some(id);
+        }
+        let keys = self.zone_keys.clone()?;
+        let names: Vec<Option<String>> =
+            self.libs[r.0].mesh(r.1, &keys)?.groups.iter().map(|g| g.name.clone()).collect();
+        let textures: Vec<Option<(usize, usize)>> =
+            names.iter().map(|n| n.as_ref().and_then(|n| self.texture(r.0, r.1, n))).collect();
+        if let Some(m) = self.libs[r.0].meshes.get_mut(&r.1) {
+            for (g, t) in m.groups.iter_mut().zip(textures) {
+                g.texture = t;
+            }
+        }
+        let id = self.meshes.len() as u32;
+        self.meshes.push(r);
+        self.mesh_id.insert(r, id);
+        self.new_meshes.push(id);
+        Some(id)
+    }
+
+    /// A D3a's GPU id; its texture resolves as a mesh's, and texel UVs are divided by the texture size.
+    pub fn sprite(&mut self, r: Ref) -> Option<u32> {
+        if let Some(&id) = self.sprite_id.get(&r) {
+            return Some(id);
+        }
+        let name = self.libs[r.0].sprite(r.1)?.name.clone();
+        let tex = self.texture(r.0, r.1, &name);
+        let size = tex.map(|(l, t)| (self.libs[l].textures[t].width as f32, self.libs[l].textures[t].height as f32));
+        let s = self.libs[r.0].sprites.get_mut(&r.1)?;
+        s.texture = tex;
+        if s.texel_uv
+            && let Some((w, h)) = size
+        {
+            for v in &mut s.verts {
+                v.uv = [v.uv[0] / w, v.uv[1] / h];
+            }
+            s.texel_uv = false;
+        }
+        let id = self.sprites.len() as u32;
+        let base = self.sprite_verts.len() as u32;
+        self.sprite_verts.extend(s.verts.iter().map(|v| bytemuck::cast::<lib::MeshVertex, [u32; 9]>(*v)));
+        let first = self.sprite_frame_table.len() as u32;
+        self.sprite_frame_table.extend(s.frames.iter().map(|&(start, q)| [base + start, q]));
+        self.sprite_at.push((first, s.frames.iter().map(|f| f.1).max().unwrap_or(0)));
+        self.sprites_dirty = true;
+        self.sprites.push(r);
+        self.sprite_id.insert(r, id);
+        self.new_sprites.push(id);
+        Some(id)
+    }
+
+    /// A D3b's GPU id; its texture resolves as a mesh's.
+    pub fn morph(&mut self, r: Ref) -> Option<u32> {
+        if let Some(&id) = self.morph_id.get(&r) {
+            return Some(id);
+        }
+        let name = self.libs[r.0].morph(r.1)?.name.clone();
+        let tex = self.texture(r.0, r.1, &name);
+        let m = self.libs[r.0].morphs.get_mut(&r.1)?;
+        m.texture = tex;
+        let id = self.morphs.len() as u32;
+        let at = self.morph_data.len() as u32;
+        self.morph_data.extend([m.k, m.v, m.n, m.t]);
+        self.morph_data.extend(m.corners.iter().flatten());
+        self.morph_data.extend(m.positions.iter().flatten().map(|f| f.to_bits()));
+        self.morph_data.extend(&m.normals);
+        self.morph_at.push(at);
+        self.morphs_dirty = true;
+        self.morphs.push(r);
+        self.morph_id.insert(r, id);
+        self.new_morphs.push(id);
+        Some(id)
+    }
+
+    pub fn morph_data_of(&self, id: u32) -> Option<&lib::Morph> {
+        let r = self.morphs[id as usize];
+        self.libs[r.0].morphs.get(&r.1)
+    }
+
+    pub fn sprite_is_flare(&self, id: u32) -> bool {
+        let r = self.sprites[id as usize];
+        self.libs[r.0].sprites.get(&r.1).is_some_and(|s| s.flare)
+    }
+
+    pub fn sprite_frames(&self, id: u32) -> u32 {
+        let r = self.sprites[id as usize];
+        self.libs[r.0].sprites.get(&r.1).map_or(0, |s| s.frames.len() as u32)
+    }
+
+    pub fn miss(&mut self, lib: usize, from: usize, name: u32, k: u8) {
+        if let Some(a) = self.audit.as_mut() {
+            *a.missing.entry((self.libs[lib].file_id, name, k)).or_default() += 1;
+        }
+        if self.missed.insert((lib, name)) {
+            log::debug!(
+                "effects: DAT {} {}: {} (kind {k:#x}) not found",
+                self.libs[lib].file_id,
+                self.libs[lib].tree.nodes[from].name(),
+                String::from_utf8_lossy(&name.to_le_bytes())
+            );
+        }
+    }
+
+    /// Logs an op of `stream` (0 generator, 1 emission) once.
+    pub fn unhandled(&mut self, stream: u8, code: u8) {
+        if let Some(a) = self.audit.as_mut() {
+            *a.stream.entry((stream, code)).or_default() += 1;
+        }
+        if self.logged.insert((stream, code)) {
+            log::debug!("effects: stream {stream} op {code:#04x} not handled");
+        }
+    }
+}
+
+/// Effects::lamp_scan's findings: glow positions, data lights (position, table slot), shells found.
+#[derive(Default, Debug)]
+pub struct LampScan {
+    /// The glows' positions and colours (BGRA, 0x80 = 1.0).
+    pub glows: Vec<(Vec3, u32)>,
+    pub lights: Vec<(Vec3, u32)>,
+    pub shells: usize,
+}
+
+/// Every running generator and live element.
+pub struct Effects {
+    pub reg: Registry,
+    pub insts: Vec<Option<Instance>>,
+    /// The instance slots of each generator, ascending (kept by `start` and `kill`) for `template_inst`.
+    by_src: HashMap<Ref, Vec<usize>>,
+    pub elems: Vec<Option<ElemCpu>>,
+    free: Vec<u32>,
+    pub writes: Vec<Write>,
+    pub slots: Vec<[u32; SLOT_WORDS]>,
+    slot_free: Vec<u32>,
+    /// Slots borrowed by op-0x45 elements (count), and those whose instance has gone.
+    lent: HashMap<u32, u32>,
+    orphans: Vec<u32>,
+    serial: u32,
+    rng: math::Rng,
+    zone_lib: Option<usize>,
+    /// The loaded sub-area's library.
+    sub_lib: Option<usize>,
+    /// Free runs of the particle pool (first, count).
+    part_free: Vec<(u32, u32)>,
+    /// Weather objects (YmCombineWeather), oldest first.
+    weathers: Vec<WeatherSet>,
+    weather_serial: u32,
+    tasks: Vec<Option<sched::Task>>,
+    /// The tasks being run, outermost first (their slots are empty meanwhile; a task an op creates runs inside its
+    /// creator's step).
+    stepping: Vec<usize>,
+    dolls: Vec<tasks::Doll>,
+    pending: Vec<tasks::Pending>,
+    /// FUN_1008c480: the wanted sub-animation while an `init` start (on_init) takes its first step.
+    sub_now: Option<(u32, u8)>,
+    /// Actor +0xa0: the cast 4cc stored by FUN_10083d60.
+    casting: HashMap<u32, u32>,
+    sched_cache: HashMap<Ref, std::rc::Rc<Vec<sched::SOp>>>,
+    index: Option<Arc<crate::dat::DatIndex>>,
+    loading: HashSet<u32>,
+    /// Files whose load failed: lookups pass them by instead of waiting.
+    failed: HashSet<u32>,
+    load_tx: std::sync::mpsc::Sender<(u32, Option<Library>)>,
+    load_rx: std::sync::mpsc::Receiver<(u32, Option<Library>)>,
+    /// Actors whose model generators run, by the model files they were started for.
+    models: HashMap<u32, Vec<u32>>,
+    /// Actors whose model is hidden (+0xb2 bit 1, FUN_10085a50 ran).
+    hidden_actors: HashSet<u32>,
+    /// DAT_1065cb18 (the time of day in 1/60 Vana'diel seconds) and DAT_1065cb0c (its change this frame), for op 0x52.
+    vana_now: i32,
+    vana_dt: f32,
+    vana_seen: bool,
+    /// Action contexts of looping tasks that restarted: retail drops them without the release, so their rest never
+    /// prints.
+    leaked: Vec<std::rc::Rc<std::cell::RefCell<sched::ActionCtx>>>,
+    /// Scheduler motions for the client to play: op 0x05 (FUN_100cb8e0), or None for op 0x28 (back to the stance).
+    pub motions: Vec<(u32, Option<crate::dat::sched::Motion>)>,
+    /// The model colour for the client (FUN_1005f6c0 channel 0: ops 0x29 / 0x2a / 0xa0; 0x88, 0xb1 / 0xb2).
+    pub fades: Vec<ColorOp>,
+    /// The running channel-0 drives (CMoActorColorDriveTask), children of their scheduler task.
+    color_drives: Vec<ColorDrive>,
+    /// Scheduler ops 0x6f / 0x70's ramps (FUN_10060990), children of their scheduler task.
+    light_ramps: Vec<LightRamp>,
+    /// The path and rotation drives (ops 0x26 / 0x27, 0xa9 / 0xaa), children of their scheduler task, and the poses
+    /// they set this frame for the client (ship model actors take them); the fast-forward's overshoot for a new drive.
+    drives: Vec<drive::Drive>,
+    rot_drives: Vec<drive::RotDrive>,
+    /// Op 0x62's turns, one per actor (a new one replaces +0x870 / +0x874).
+    face_drives: Vec<drive::FaceDrive>,
+    pub actor_poses: HashMap<u32, drive::ActorPose>,
+    seq_over: f32,
+    /// Op 0x6e for the client: actor, ticks, units a tick along its facing.
+    pub self_moves: Vec<(u32, f32, f32)>,
+    /// Ops 0x9e / 0x9f / 0xad for the client: actor, which (0 arrow +0x8a6, 1 name plate +0x8a7, 2 +0x8a8), point.
+    pub anchor_points: Vec<(u32, u8, u8)>,
+    /// Op 0x9a for the client: actor, entity +0x130 bit 1.
+    pub gens_off: Vec<(u32, bool)>,
+    /// Ops 0x20 / 0x1f / 0x56 / 0x59 / 0x07 / 0x08's holds: (owner task uid, actor, HOLD_* kind, ticks left). They are
+    /// child sub-tasks of their scheduler task, so they end with their time or their task.
+    pub(crate) task_holds: Vec<(u64, u32, u8, f32)>,
+    /// The HOLD_* kinds the live task holds put on each actor this frame.
+    pub held: HashMap<u32, u8>,
+    /// Ops 0x2e (actor1's move input, our player only) and 0x2f (actor1's facing) locked for ticks.
+    pub locks: Vec<(u32, u8, f32)>,
+    /// Op 0x2e: (owner task uid, actor1, ticks left); the actors whose move input is off this frame, and those whose
+    /// root ended (their status motion restarts).
+    roots: Vec<(u64, u32, f32)>,
+    pub rooted: HashSet<u32>,
+    pub status_restarts: Vec<u32>,
+    /// Ops 0x75 / 0xa3: an actor's `wepN` meshes hidden or shown.
+    pub weapons: Vec<WeaponOp>,
+    wep_timers: Vec<equip::WepTimer>,
+    /// fx/equip.rs: per actor, and the calls waiting to run.
+    equip: HashMap<u32, EquipState>,
+    equip_calls: Vec<(u32, EquipCall)>,
+    /// Config 0xbe == 1 (Misc. 3 "weapon effect" Off): `!w01` / `!w11` are skipped.
+    pub weapon_effect_off: bool,
+    /// FUN_10002d80: Misc.'s weather density (config 0x3b as a float, DAT_10456a68), or 1.0 while an event forces it
+    /// (DAT_10487ef5, event op 0xab subs 9 / 10).
+    pub weather_density: f32,
+    pub releases: Vec<u32>,
+    /// Load holds taken here (op 0x80's skillchain burst, FUN_100a8e30); released like the action's.
+    pub loads: Vec<u32>,
+    /// Op 0x25 / 0x21 hit reactions (FUN_100cdd60).
+    pub reacts: Vec<React>,
+    /// Op 0x5a / 0x5b guard and parry overlays (FUN_100cde70 / FUN_100cdf00).
+    pub guards: Vec<Guard>,
+    /// Op 0x5e pushes (FUN_100aa940), and op 0xbf's waiting for their delay (ticks left).
+    pub knocks: Vec<Knock>,
+    knocks_later: Vec<(f32, Knock)>,
+    /// DAT_1035bc60: knockback (speed per tick, decay, ticks) by level.
+    knock_table: [[f32; 3]; 8],
+    /// Model +0x800 / +0x804: the footstep folder an actor's steps search (the zone's, or its model file's once a
+    /// name was missing there) and its set; op 0x78 and the wading ripple read it too.
+    foot_folder: HashMap<u32, Foot>,
+    /// +0x9e8 / +0x808: the actor's wading ripple `i900` (None: the flag set without a clone).
+    wading: HashMap<u32, Option<usize>>,
+    /// Op 0x99: actor1's entity scale (+0x204).
+    pub entity_scales: Vec<(u32, f32)>,
+    /// Messages that print now: (action, record, which: 0 main (op 0x2b, the action's end), 1 proc / 2 react (op 0x71)).
+    pub action_prints: Vec<(crate::net::action::Action, usize, u8)>,
+    /// Motion files to put on an actor's list (FUN_100d22a0 kind 6: weapon-skill files).
+    pub motion_files: Vec<(u32, Vec<u32>)>,
+    /// Op 0x05 motions found in their scheduler's file (FUN_10057000 case 5 looks there before the actor's
+    /// files): (actor, file) to put on the actor, and those to take off once no live task owns them.
+    pub effect_motions: Vec<(u32, u32)>,
+    /// The last frame's inputs, for attachments made between frames (the eye for point 0x33, the camera for 7 / 8).
+    last_frame: Option<Frame>,
+    /// Scheduler ops 0x40..0x47 / 0x54 / 0x55: each actor's shine overlay and the timed drives changing it.
+    shine: HashMap<u32, Shine>,
+    shine_drives: Vec<ShineDrive>,
+    next_drive: u64,
+    /// Op 0x88's colour guards: (owner task uid, actor, ticks left).
+    color_guards: Vec<(u64, u32, f32)>,
+    /// Op 0x2c's after-images by GPU slot (they outlive their scheduler task), and whether any changed this frame.
+    pub trails: Vec<Option<trail::Trail>>,
+    pub trails_dirty: bool,
+    /// Op 0xb5's blink holds: (owner task uid, actor1, ticks left).
+    blink_holds: Vec<(u64, u32, f32)>,
+    /// Actors that do not blink this frame (actor +0x8aa != 0).
+    pub no_blink: HashSet<u32>,
+    /// Op 0x7a's pins: (owner task uid, actor1, actor2, point, offset, ticks left).
+    pins: Vec<(u64, u32, u32, u16, Vec3, f32)>,
+    /// Where each pinned actor stands this frame, and its yaw (atan2(-z, x) of its facing) for ordinary points.
+    pub pinned: HashMap<u32, (Vec3, Option<f32>)>,
+    pub effect_motions_done: Vec<(u32, u32)>,
+    owned_motions: Vec<(u64, u32, u32)>,
+    /// Skill `main` tasks (uid, caster), and the casters whose skill files go now (0x100a8db0).
+    skill_mains: Vec<(u64, u32)>,
+    pub skill_files_done: Vec<u32>,
+    /// Door part moves from scheduler ops 0x0c / 0x0d this frame, for the renderer.
+    pub door_moves: Vec<DoorMove>,
+    /// Scheduler ops 0x0f / 0x72 / 0x0e for the screen (client/event.rs Screen): code, the RGBA bytes @8, f32 @0xc
+    /// (0x0e's zoom), dur x speed.
+    pub screen_ops: Vec<(u8, [u8; 4], f32, f32)>,
+    /// Camera ops (0x04 / 0x81) of an event's tasks this frame, for the cutscene camera (client/event.rs Screen).
+    pub event_cameras: Vec<EventCamera>,
+    /// Ops 0x10 (crossfade ticks) and 0xb0 (camera path 4cc to end) of an event's tasks this frame.
+    pub event_crosses: Vec<f32>,
+    /// Ops 0x7c / 0x7d this frame.
+    pub env_ops: Vec<EnvOp>,
+    pub event_path_stops: Vec<u32>,
+    /// The running task's event: the tasks its op creates take it (tasks.rs run_op).
+    spawn_event: bool,
+    /// Ops 0x79 / 0x8c / 0xa4 / 0xa5: actor1's battle / idle / run / walk motion set (motion::MotionNames::apply).
+    pub motion_sets: Vec<(u32, u8, u32)>,
+    /// Op 0x89 (FUN_1005f450): actor1's head-look off (drawobj +0x840 bit 1) for these ticks (dur x speed, truncated).
+    pub look_holds: Vec<(u32, f32)>,
+    /// Op 0xba (FUN_100d5430): actor1's drawobj +0x840 bit 23 on / off; FUN_100c83c0 then leaves its status motion alone.
+    pub motion_locks: Vec<(u32, bool)>,
+    /// Ops 0xa7 / 0xa8 / 0x9b (vt+0x324 FUN_100a4a70): actor1's drawn override for slot 0 (main) / 1 (sub), on or off,
+    /// and for 0x9b the ticks it holds (0 untimed).
+    pub draw_overrides: Vec<(u32, usize, bool, f32)>,
+    /// Op 0xbc (FUN_10061c70 / FUN_100d53f0): actor1's footstep counter +0x8ab held up for these ticks.
+    pub step_holds: Vec<(u32, f32)>,
+    /// Op 0xb6 (FUN_1005e7e0): actor1's drawobj +0x840 bit 22 = u32 @8 bit 0 (FUN_100c83c0 then shows wep0 / wep1).
+    pub weapon_shows: Vec<(u32, bool)>,
+    /// Op 0xb9 (vt+0x150 FUN_100d6f50): actor1's +0x8ac bit 1 = u32 @8 != 0, the camera rig (FUN_100cce60).
+    pub camera_rigs: Vec<(u32, bool)>,
+    /// Op 0xc1 (vt+0x22c on actor 1 through its dolls, FUN_10062770): model +0xa8 = u32 @8 (lit by the scenery).
+    pub bg_lits: Vec<(u32, bool)>,
+    /// CMoSkeletonElem models: live ones, new ones for the client (actor id, file id, the folder's byte range), each frame's
+    /// place (id, world position, rotation, scale, the element's colour word) and the gone.
+    fx_models: Vec<FxModel>,
+    model_seq: u32,
+    pub model_spawns: Vec<(u32, u32, u32, u32)>,
+    pub model_places: Vec<(u32, Vec3, Vec3, Vec3, u32)>,
+    pub model_drops: Vec<u32>,
+    /// Scheduler ops 0xc0 / 0xc3 (an area's `@ini`): the zone's clock override (+0x1c8, FUN_10182c40: the lighting's
+    /// time while online) and its sun / moon yaw in degrees (+0x1cc, FUN_10180700); reset with each zone.
+    pub zone_clock: Option<u32>,
+    pub zone_yaw: i16,
+    /// Scheduler op 0xb4: (actor, the plate's lift in y, ticks) for client/mod.rs.
+    pub plate_lifts: Vec<(u32, f32, f32)>,
+    /// Op 0xab: actor1's entity +0x130 bit 4 (its motion bases reset at each model creation).
+    pub base_resets: Vec<(u32, bool)>,
+    /// Op 0xac: actor1's death scheduler pick (dead / 1ead / 2ead / 3ead).
+    pub death_picks: Vec<(u32, u8)>,
+    /// Op 0xb7: actor1's race code (entity +0xef), the per-race skill files' pick.
+    pub races: Vec<(u32, u8)>,
+    /// The voyage matrix (DAT_10631ed0, FUN_10178b30) attach modes 0x14 / 0x15 take: identity off a ship's voyage.
+    pub voyage: Mat4,
+    pub lift_moves: Vec<LiftMove>,
+    /// W+0x1bc: the camera is under a covered object (FUN_101845c0).
+    covered: bool,
+    /// Update op 0x60's screen flash from the last readback: the bytes the elements add to renderer +0x324..+0x326
+    /// (FUN_10014f70; B, G, R as in the element colour), a frame or two late.
+    pub flash: [u8; 3],
+    /// Sound elements and scheduler sounds; this frame's commands for the audio; voices the audio reports alive.
+    sounds: Vec<sound::Sound>,
+    /// Op 0xa6's fade of the current stream: target level, total and remaining ticks.
+    stream_fade: Option<(f32, f32, f32)>,
+    /// Config 0x92 (the Effects filter) and whether the player's status is 1 or 3 (FUN_100ac4b0's bit-0 gate).
+    pub filter: (u32, bool),
+    /// The player is busy (FUN_10087070(0): an event, frozen, charmed, fishing or digging): op 0x5f ignores the
+    /// "Screen shaking" filter.
+    pub busy: bool,
+    /// This frame's op 0x5f camera kicks (v x factor, in retail's element order: `run_order`) and rumble (the sum of
+    /// v, the pad's DAT_10455c20 +0xdb4).
+    pub quakes: Vec<f32>,
+    pub rumble: i32,
+    /// Ticks run, for `ElemCpu::born`.
+    ticks: u32,
+    /// An element's update is running (the lives, an element's clone): elements made now are `ElemCpu::late`.
+    in_elem: bool,
+    /// This tick's lives have run: elements made now by a generator's task get their first update after the
+    /// generators (`first_run`), as the walk reaches bucket 0xb after them.
+    lives_done: bool,
+    first_run: Vec<(u32, u32)>,
+    /// Bumped whenever a ground projection's faces change (the renderer re-uploads them).
+    pub decal_version: u64,
+    /// Footstep dust to start next tick: generator and actor; actors that left a footprint.
+    dust: Vec<(Ref, u32)>,
+    prints: Vec<u32>,
+    pub sound_cmds: Vec<sound::SoundCmd>,
+    alive: HashSet<u32>,
+    next_voice: u32,
+    /// High bits of this engine's voice handles, so engines sharing the mixer never reuse one another's.
+    voice_base: u32,
+    /// FUN_10036460's start list this retail frame: ticks into the frame, SeSep resources started.
+    start_window: (f32, Vec<(usize, usize)>),
+    /// DAT_104638f4: the 2239 / 2063 voice playing.
+    solo: Option<u32>,
+}
+
+/// One weather's generators (FUN_10183780): its tag, crossfade length and what is left of it (seconds).
+struct WeatherSet {
+    serial: u32,
+    tag: [u8; 4],
+    duration: f32,
+    remaining: f32,
+}
+
+/// Elements and batched particles the GPU buffers hold.
+pub const MAX_ELEMS: usize = 8192;
+/// The counter part of an effect voice handle; the bits above it are the engine's base (set_voice_base).
+pub const VOICE_MASK: u32 = 0x00ff_ffff;
+pub const MAX_PARTS: usize = 65536;
+
+impl Default for Effects {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Effects {
+    pub fn new() -> Self {
+        let (load_tx, load_rx) = std::sync::mpsc::channel();
+        Self {
+            reg: Registry::new(),
+            insts: Vec::new(),
+            by_src: HashMap::new(),
+            elems: Vec::new(),
+            free: Vec::new(),
+            writes: Vec::new(),
+            slots: Vec::new(),
+            slot_free: Vec::new(),
+            lent: HashMap::new(),
+            orphans: Vec::new(),
+            serial: 0,
+            rng: math::Rng::new(0x5eed_f00d),
+            zone_lib: None,
+            part_free: vec![(0, MAX_PARTS as u32)],
+            weathers: Vec::new(),
+            weather_serial: 0,
+            tasks: Vec::new(),
+            stepping: Vec::new(),
+            dolls: Vec::new(),
+            pending: Vec::new(),
+            sub_now: None,
+            casting: HashMap::new(),
+            sched_cache: HashMap::new(),
+            index: None,
+            loading: HashSet::new(),
+            failed: HashSet::new(),
+            load_tx,
+            load_rx,
+            hidden_actors: HashSet::new(),
+            vana_now: 0,
+            vana_dt: 0.0,
+            vana_seen: false,
+            leaked: Vec::new(),
+            models: HashMap::new(),
+            motions: Vec::new(),
+            fades: Vec::new(),
+            color_drives: Vec::new(),
+            light_ramps: Vec::new(),
+            drives: Vec::new(),
+            rot_drives: Vec::new(),
+            face_drives: Vec::new(),
+            actor_poses: HashMap::new(),
+            seq_over: 0.0,
+            self_moves: Vec::new(),
+            anchor_points: Vec::new(),
+            gens_off: Vec::new(),
+            task_holds: Vec::new(),
+            held: HashMap::new(),
+            locks: Vec::new(),
+            roots: Vec::new(),
+            rooted: HashSet::new(),
+            status_restarts: Vec::new(),
+            weapons: Vec::new(),
+            wep_timers: Vec::new(),
+            equip: HashMap::new(),
+            equip_calls: Vec::new(),
+            weapon_effect_off: false,
+            weather_density: 1.0,
+            releases: Vec::new(),
+            loads: Vec::new(),
+            reacts: Vec::new(),
+            guards: Vec::new(),
+            knocks: Vec::new(),
+            knocks_later: Vec::new(),
+            knock_table: [[0.0; 3]; 8],
+            foot_folder: HashMap::new(),
+            wading: HashMap::new(),
+            entity_scales: Vec::new(),
+            action_prints: Vec::new(),
+            motion_files: Vec::new(),
+            effect_motions: Vec::new(),
+            last_frame: None,
+            shine: HashMap::new(),
+            shine_drives: Vec::new(),
+            next_drive: 0,
+            color_guards: Vec::new(),
+            pins: Vec::new(),
+            blink_holds: Vec::new(),
+            trails: Vec::new(),
+            trails_dirty: false,
+            no_blink: HashSet::new(),
+            pinned: HashMap::new(),
+            effect_motions_done: Vec::new(),
+            owned_motions: Vec::new(),
+            skill_mains: Vec::new(),
+            skill_files_done: Vec::new(),
+            door_moves: Vec::new(),
+            screen_ops: Vec::new(),
+            event_cameras: Vec::new(),
+            event_crosses: Vec::new(),
+            env_ops: Vec::new(),
+            event_path_stops: Vec::new(),
+            spawn_event: false,
+            motion_sets: Vec::new(),
+            look_holds: Vec::new(),
+            motion_locks: Vec::new(),
+            draw_overrides: Vec::new(),
+            step_holds: Vec::new(),
+            weapon_shows: Vec::new(),
+            camera_rigs: Vec::new(),
+            bg_lits: Vec::new(),
+            fx_models: Vec::new(),
+            model_seq: 0,
+            model_spawns: Vec::new(),
+            model_places: Vec::new(),
+            model_drops: Vec::new(),
+            zone_clock: None,
+            zone_yaw: 0,
+            plate_lifts: Vec::new(),
+            base_resets: Vec::new(),
+            death_picks: Vec::new(),
+            races: Vec::new(),
+            voyage: Mat4::IDENTITY,
+            lift_moves: Vec::new(),
+            sub_lib: None,
+            covered: false,
+            flash: [0; 3],
+            sounds: Vec::new(),
+            stream_fade: None,
+            filter: (0, false),
+            busy: false,
+            quakes: Vec::new(),
+            rumble: 0,
+            ticks: 0,
+            in_elem: false,
+            lives_done: false,
+            first_run: Vec::new(),
+            decal_version: 0,
+            dust: Vec::new(),
+            prints: Vec::new(),
+            sound_cmds: Vec::new(),
+            alive: HashSet::new(),
+            next_voice: 0,
+            voice_base: 0,
+            start_window: (0.0, Vec::new()),
+            solo: None,
+        }
+    }
+
+    pub fn set_knock_table(&mut self, t: [[f32; 3]; 8]) {
+        self.knock_table = t;
+    }
+
+    pub fn set_keys(&mut self, keys: Arc<zone::Keys>) {
+        self.reg.zone_keys = Some(keys);
+    }
+
+    /// DAT 0 (the shared meshes and keyframes every file falls back to).
+    pub fn set_global(&mut self, lib: Library) {
+        if self.reg.global.is_none() {
+            self.reg.add(lib);
+        }
+        // FUN_10072ed0(0) keeps DAT 27 (the damage number schedulers) resident with DAT 0.
+        self.preload(&[27]);
+    }
+
+    /// The zone library's registry index.
+    pub fn zone_lib(&self) -> Option<usize> {
+        self.zone_lib
+    }
+
+    pub fn has_global(&self) -> bool {
+        self.reg.global.is_some()
+    }
+
+    /// A new zone: the old zone's instances go, and its auto-start world generators start (FUN_10046d30).
+    /// Returns the library's registry index, for [`Effects::switch_zone`].
+    pub fn load_zone(&mut self, lib: Library) -> usize {
+        // A zone come back to keeps its library: another copy (and its meshes and textures on the GPU) per visit grew
+        // for the whole session. Its caches are the same either way.
+        let l = self.reg.lib_of(lib.file_id).unwrap_or_else(|| self.reg.add(lib));
+        self.switch_zone(l, false);
+        l
+    }
+
+    /// An event area (op 0x34) or the zone again (op 0x35) by its registered library: only the old scene's effects go.
+    pub fn load_area(&mut self, lib: Library) -> usize {
+        let l = self.reg.lib_of(lib.file_id).unwrap_or_else(|| self.reg.add(lib));
+        self.switch_zone(l, true);
+        l
+    }
+
+    /// Makes an already registered library the zone's; `area`: an event's scene swap (op 0x34 / 0x35).
+    pub fn switch_zone(&mut self, l: usize, area: bool) {
+        // FUN_1017b1e0 -> FUN_100446a0: every clone of the old zone's and sub-area's generators goes, whatever started it.
+        let old = [self.zone_lib, self.sub_lib];
+        if area {
+            // The event's actors and their effects stay (op 0x34 keeps the event's tasks: Yve'noile's sg01 shows in
+            // Ro'Maeve); the old scene's tasks, weathers and footstep folder go.
+            let scene = |lib: usize| old.contains(&Some(lib));
+            for i in 0..self.insts.len() {
+                if self.insts[i].as_ref().is_some_and(|x| {
+                    scene(x.src.0) || matches!(x.owner, Owner::Zone | Owner::SubArea | Owner::Weather(_))
+                }) {
+                    self.kill(i);
+                }
+            }
+            for t in self.tasks.iter_mut() {
+                if t.as_ref().is_some_and(|t| scene(t.res.0)) {
+                    *t = None;
+                }
+            }
+            self.weathers.clear();
+            self.wading.clear();
+            self.foot_folder.clear();
+            self.sub_lib = None;
+            (self.zone_clock, self.zone_yaw) = (None, 0);
+            self.zone_lib = Some(l);
+            self.reg.zone = Some(l);
+            self.start_zone(l);
+            return;
+        }
+        // Actors are rebuilt at zone-in: no cast carries over (inf).
+        self.casting.clear();
+        // The actors are rebuilt and the tasks cleared too, so their instances go with them (trusts gone with the zone
+        // left theirs at the identity: the new zone's origin).
+        for i in 0..self.insts.len() {
+            if self.insts[i].is_some() {
+                self.kill(i);
+            }
+        }
+        self.leaked.clear();
+        self.weathers.clear();
+        self.wading.clear();
+        self.foot_folder.clear();
+        self.tasks.clear();
+        self.drives.clear();
+        self.rot_drives.clear();
+        self.trails.clear();
+        self.trails_dirty = true;
+        self.dolls.clear();
+        self.pending.clear();
+        self.models.clear();
+        self.shine.clear();
+        self.shine_drives.clear();
+        self.color_drives.clear();
+        self.color_guards.clear();
+        self.hidden_actors.clear();
+        self.zone_lib = Some(l);
+        self.reg.zone = Some(l);
+        (self.zone_clock, self.zone_yaw) = (None, 0);
+        // FUN_100361d0: the zone reset forgets the stream.
+        self.stream_fade = None;
+        for s in self.sounds.iter_mut() {
+            s.cur_stream = false;
+        }
+        self.start_zone(l);
+    }
+
+    /// The zone's auto-start world generators and self-starting schedulers (FUN_10046d30, FUN_10073430's link pass).
+    fn start_zone(&mut self, l: usize) {
+        let weat = crate::dat::generator::fourcc("weat");
+        let starts: Vec<usize> = self.reg.libs[l]
+            .gens
+            .iter()
+            .filter(|g| g.flags & 0x1000 != 0 && matches!(g.attach_mode(), 0 | 0xe | 0xf | 0x14))
+            .filter(|g| !self.reg.libs[l].tree.path(g.node).contains(&weat))
+            .map(|g| g.node)
+            .collect();
+        log::info!(
+            "effects: zone DAT {}: {} generators, {} start at load",
+            self.reg.libs[l].file_id,
+            self.reg.libs[l].gens.len(),
+            starts.len()
+        );
+        // What the loader parsed goes to the GPU with the zone (render/effects.rs upload_pending).
+        let meshes: Vec<usize> = self.reg.libs[l].meshes.keys().copied().collect();
+        let sprites: Vec<usize> = self.reg.libs[l].sprites.keys().copied().collect();
+        for n in meshes {
+            self.reg.mesh((l, n));
+        }
+        for n in sprites {
+            self.reg.sprite((l, n));
+        }
+        for node in starts {
+            self.start((l, node), Owner::Zone);
+        }
+        // FUN_10073430's link pass: the zone's self-starting schedulers, `weat` ones too (the weather that follows
+        // replaces those).
+        self.start_auto(l, None);
+    }
+
+    /// A sub-area DAT (an interior) loaded beside the zone: the old one's generators go and its auto-start world
+    /// generators start, as a zone's do *(inf: the chunk loader starts them the same way)*. A file loaded before is
+    /// reused.
+    pub fn load_sub_area(&mut self, lib: Library) {
+        self.drop_sub_area();
+        let l = self.reg.lib_of(lib.file_id).unwrap_or_else(|| self.reg.add(lib));
+        self.sub_lib = Some(l);
+        let weat = crate::dat::generator::fourcc("weat");
+        let starts: Vec<usize> = self.reg.libs[l]
+            .gens
+            .iter()
+            .filter(|g| g.flags & 0x1000 != 0 && matches!(g.attach_mode(), 0 | 0xe | 0xf | 0x14))
+            .filter(|g| !self.reg.libs[l].tree.path(g.node).contains(&weat))
+            .map(|g| g.node)
+            .collect();
+        log::info!(
+            "effects: sub-area DAT {}: {} generators, {} start at load",
+            self.reg.libs[l].file_id,
+            self.reg.libs[l].gens.len(),
+            starts.len()
+        );
+        let meshes: Vec<usize> = self.reg.libs[l].meshes.keys().copied().collect();
+        let sprites: Vec<usize> = self.reg.libs[l].sprites.keys().copied().collect();
+        for n in meshes {
+            self.reg.mesh((l, n));
+        }
+        for n in sprites {
+            self.reg.sprite((l, n));
+        }
+        for node in starts {
+            self.start((l, node), Owner::SubArea);
+        }
+        // Parsed again at each load, so its self-starting schedulers start again.
+        self.start_auto(l, None);
+    }
+
+    /// FUN_10072290 / FUN_100724c0: scheduler `name` inside the folder named `folder` (a door id) of the zone or the
+    /// sub-area, run with actor1 = actor2 = the door; false when there is none.
+    pub fn door_scheduler(&mut self, actor: u32, folder: u32, name: u32) -> bool {
+        let (folder, name) = (folder.to_le_bytes(), name.to_le_bytes());
+        for l in [self.zone_lib, self.sub_lib].into_iter().flatten() {
+            let tree = &self.reg.libs[l].tree;
+            let Some(f) = tree.nodes.iter().position(|n| n.kind == kind::FOLDER && n.name == folder) else { continue };
+            let inside = |mut i: usize| loop {
+                match tree.nodes[i].parent {
+                    Some(p) if p == f => return true,
+                    Some(p) => i = p,
+                    None => return false,
+                }
+            };
+            if let Some(s) = tree
+                .nodes
+                .iter()
+                .enumerate()
+                .position(|(i, n)| n.kind == kind::SCHEDULER && n.name == name && inside(i))
+            {
+                let who = sched::Who::Actor(actor);
+                self.spawn_task((l, s), who, who, None, 1.0, None);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// FUN_100d64d0 / FUN_100d6550: on water near the eye, `i900` from the actor's footstep folder (known from an
+    /// earlier frame, +0x800) cloned once on (actor, actor) and left running; off water it goes with its elements.
+    /// `folder`: this frame's fses / fser choice (Some(rain)), stored after the check as retail does.
+    pub fn wade(&mut self, id: u32, water: bool, near: bool, folder: Option<bool>) {
+        if water && near && !self.wading.contains_key(&id) {
+            let found = self
+                .foot_folder
+                .get(&id)
+                .and_then(|f| Some((f.at.0, self.reg.libs[f.at.0].find_in(f.at.1, kind::GENERATOR, *b"i900")?)));
+            // The flag is set even without the folder (no ripple until it clears).
+            let inst = found.and_then(|g| self.start(g, Owner::Step(id)));
+            if let Some(x) = inst.and_then(|i| self.insts[i].as_mut()) {
+                x.actors = [sched::Who::Actor(id); 2];
+            }
+            if inst.is_some() {
+                log::debug!("effects: wading ripple on {id:#x}");
+            }
+            self.wading.insert(id, inst);
+        } else if !water
+            && let Some(inst) = self.wading.remove(&id)
+            && let Some(i) = inst
+                .filter(|&i| self.insts[i].as_ref().is_some_and(|x| &x.name == b"i900" && x.owner == Owner::Step(id)))
+        {
+            self.kill(i);
+        }
+        if let Some(rain) = folder {
+            self.foot_set(id, rain);
+        }
+    }
+
+    /// FUN_100d2970 step 4: a new set ('fses', or 'fser' in the rain) takes that folder from the zone's scope; None
+    /// when the zone has none (no step).
+    fn foot_set(&mut self, id: u32, rain: bool) -> Option<(usize, usize)> {
+        if let Some(f) = self.foot_folder.get(&id).filter(|f| f.rain == rain) {
+            return Some(f.at);
+        }
+        let l = self.zone_lib?;
+        let at = (l, folder_of(&self.reg.libs[l], rain)?);
+        self.foot_folder.insert(id, Foot { rain, at });
+        Some(at)
+    }
+
+    /// The sub-area unloads (FUN_1017b110 -> FUN_100446a0): its generators' clones and its schedulers' tasks stop.
+    pub fn drop_sub_area(&mut self) {
+        let sub = self.sub_lib.take();
+        for i in 0..self.insts.len() {
+            if self.insts[i].as_ref().is_some_and(|x| matches!(x.owner, Owner::SubArea) || Some(x.src.0) == sub) {
+                self.kill(i);
+            }
+        }
+        if let Some(s) = sub {
+            for t in self.tasks.iter_mut() {
+                if t.as_ref().is_some_and(|t| t.res.0 == s) {
+                    *t = None;
+                }
+            }
+        }
+    }
+
+    /// FUN_101804d0 / FUN_10183780: the zone's `weat/<tag>` generators start (fallback `suny`, then `weat`
+    /// itself) and crossfade with the current set over `seconds` (op 0x50 reads the weight); the same tag does
+    /// nothing, and 0 seconds replaces the old set at once.
+    pub fn set_weather(&mut self, tag: &str, seconds: f32) {
+        let Some(l) = self.zone_lib else { return };
+        let tag4 = crate::dat::generator::fourcc(tag);
+        if self.weathers.last().is_some_and(|w| w.tag == tag4) {
+            return;
+        }
+        if seconds <= 0.0 {
+            self.drop_weathers(usize::MAX);
+        }
+        let tree = &self.reg.libs[l].tree;
+        let named = |parent: Option<usize>, n: &str| {
+            let n = crate::dat::generator::fourcc(n);
+            tree.nodes
+                .iter()
+                .enumerate()
+                .find(|(_, x)| x.kind == kind::FOLDER && x.name == n && (parent.is_none() || x.parent == parent))
+                .map(|(i, _)| i)
+        };
+        let Some(weat) = named(None, "weat") else { return };
+        // FUN_1018a7a0: neither the tag nor `suny`: nothing starts and nothing is killed.
+        let Some(folder) = named(Some(weat), tag).or_else(|| named(Some(weat), "suny")) else { return };
+        let within = |mut i: usize| loop {
+            match tree.nodes[i].parent {
+                Some(p) if p == folder => return true,
+                Some(p) => i = p,
+                None => return false,
+            }
+        };
+        let covered = self.covered;
+        let gens: Vec<usize> = self.reg.libs[l]
+            .gens
+            .iter()
+            .filter(|g| g.flags & 0x1000 != 0 && within(g.node) && !(covered && roofed(g)))
+            .map(|g| g.node)
+            .collect();
+        self.weather_serial += 1;
+        let serial = self.weather_serial;
+        log::info!("effects: weather {tag} over {seconds:.0} s: {} generators", gens.len());
+        for node in gens {
+            if let Some(i) = self.start((l, node), Owner::Weather(serial))
+                && let Some(x) = self.insts[i].as_mut()
+            {
+                x.weather = if seconds > 0.0 { 0.0 } else { 1.0 };
+            }
+        }
+        self.weathers.push(WeatherSet { serial, tag: tag4, duration: seconds, remaining: seconds });
+        // Its schedulers switch at once: every task of a `weat` scheduler ends, then the folder's self-starting ones.
+        let tree = &self.reg.libs[l].tree;
+        let under = |mut i: usize, f: usize| loop {
+            match tree.nodes[i].parent {
+                Some(p) if p == f => return true,
+                Some(p) => i = p,
+                None => return false,
+            }
+        };
+        let old: Vec<usize> =
+            (0..tree.nodes.len()).filter(|&n| tree.nodes[n].kind == kind::SCHEDULER && under(n, weat)).collect();
+        for n in old {
+            self.kill_tasks((l, n), None);
+        }
+        self.start_auto(l, Some(folder));
+    }
+
+    /// The zone's ambient loop (FUN_10189ca0 via FUN_1018a220, played by FUN_10036170): a SeSep (type 0x3d) under the
+    /// weather's folder (as set_weather picks it), inside its "indo" folder when covered and outside it otherwise,
+    /// named HHMM (FUN_10189bd0: four digits, the first 0 or 1, the third at most 5, the parent not "extr"); the
+    /// latest at or before the Vana'diel minute, else the last valid one in file order (e.g. 1800 before 06:00).
+    pub fn ambient(&self, minute: f32) -> Option<u32> {
+        let l = self.zone_lib?;
+        let lib = &self.reg.libs[l];
+        let tree = &lib.tree;
+        let named = |parent: Option<usize>, n: [u8; 4]| {
+            tree.nodes
+                .iter()
+                .enumerate()
+                .find(|(_, x)| x.kind == kind::FOLDER && x.name == n && (parent.is_none() || x.parent == parent))
+                .map(|(i, _)| i)
+        };
+        let fc = crate::dat::generator::fourcc;
+        let weat = named(None, fc("weat"))?;
+        let tag = self.weathers.last().map_or(fc("suny"), |w| w.tag);
+        let folder = named(Some(weat), tag).or_else(|| named(Some(weat), fc("suny"))).unwrap_or(weat);
+        let under = |mut i: usize, f: usize| loop {
+            match tree.nodes[i].parent {
+                Some(p) if p == f => return true,
+                Some(p) => i = p,
+                None => return false,
+            }
+        };
+        let indo = tree
+            .nodes
+            .iter()
+            .enumerate()
+            .find(|(i, x)| x.kind == kind::FOLDER && x.name == fc("indo") && under(*i, folder))
+            .map(|(i, _)| i);
+        let time = |n: &[u8; 4]| -> Option<u32> {
+            let d = |c: u8| c.is_ascii_digit().then(|| (c - b'0') as u32);
+            let (a, b, c, e) = (d(n[0])?, d(n[1])?, d(n[2])?, d(n[3])?);
+            (a <= 1 && c <= 5).then_some((a * 10 + b) * 60 + c * 10 + e)
+        };
+        let now = minute.rem_euclid(1440.0) as u32;
+        let mut best: Option<(u32, usize)> = None;
+        let mut last = None;
+        for (i, n) in tree.nodes.iter().enumerate() {
+            if n.kind != 0x3d || !under(i, folder) || n.parent.is_some_and(|p| tree.nodes[p].name == fc("extr")) {
+                continue;
+            }
+            if let Some(f) = indo
+                && under(i, f) != self.covered
+            {
+                continue;
+            }
+            let Some(t) = time(&n.name) else { continue };
+            last = Some(i);
+            if t <= now && best.is_none_or(|(b, _)| t >= b) {
+                best = Some((t, i));
+            }
+        }
+        let node = best.map(|b| b.1).or(last)?;
+        sound::sesep(lib.data(node)).map(|(se, _)| se)
+    }
+
+    /// FUN_101845c0: on a change, covered stops the transient weather emitters that spawn at the camera (op-1
+    /// flags 4 or 0x4000000: rain, snow, dust) and kills their elements (FUN_10183b90); uncovered starts them again.
+    pub fn set_covered(&mut self, covered: bool) {
+        if covered == self.covered {
+            return;
+        }
+        self.covered = covered;
+        for i in 0..self.insts.len() {
+            let Some(x) = self.insts[i].as_ref() else { continue };
+            if !matches!(x.owner, Owner::Weather(_)) {
+                continue;
+            }
+            let Some(g) = self.reg.libs[x.src.0].generator(x.src.1) else { continue };
+            let transient = !(g.flags & 0x400 != 0 || g.template().is_some_and(|o| o.i16_at(0x22) == 0));
+            if !transient || !roofed(g) {
+                continue;
+            }
+            if covered {
+                let live = std::mem::take(&mut self.insts[i].as_mut().unwrap().live);
+                for e in live {
+                    self.drop_elem(e);
+                }
+                self.insts[i].as_mut().unwrap().stopping = true;
+            } else if let Some(x) = self.insts[i].as_mut() {
+                x.stopping = false;
+                x.countdown = 0.0;
+                x.elapsed = 0.0;
+                x.emitted = 0;
+            }
+        }
+    }
+
+    /// FUN_10183bd0 for the oldest `n` weather sets: their elements go now.
+    fn drop_weathers(&mut self, n: usize) {
+        let n = n.min(self.weathers.len());
+        let gone: Vec<u32> = self.weathers.drain(..n).map(|w| w.serial).collect();
+        for i in 0..self.insts.len() {
+            if let Some(Owner::Weather(s)) = self.insts[i].as_ref().map(|x| x.owner)
+                && gone.contains(&s)
+            {
+                self.kill(i);
+            }
+        }
+    }
+
+    /// The newest weather counts down; its weight is (duration - remaining) / duration, the older ones get the
+    /// rest, and they go when it is done.
+    fn weather_step(&mut self, seconds: f32) {
+        let Some(new) = self.weathers.last_mut() else { return };
+        new.remaining = (new.remaining - seconds).max(0.0);
+        let wgt = if new.duration > 0.0 { (new.duration - new.remaining) / new.duration } else { 1.0 };
+        let (serial, done) = (new.serial, new.remaining <= 0.0);
+        for x in self.insts.iter_mut().flatten() {
+            if let Owner::Weather(s) = x.owner {
+                x.weather = if s == serial { wgt } else { 1.0 - wgt };
+            }
+        }
+        if done && self.weathers.len() > 1 {
+            self.drop_weathers(self.weathers.len() - 1);
+        }
+    }
+
+    /// FUN_10052220: a new running instance of the generator.
+    pub fn start(&mut self, src: Ref, owner: Owner) -> Option<usize> {
+        let mut g = self.reg.libs[src.0].generator(src.1)?.clone();
+        let mut de = 0u8;
+        if g.name[0] == b'~' {
+            de = (g.name[1].wrapping_sub(b'0') & 0xfb) | 0x80;
+        }
+        let weat = crate::dat::generator::fourcc("weat");
+        if self.reg.libs[src.0].tree.path(src.1).contains(&weat) {
+            de |= 0x83;
+        }
+        let mslot = self.alloc_slot();
+        self.serial = self.serial.wrapping_add(1);
+        let inst = Instance {
+            src,
+            name: g.name,
+            streams: std::mem::take(&mut g.streams),
+            flags: g.flags | 0x800,
+            stopping: false,
+            held: false,
+            de,
+            life: g.life,
+            elapsed: 0.0,
+            countdown: 0.0,
+            interval: g.interval,
+            interval_rand: g.interval_rand,
+            emitted: 0,
+            attach: g.attach,
+            mode: g.attach_mode(),
+            // FUN_100531d0: the generator's matrix taken at the start; the voyage modes' is V (or its rotation).
+            matrix: match g.attach_mode() {
+                0x14 => Some(self.voyage),
+                0x15 => {
+                    Some(Mat4::from_cols(self.voyage.x_axis, self.voyage.y_axis, self.voyage.z_axis, glam::Vec4::W))
+                }
+                _ => None,
+            },
+            scale_a: Vec3::ONE,
+            scale_b: Vec3::ONE,
+            dist: 0.0,
+            size_scaled: (g.attach >> 24) & 0xf != 0,
+            target_depth: 1.0,
+            mslot,
+            weather: 1.0,
+            live: Default::default(),
+            finished: false,
+            clone: false,
+            emptied: false,
+            owner,
+            parent_elem: None,
+            actors: [sched::Who::None; 2],
+            driven: None,
+            ground: None,
+            area_light: None,
+            dam: None,
+            started: self.serial,
+        };
+        let i = match self.insts.iter().position(|x| x.is_none()) {
+            Some(i) => {
+                self.insts[i] = Some(inst);
+                i
+            }
+            None => {
+                self.insts.push(Some(inst));
+                self.insts.len() - 1
+            }
+        };
+        let v = self.by_src.entry(src).or_default();
+        v.insert(v.partition_point(|&k| k < i), i);
+        Some(i)
+    }
+
+    /// FUN_100531d0 on a running instance: its clock and emissions from the start again (the start's matrix too), its
+    /// elements kept.
+    pub(super) fn restart(&mut self, i: usize) {
+        let voyage = self.voyage;
+        let Some(x) = self.insts.get_mut(i).and_then(|x| x.as_mut()) else { return };
+        let Some(g) = self.reg.libs[x.src.0].generator(x.src.1) else { return };
+        (x.elapsed, x.countdown, x.emitted, x.finished, x.stopping, x.emptied) = (0.0, 0.0, 0, false, false, false);
+        (x.life, x.flags) = (g.life, g.flags | 0x800);
+        x.matrix = match x.mode {
+            0x14 => Some(voyage),
+            0x15 => Some(Mat4::from_cols(voyage.x_axis, voyage.y_axis, voyage.z_axis, glam::Vec4::W)),
+            _ => None,
+        };
+    }
+
+    fn alloc_slot(&mut self) -> u32 {
+        let mut s = [0u32; SLOT_WORDS];
+        let id = Mat4::IDENTITY.to_cols_array();
+        for k in 0..16 {
+            s[slot::MATRIX + k] = id[k].to_bits();
+        }
+        for k in 0..3 {
+            s[slot::SCALE_A + k] = 1f32.to_bits();
+            s[slot::SCALE_B + k] = 1f32.to_bits();
+        }
+        s[slot::WEATHER] = 1f32.to_bits();
+        if let Some(i) = self.slot_free.pop() {
+            self.slots[i as usize] = s;
+            i
+        } else {
+            self.slots.push(s);
+            (self.slots.len() - 1) as u32
+        }
+    }
+
+    fn put_slot(&mut self, i: u32, m: Option<Mat4>, a: Vec3, b: Vec3, weather: f32, size_scaled: bool) {
+        let s = &mut self.slots[i as usize];
+        let arr = m.unwrap_or(Mat4::IDENTITY).to_cols_array();
+        for k in 0..16 {
+            s[slot::MATRIX + k] = arr[k].to_bits();
+        }
+        for k in 0..3 {
+            s[slot::SCALE_A + k] = a[k].to_bits();
+            s[slot::SCALE_B + k] = b[k].to_bits();
+        }
+        s[slot::WEATHER] = weather.to_bits();
+        s[slot::SIZE_SCALED] = size_scaled as u32;
+        s[slot::HAS_MATRIX] = m.is_some() as u32;
+    }
+
+    /// FUN_10052930(0): the instance and its elements go now.
+    pub fn kill(&mut self, i: usize) {
+        let Some(inst) = self.insts[i].take() else { return };
+        if let Some(v) = self.by_src.get_mut(&inst.src) {
+            v.retain(|&k| k != i);
+            if v.is_empty() {
+                self.by_src.remove(&inst.src);
+            }
+        }
+        for e in inst.live {
+            self.drop_elem(e);
+        }
+        if self.lent.contains_key(&inst.mslot) {
+            self.orphans.push(inst.mslot);
+        } else {
+            self.slot_free.push(inst.mslot);
+        }
+    }
+
+    fn drop_elem(&mut self, e: u32) {
+        let Some(c) = self.elems.get_mut(e as usize).and_then(|x| x.take()) else { return };
+        if let Some(s) = c.light {
+            self.writes.push(Write::LightOff(s));
+        }
+        if c.mslot != NONE {
+            self.slot_free.push(c.mslot);
+        }
+        if c.borrowed
+            && let Some(n) = self.lent.get_mut(&c.frame)
+        {
+            *n -= 1;
+            if *n == 0 {
+                self.lent.remove(&c.frame);
+                if let Some(k) = self.orphans.iter().position(|&s| s == c.frame) {
+                    self.slot_free.push(self.orphans.swap_remove(k));
+                }
+            }
+        }
+        if let Some(k) = self.sounds.iter().position(|s| s.elem == Some(e)) {
+            let s = self.sounds.swap_remove(k);
+            if s.handle != 0 {
+                self.sound_cmds.push(sound::SoundCmd::Stop { handle: s.handle, ticks: s.fade as i32 });
+                self.voice_ended(s.handle);
+            }
+        }
+        if let Some(run) = c.parts {
+            // Kept sorted and merged: the run joins its neighbours in place.
+            let at = self.part_free.partition_point(|r| r.0 < run.0);
+            self.part_free.insert(at, run);
+            if at + 1 < self.part_free.len() && run.0 + run.1 == self.part_free[at + 1].0 {
+                self.part_free[at].1 += self.part_free.remove(at + 1).1;
+            }
+            if at > 0 && self.part_free[at - 1].0 + self.part_free[at - 1].1 == run.0 {
+                self.part_free[at - 1].1 += self.part_free.remove(at).1;
+            }
+        }
+        if let Some(ch) = c.child
+            && self.insts.get(ch).is_some_and(|x| x.is_some())
+        {
+            // The linked clone stops emitting; its elements finish.
+            if let Some(x) = self.insts[ch].as_mut() {
+                x.stopping = true;
+            }
+        }
+        self.writes.push(Write::Word(e, w::STATE, 0));
+        self.free.push(e);
+    }
+
+    /// Readback records from the GPU (a frame or two late): sort keys, expire requests, positions.
+    pub fn take_back(&mut self, words: &[u32]) {
+        use elem::{BACK_WORDS, back};
+        self.flash = [0; 3];
+        for (i, r) in words.as_chunks::<BACK_WORDS>().0.iter().enumerate() {
+            let Some(Some(c)) = self.elems.get_mut(i) else { continue };
+            if r[back::SERIAL] != c.serial {
+                continue;
+            }
+            // FUN_10014f90: each element's flash adds, saturating at 255.
+            for (k, v) in r[back::FLASH].to_le_bytes()[..3].iter().enumerate() {
+                self.flash[k] = self.flash[k].saturating_add(*v);
+            }
+            let f = |k: usize| f32::from_bits(r[k]);
+            c.key = f(back::KEY);
+            c.drawn = r[back::STATUS] & back::DRAWN != 0;
+            c.back = Some(emit::Parent {
+                pos: Vec3::new(f(back::LPOS), f(back::LPOS + 1), f(back::LPOS + 2)),
+                world: Vec3::new(f(back::WORLD), f(back::WORLD + 1), f(back::WORLD + 2)),
+                rot: Vec3::new(f(back::ROT), f(back::ROT + 1), f(back::ROT + 2)),
+                scale: Vec3::new(f(back::SCALE), f(back::SCALE + 1), f(back::SCALE + 2)),
+                color: r[back::COLOR],
+                life: c.life,
+                max_life: c.max_life,
+                uv: [f(back::UV), f(back::UV + 1)],
+                bias: f(back::BIAS),
+                vel: c.drift.then(|| Vec3::new(f(back::VEL), f(back::VEL + 1), f(back::VEL + 2))),
+                frame: None,
+                src: self.insts.get(c.inst).and_then(|x| x.as_ref()).map(|x| x.src),
+                light: (r[back::STATUS] & back::LIGHT != 0).then(|| [f(back::L_INT), f(back::L_RANGE)]),
+                slots: (r[back::STATUS] & back::SLOTS != 0)
+                    .then(|| (0x3e + ((r[back::STATUS] >> 8) & 3) as u8, [r[back::SLOT_A], r[back::SLOT_B]])),
+            });
+            // Op 0x2e / 0x48 with the kill flag: life = 1, so it expires now.
+            if r[back::STATUS] & back::KILL != 0 && c.max_life != 0.0 && c.life >= 1.0 {
+                c.life = 0.5;
+            }
+        }
+    }
+
+    /// One frame: attachments, generator updates and emissions, element lives (FUN_10043ca0) and expiry.
+    pub fn tick(&mut self, f: &Frame, actors: &dyn Actors) {
+        let dt = f.dt;
+        self.ticks = self.ticks.wrapping_add(1);
+        // FUN_1018c2b0: the time of day (rounded: 11:00 from an f32 day fraction must not land on 10:59:59.98) and
+        // its change since the last frame.
+        let now =
+            ((f.dayfrac as f64 * tasks::VANA_DAY as f64).round() as i64).rem_euclid(tasks::VANA_DAY as i64) as i32;
+        self.vana_dt = if self.vana_seen { (now - self.vana_now).rem_euclid(tasks::VANA_DAY) as f32 } else { 0.0 };
+        (self.vana_now, self.vana_seen) = (now, true);
+        self.weather_step(f.seconds);
+        self.poll_loads();
+        self.model_generators(actors);
+        self.run_equip(actors);
+        self.run_pending(f, actors);
+        self.step_tasks(f, actors);
+        self.step_drives(f, actors);
+        self.step_trails(f, actors);
+        // Op 0xbf: the push starts when its delay has counted down (its task's destructor).
+        for k in self.knocks_later.iter_mut() {
+            k.0 -= dt;
+        }
+        let (due, later): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut self.knocks_later).into_iter().partition(|k| k.0 <= 0.0);
+        self.knocks_later = later;
+        self.knocks.extend(due.into_iter().map(|k| k.1));
+        self.last_frame = Some(*f);
+        self.start_dust(f, actors);
+        self.lives_done = false;
+        self.first_run.clear();
+        // Lives first, as each element's Exec does before its update stream.
+        for e in 0..self.elems.len() {
+            self.step_life(e as u32, f, actors);
+        }
+        self.lives_done = true;
+        self.step_models(f, actors);
+        self.step_decals(actors);
+        let voyage = self.voyage;
+        for i in 0..self.insts.len() {
+            let Some(inst) = self.insts[i].as_mut().filter(|x| !x.held) else { continue };
+            attach(inst, f, voyage);
+            // Generator op 0x11: follow the actors every frame.
+            if let Some(word) = inst.streams[0].iter().find(|o| o.code == 0x11).map(|o| o.u32(1))
+                && !matches!(inst.mode, 0 | 0xe | 0xf)
+            {
+                self.follow(i, word, f, actors);
+            }
+            // Generator ops 0x0e..0x10: each rebuilds the attachment and spins it, so the stream's last one stands.
+            if let Some(Some(op)) = self.insts[i].as_ref().filter(|x| x.mode != 0).map(|x| {
+                x.streams[0].iter().rev().find(|o| matches!(o.code, 0x0e..=0x10)).map(|o| (o.code, o.u32(2), o.u32(3)))
+            }) {
+                self.spin(i, op, f, actors);
+            }
+            self.ground_frame(i, actors);
+            let driven = self.drive(i, f);
+            let Some(inst) = self.insts[i].as_ref() else { continue };
+            // An element's clone runs inside that element's update (ops 0x25 / 0x33 / 0x46: FUN_1004a980 0x1004b5d0,
+            // 0x1004b604 -> FUN_100496f0); a generator's own task runs before the elements (buckets 8 / 9).
+            let in_elem = inst.driven.is_some();
+            let (m, a, b, wgt, ss, ms) =
+                (inst.matrix, inst.scale_a, inst.scale_b, inst.weather, inst.size_scaled, inst.mslot);
+            self.put_slot(ms, m, a, b, wgt, ss);
+            if driven {
+                self.in_elem = in_elem;
+                self.update_instance(i, f, actors);
+                self.in_elem = false;
+            }
+        }
+        // The walk reaches bucket 0xb after the generators' tasks: what they made this frame runs its first update
+        // now (FUN_10045a40 -> FUN_10044ae0: the life, then the update stream), the kicks of op 0x5f included.
+        for (e, serial) in std::mem::take(&mut self.first_run) {
+            if self.elems[e as usize].as_ref().is_some_and(|c| c.serial == serial) {
+                self.step_life(e, f, actors);
+            }
+        }
+        self.lives_done = false;
+        self.step_quakes(f);
+        self.step_sounds(f);
+        // Finished or stopped instances go once their elements have; a clone whose last element went this frame goes
+        // unless its generator has emitted again since *(inf: retail's order of generators and elements in a frame)*.
+        for i in 0..self.insts.len() {
+            let Some(x) = self.insts[i].as_mut() else { continue };
+            let orphan = std::mem::take(&mut x.emptied) && x.live.is_empty();
+            if orphan
+                || (x.finished || x.stopping)
+                    && x.live.is_empty()
+                    && !matches!(x.owner, Owner::Zone | Owner::SubArea | Owner::Actor(_) | Owner::Weather(_))
+            {
+                self.kill(i);
+            }
+        }
+    }
+
+    /// Whether instance `i` runs this frame: its task always; an element's clone while the element lives and its
+    /// update stream has op 0x25 (emit every frame, life != 0), or 0x33 / 0x46 (the clone follows the element:
+    /// its rotation, scale and world position, 0x46 also turned to the camera; it runs while either life is not 0).
+    /// The clone of a dead element stops.
+    fn drive(&mut self, i: usize, f: &Frame) -> bool {
+        let Some(e) = self.insts[i].as_ref().and_then(|x| x.driven) else { return true };
+        let elem = self.elems.get(e as usize).and_then(|c| c.as_ref()).filter(|c| c.child == Some(i));
+        let Some(c) = elem else {
+            if let Some(x) = self.insts[i].as_mut() {
+                x.stopping = true;
+            }
+            return false;
+        };
+        let (life, back, owner) = (c.life, c.back, self.insts.get(c.inst).and_then(|x| x.as_ref()).map(|x| x.src));
+        let pf = self.parent_frame(c);
+        let Some(owner) = owner else { return false };
+        let has = |reg: &Registry, code: u8| reg.update_op_slot(owner, code).is_some();
+        let follow = if has(&self.reg, 0x46) {
+            Some(true)
+        } else if has(&self.reg, 0x33) {
+            Some(false)
+        } else {
+            None
+        };
+        if let (Some(cam), Some(b)) = (follow, back)
+            && let Some(x) = self.insts[i].as_mut()
+        {
+            // 0x1004b604 (0x33): euler(rot) x the element's parent frame rotation (FUN_100473f0: its snapshot or the
+            // generator's matrix, translation cleared), then the world position; scale A = the owner's x the element's.
+            let mut m = math::euler(b.rot);
+            if cam {
+                // 0x1004b6e8 (0x46): the camera object's +0x294 (FUN_10015240), the inverse of its LookAt view
+                // (FUN_10015120 -> FUN_100283c0), translation cleared: the view rotation's inverse.
+                m = math::then(m, f.view_rot.transpose());
+            } else if let Some(mut p) = pf.as_ref().and_then(|p| p.matrix) {
+                p.w_axis = glam::Vec4::W;
+                m = math::then(m, p);
+            }
+            m.w_axis = b.world.extend(1.0);
+            x.matrix = Some(m);
+            x.scale_a = pf.as_ref().map_or(Vec3::ONE, |p| p.scale_a) * b.scale;
+            // Run only while the element's life or the clone's (+0xd0) is not 0: a held element stops it.
+            return life != 0.0 || x.life != 0.0;
+        }
+        has(&self.reg, 0x25) && life != 0.0
+    }
+
+    /// FUN_10048740 for one instance.
+    fn update_instance(&mut self, i: usize, f: &Frame, actors: &dyn Actors) {
+        let Some(mut inst) = self.insts[i].take() else { return };
+        if inst.stopping || inst.finished {
+            self.insts[i] = Some(inst);
+            return;
+        }
+        let allowed = emit::generator_stream(&mut self.reg, &mut inst, f);
+        let mut dt = f.dt.min(10.0);
+        if inst.life > 0.0 && inst.elapsed >= inst.life {
+            inst.elapsed += dt;
+            inst.finished = true;
+            self.insts[i] = Some(inst);
+            return;
+        }
+        let persistent = inst.flags & 0x400 != 0 || inst.streams[1].first().is_some_and(|o| o.i16_at(0x22) == 0);
+        let mut emissions = 0u32;
+        if persistent {
+            // 0x1004a605..0x1004a628: the static element is made on the first update, whatever the 0x0a / 0x15 gate says.
+            if inst.emitted == 0 {
+                emissions = 1;
+            }
+        } else {
+            if inst.de & 2 != 0 {
+                // FUN_100496f0 (0x1004a654): a weather generator's clock runs at the weather density.
+                dt *= self.weather_density;
+            }
+            inst.countdown -= dt;
+            let mut budget = inst.life;
+            while inst.countdown < 0.0 {
+                if allowed && inst.flags & 0x800 != 0 {
+                    // 0x1004a750: with +0xde bit 0 (weather) the count is ftol(n x density x 0.3).
+                    let n = inst.flags & 0x1ff;
+                    let n = if inst.de & 1 != 0 { (n as f32 * self.weather_density * 0.3) as u32 } else { n };
+                    emissions += if inst.flags & 0x2000_0000 != 0 { 1 } else { n + 1 };
+                }
+                let interval = self.rng.un(inst.interval_rand as u16 as u32) as f32 + 1.0 + inst.interval as f32;
+                inst.countdown += interval;
+                if inst.life > 0.0 {
+                    budget -= interval;
+                    if budget <= inst.elapsed {
+                        break;
+                    }
+                }
+            }
+        }
+        let parent = inst.parent_elem.and_then(|p| {
+            let c = self.elems.get(p as usize)?.as_ref()?;
+            let mut b = c.back?;
+            b.frame = self.parent_frame(c);
+            Some(b)
+        });
+        let mut spawns = Vec::new();
+        if emissions > 0 {
+            inst.target_depth = self.who_sizes(inst.actors[1], actors)[2];
+        }
+        for _ in 0..emissions.min(512) {
+            let me = self.me_pair(&inst, actors);
+            if let Some(s) = emit::emit(
+                &mut self.reg,
+                &mut inst,
+                parent.as_ref(),
+                f,
+                &mut self.rng,
+                &|a, b| actors.ground_hit(a, b),
+                me,
+            ) {
+                spawns.push(s);
+            }
+        }
+        inst.elapsed += dt;
+        if inst.life > 0.0 && inst.elapsed >= inst.life {
+            inst.finished = true;
+        }
+        self.insts[i] = Some(inst);
+        for s in spawns {
+            self.add_elem(i, s, f, actors);
+        }
+    }
+
+    /// What op 0x45 copies from parent element `c`: its frame slot's matrix and scales, its generator's attach
+    /// word and actors.
+    fn parent_frame(&self, c: &ElemCpu) -> Option<emit::ParentFrame> {
+        let x = self.insts.get(c.inst)?.as_ref()?;
+        let s = self.slots.get(c.frame as usize);
+        let v3 = |s: &[u32; SLOT_WORDS], k: usize| {
+            Vec3::new(f32::from_bits(s[k]), f32::from_bits(s[k + 1]), f32::from_bits(s[k + 2]))
+        };
+        let matrix = s
+            .filter(|s| s[slot::HAS_MATRIX] != 0)
+            .map(|s| Mat4::from_cols_array(&std::array::from_fn(|k| f32::from_bits(s[slot::MATRIX + k]))));
+        Some(emit::ParentFrame {
+            slot: c.frame,
+            matrix,
+            scale_a: s.map_or(Vec3::ONE, |s| v3(s, slot::SCALE_A)),
+            scale_b: s.map_or(Vec3::ONE, |s| v3(s, slot::SCALE_B)),
+            attach: x.attach,
+            actors: x.actors,
+        })
+    }
+
+    /// Whether the instance's actor1 / actor2 (dolls as their owners) is our player (FUN_1003b8b0 / vtable +0x304).
+    fn me_pair(&self, inst: &Instance, actors: &dyn Actors) -> [bool; 2] {
+        let p = actors.player();
+        inst.actors.map(|w| p.is_some() && self.doll_of(w).id() == p)
+    }
+
+    /// A keyframe by GPU id with its sampler flags (0: linear, else eased), 0 for none.
+    fn sample_key(&self, id: u32, prm: u32, x: f32) -> f32 {
+        self.reg.key_desc.get(id as usize).map_or(0.0, |d| {
+            crate::dat::generator::KeyFrame {
+                keys: self.reg.key_data[d[0] as usize..(d[0] + d[1]) as usize].iter().map(|p| (p[0], p[1])).collect(),
+            }
+            .sample(x, prm & 0xf != 0)
+        })
+    }
+
+    /// Where an element stands in retail's task walk, larger = earlier. The element factory moves every new element
+    /// to the front of task bucket 0xb (FUN_1004e8d0 0x100511a4: FUN_100749b0(elem, DAT_10353710 = 0xb) ->
+    /// FUN_10074f80), so elements update newest first. Elements made in one frame come from generators the walk
+    /// reached in order: the unattached kinds (0, 0xe, 0xf, 0x14: FUN_100531d0 -> FUN_10075120, appended) in start
+    /// order, then the actor-attached ones (front of bucket 9), the last started first *(inf: an unattached generator
+    /// started by a running task goes just before that task instead)*.
+    fn run_order(&self, c: &ElemCpu) -> RunKey {
+        let (mode, started) = self.insts.get(c.inst).and_then(|x| x.as_ref()).map_or((0, 0), |x| (x.mode, x.started));
+        run_key(c.born, mode, started, c.serial)
+    }
+
+    /// The CMoSkeletonElem models: actor id and whether its scheduler started (fx-shot's report).
+    pub fn model_states(&self) -> Vec<(u32, bool)> {
+        self.fx_models.iter().map(|m| (m.id, m.started)).collect()
+    }
+
+    /// FUN_10047830 / FUN_10047590 for each CMoSkeletonElem: once its model is in, the scheduler named like its generator
+    /// plays on it (FUN_100724c0(7, name) -> FUN_10056c70); while that runs (actor +0x84) the element stays alive
+    /// (life >= frame + 1); each frame the model stands at the element's world position, rotation and scale with its
+    /// colour (vt+0x30) and alpha (+0x59c = A / 128). It goes with the element.
+    fn step_models(&mut self, f: &Frame, actors: &dyn Actors) {
+        let mut keep = Vec::new();
+        for mut m in std::mem::take(&mut self.fx_models) {
+            let alive = self.elems.get(m.elem as usize).and_then(|c| c.as_ref()).is_some_and(|c| c.serial == m.serial);
+            if !alive {
+                self.model_drops.push(m.id);
+                continue;
+            }
+            if !m.started && actors.ready(m.id) == Some(true) {
+                m.started = true;
+                let name = self.reg.libs[m.source.0].tree.nodes[m.source.1].name;
+                if let Some(r) = self.reg.resolve(m.source.0, m.source.1, kind::SCHEDULER, u32::from_le_bytes(name)) {
+                    self.spawn_task(r, sched::Who::Actor(m.id), sched::Who::None, None, 1.0, None);
+                }
+            }
+            let running = self.tasks.iter().flatten().any(|t| t.a1 == sched::Who::Actor(m.id));
+            let frame = self.elems[m.elem as usize].as_ref().and_then(|c| self.parent_frame(c)).and_then(|p| p.matrix);
+            if let Some(c) = self.elems[m.elem as usize].as_mut() {
+                if running && c.max_life != 0.0 && c.life < f.dt + 1.0 {
+                    c.life = f.dt + 1.0;
+                    let life = c.life;
+                    self.writes.push(Write::Word(m.elem, w::LIFE, life.to_bits()));
+                    self.writes.push(Write::Word(m.elem, w::CTRL, ctl::LIFE_SET));
+                }
+                if let Some(b) = c.back.as_ref() {
+                    // The draw matrix (+0x5f8) is the element's whole matrix: its frame's turn comes on top.
+                    let frame_yaw = frame.map_or(0.0, |f| (-f.x_axis.z).atan2(f.x_axis.x));
+                    let rot = Vec3::new(b.rot.x, math::wrap(b.rot.y + frame_yaw), b.rot.z);
+                    self.model_places.push((m.id, b.world, rot, b.scale, b.color));
+                }
+            }
+            keep.push(m);
+        }
+        self.fx_models = keep;
+    }
+
+    /// FUN_10044ae0's life: an element with one counts it down by the frame's ticks and ends under 1 (its end stream
+    /// runs inside its update). One made inside an element's update this frame waits for the next (`ElemCpu::late`).
+    fn step_life(&mut self, e: u32, f: &Frame, actors: &dyn Actors) {
+        let ticks = self.ticks;
+        let Some(c) = self.elems[e as usize].as_mut() else { return };
+        if c.max_life == 0.0 || c.late && c.born == ticks {
+            return;
+        }
+        c.life -= f.dt;
+        if c.life < 1.0 {
+            let was = std::mem::replace(&mut self.in_elem, true);
+            self.expire(e, f, actors);
+            self.in_elem = was;
+        }
+    }
+
+    /// Element update op 0x5f each frame, after the generators' tasks and the first update of what they made (the walk
+    /// runs bucket 0xb after them), not for elements whose first update is the next frame: |sort key| > far skips; k
+    /// from the distance to the eye (1 within near, 0 at far); v = trunc(key(t) x S2 x k x 255) >= 0 to the rumble, v x
+    /// factor a camera kick. Skipped with "Screen shaking" off (config 0x92 bit 17) unless the player is busy
+    /// (FUN_100adf70). The kicks come in retail's element order (`run_order`): FUN_10021ba0's speed rule depends on it.
+    fn step_quakes(&mut self, f: &Frame) {
+        self.quakes.clear();
+        self.rumble = 0;
+        if !self.busy && self.filter.0 & (1 << 17) != 0 {
+            return;
+        }
+        let ticks = self.ticks;
+        let mut order: Vec<usize> = (0..self.elems.len())
+            .filter(|&e| self.elems[e].as_ref().is_some_and(|c| c.quake.is_some() && !(c.late && c.born == ticks)))
+            .collect();
+        order.sort_by_key(|&e| std::cmp::Reverse(self.elems[e].as_ref().map(|c| self.run_order(c))));
+        for e in order {
+            let Some(c) = self.elems[e].as_ref() else { continue };
+            let Some(q) = c.quake else { continue };
+            if c.key.abs() > q.far {
+                continue;
+            }
+            let pf = self.parent_frame(c);
+            let sa = pf.as_ref().map_or(Vec3::ONE, |p| p.scale_a);
+            let mut p = pf.and_then(|p| p.matrix).map_or(q.pos * sa, |m| m.transform_point3(q.pos * sa));
+            if q.eye_rel {
+                p += f.eye;
+            }
+            let d = (p - f.eye).length();
+            let k = if d < q.near {
+                1.0
+            } else if d >= q.far {
+                continue;
+            } else {
+                1.0 - (d - q.near) / (q.far - q.near)
+            };
+            let t = if c.max_life == 0.0 { 0.0 } else { 1.0 - c.life / c.max_life };
+            let v = ((self.sample_key(q.key, q.prm, t) * q.s2 * k * 255.0) as i32).max(0);
+            self.rumble += v;
+            if q.factor != 0.0 {
+                self.quakes.push(v as f32 * q.factor);
+            }
+        }
+    }
+
+    /// Ground projections: their faces follow the element's cell (its world position from the readback).
+    fn step_decals(&mut self, actors: &dyn Actors) {
+        for c in self.elems.iter_mut().flatten() {
+            let (Some(gp), Some(b)) = (c.gp.as_mut(), c.back.as_ref()) else { continue };
+            let cell = actors.decal_cell(b.world);
+            if cell != gp.cell {
+                gp.cell = cell;
+                gp.verts = actors.decal_tris(b.world);
+                self.decal_version += 1;
+            }
+        }
+    }
+
+    fn add_elem(&mut self, inst: usize, s: emit::Spawn, f: &Frame, acts: &dyn Actors) {
+        let Some(e) = self.free.pop().or_else(|| {
+            (self.elems.len() < MAX_ELEMS).then(|| {
+                self.elems.push(None);
+                (self.elems.len() - 1) as u32
+            })
+        }) else {
+            return;
+        };
+        self.serial = self.serial.wrapping_add(1);
+        let mut elem = s.elem;
+        let mut cpu = s.cpu;
+        if !s.parts.is_empty() {
+            let n = s.parts.len() as u32;
+            let Some(k) = self.part_free.iter().position(|r| r.1 >= n) else {
+                self.free.push(e);
+                return;
+            };
+            let (first, len) = self.part_free[k];
+            if len == n {
+                // `remove`: the list stays sorted for `drop_elem`'s merge.
+                self.part_free.remove(k);
+            } else {
+                self.part_free[k] = (first + n, len - n);
+            }
+            cpu.parts = Some((first, n));
+            elem.0[w::PART_BASE] = first;
+            self.writes.push(Write::Parts(first, s.parts));
+        }
+        cpu.inst = inst;
+        cpu.serial = self.serial;
+        cpu.born = self.ticks;
+        cpu.late = self.in_elem;
+        let first_run = !self.in_elem && self.lives_done;
+        if first_run {
+            self.first_run.push((e, self.serial));
+        }
+        // CMoSkeletonElem: its CXiSkeletonActor is the client's, made from the model folder (FUN_1004e8d0 kind 1).
+        if let (Some(r), Some(x)) = (s.model, self.insts.get(inst).and_then(|x| x.as_ref())) {
+            self.model_seq = self.model_seq.wrapping_add(1);
+            let id = MODEL_IDS | (self.model_seq & 0xff_ffff);
+            let (file, at) = (self.reg.libs[r.0].file_id, self.reg.libs[r.0].folder_range(r.1));
+            log::debug!("effects: model element {id:#x} from DAT {file} {:#x}..{:#x}", at.start, at.end);
+            self.model_spawns.push((id, file, at.start as u32, at.end as u32));
+            self.fx_models.push(FxModel { id, elem: e, serial: self.serial, source: x.src, started: false });
+        }
+        if let Some(mut snd) = s.sound {
+            snd.elem = Some(e);
+            snd.pos = elem.v3(w::POS);
+            snd.fade = cpu.max_life;
+            if let Some(x) = self.insts[inst].as_ref() {
+                snd.gen_persistent = x.flags & 0x400 != 0 || x.streams[1].first().is_some_and(|o| o.i16_at(0x22) == 0);
+                if let Some(k) = self.reg.update_op_slot(x.src, 0x43) {
+                    snd.vol_key = Some((elem.s(k), elem.s(k + 1)));
+                }
+            }
+            // FUN_10035a90: generator sound elements never run out of life.
+            cpu.max_life = 0.0;
+            self.sounds.push(snd);
+        }
+        if let Some(x) = self.insts[inst].as_ref()
+            && let Some(op) = self.reg.libs[x.src.0]
+                .generator(x.src.1)
+                .and_then(|g| g.streams[2].iter().find(|o| o.code == 0x5f).cloned())
+        {
+            let k = op.slot as usize;
+            let factor = if op.words.len() >= 4 { op.f32(3) } else { 0.0 };
+            let q = Quake {
+                key: elem.s(k),
+                prm: elem.s(k + 1),
+                s2: f32::from_bits(elem.s(k + 2)),
+                pos: elem.v3(w::POS),
+                near: op.f32(1),
+                far: op.f32(2),
+                factor,
+                eye_rel: cpu.flags & 4 != 0,
+            };
+            log::debug!(
+                "effects: quake element near {} far {} player factor {} kick factor {} eye-relative {}",
+                q.near,
+                q.far,
+                q.s2,
+                q.factor,
+                q.eye_rel
+            );
+            cpu.quake = Some(q);
+        }
+        elem.0[w::SERIAL] = self.serial;
+        if let Some(m) = cpu.snapshot {
+            let ms = self.alloc_slot();
+            let ss = self.insts[inst].as_ref().is_some_and(|x| x.size_scaled);
+            let (a, b) = cpu.snap_scale;
+            self.put_slot(ms, Some(m), a, b, 1.0, ss);
+            cpu.mslot = ms;
+            cpu.frame = ms;
+            elem.0[w::PARENT] = ms;
+        }
+        // The lender's slot outlives it while borrowed (retail AddRefs the generator).
+        if cpu.borrowed {
+            *self.lent.entry(cpu.frame).or_default() += 1;
+        }
+        let parent = emit::Parent {
+            pos: elem.v3(w::POS),
+            world: self.insts[inst]
+                .as_ref()
+                .and_then(|x| x.matrix)
+                .map_or(elem.v3(w::POS), |m| m.transform_point3(elem.v3(w::POS))),
+            rot: elem.v3(w::ROT),
+            scale: elem.v3(w::SCALE),
+            color: elem.0[w::COLOR],
+            life: cpu.life,
+            max_life: cpu.max_life,
+            uv: [elem.f(w::UV), elem.f(w::UV + 1)],
+            bias: elem.f(w::BIAS),
+            vel: self.insts[inst].as_ref().and_then(|x| self.reg.update_op_slot(x.src, 2)).map(|k| elem.sv3(k)),
+            frame: None,
+            src: self.insts[inst].as_ref().map(|x| x.src),
+            light: (elem.0[w::KIND] == elem::dk::LIGHT).then(|| [elem.f(w::L_INT), elem.f(w::L_RANGE)]),
+            slots: None,
+        };
+        cpu.back = Some(parent);
+        self.elems[e as usize] = Some(cpu);
+        if let Some(x) = self.insts[inst].as_mut() {
+            x.live.push_back(e);
+        }
+        // One made by a generator's task after the lives gets its whole first update this frame (`first_run`): its
+        // life counted down on both sides, then drawn (FUN_10045a40). Else the CPU's lives ran before this spawn (or
+        // its first update is the next frame: `late`): the GPU skips its first decrement too, or it would run a
+        // frame's dt ahead and sample t >= 1 on the last frame (keys ending in a spike at 1.0 flash white). That
+        // frame's t = 0 sample is not drawn (ctl::BORN).
+        if !first_run {
+            elem.0[w::CTRL] |= ctl::LIFE_SET | ctl::BORN;
+        }
+        self.writes.push(Write::Full(e, Box::new(elem)));
+        for ch in s.children {
+            match ch {
+                emit::Child::Clone { src, op } => {
+                    // Ops 0x53 / 0x6a: the clone's matrix is the element's rotation (through the emitter's
+                    // rotation, and the camera's for 0x6a) at the element's world position, its scales the
+                    // element's; 0x44 leaves the clone's placement.
+                    let (emitter, size, actors) = self.insts[inst]
+                        .as_ref()
+                        .map_or((None, Vec3::ONE, [sched::Who::None; 2]), |x| (x.matrix, x.scale_b, x.actors));
+                    // 0x1004ee4a: +0x64 (the damage number) only from a parent that is a clone itself.
+                    let dam = self.insts[inst].as_ref().filter(|x| x.clone).and_then(|x| x.dam.clone());
+                    if let Some(ci) = self.start(src, Owner::Element(e as usize)) {
+                        if let Some(x) = self.insts[ci].as_mut() {
+                            x.parent_elem = Some(e);
+                            x.driven = Some(e);
+                            x.actors = actors;
+                            x.dam = dam;
+                            // The clone's attach word `&= 0xfffefff0`: mode 0, so op 0x11 / 0x0e..0x10 leave it be.
+                            x.attach &= 0xfffe_fff0;
+                            x.mode = 0;
+                            if op != 0x44 {
+                                let mut m = math::euler(parent.rot);
+                                if let Some(a) = emitter {
+                                    let mut a = a;
+                                    a.w_axis = glam::Vec4::W;
+                                    m = math::then(m, a);
+                                }
+                                if op == 0x6a {
+                                    let [_, _, _, c10] = crate::render::effects::view_set(f.view);
+                                    let mut c = c10;
+                                    c.w_axis = glam::Vec4::W;
+                                    m = math::then(m, c);
+                                }
+                                m.w_axis = parent.world.extend(1.0);
+                                x.matrix = Some(m);
+                                x.scale_a = parent.scale;
+                                x.scale_b = size;
+                            }
+                        }
+                        if let Some(c) = self.elems[e as usize].as_mut() {
+                            c.child = Some(ci);
+                        }
+                        self.update_instance(ci, f, acts);
+                    }
+                }
+                emit::Child::Burst { src } => self.burst(src, e, f, acts, false),
+            }
+        }
+    }
+
+    /// FUN_100d41a0: the dust generator cloned onto the actor (both slots), started, one emission now (life 10000,
+    /// elapsed 10001 after), so it ends; attach point 0x34 puts it at the foot contact. Retail keeps one clone per
+    /// actor and restarts it *(inf: a new instance per step, same emissions)*.
+    fn start_dust(&mut self, f: &Frame, actors: &dyn Actors) {
+        for id in std::mem::take(&mut self.prints) {
+            self.start_print(id, f, actors);
+        }
+        for (g, id) in std::mem::take(&mut self.dust) {
+            let Some(i) = self.start(g, Owner::Step(id)) else { continue };
+            log::debug!(
+                "footstep dust {} on {id:#x}",
+                String::from_utf8_lossy(&self.reg.libs[g.0].tree.nodes[g.1].name)
+            );
+            if let Some(x) = self.insts[i].as_mut() {
+                x.actors = [sched::Who::Actor(id); 2];
+                x.life = 10000.0;
+            }
+            self.attach_now(i, actors);
+            self.update_instance(i, f, actors);
+            if let Some(x) = self.insts[i].as_mut() {
+                x.elapsed = 10001.0;
+                x.finished = true;
+            }
+        }
+    }
+
+    /// FUN_100d3750 for an instance whose emission stream has op 0x8e: down = into the floor, front = the actor's
+    /// (0, 0, 1) (model x is its facing), side = down x front, front = side x down.
+    fn ground_frame(&mut self, i: usize, actors: &dyn Actors) {
+        let Some(x) = self.insts[i].as_mut() else { return };
+        if x.streams[1].iter().any(|o| o.code == 0x8f) {
+            x.area_light = x.actors[0].id().and_then(|id| actors.area_light(id));
+        }
+        if !x.streams[1].iter().any(|o| o.code == 0x8e) {
+            return;
+        }
+        let Some(id) = x.actors[0].id() else { return };
+        let (Some(foot), Some(m)) = (actors.foot(id), actors.matrix(id)) else { return };
+        let down = actors.floor(id).unwrap_or(Vec3::Y);
+        let side = down.cross(m.z_axis.truncate().normalize_or(Vec3::Z)).normalize_or(Vec3::X);
+        let front = side.cross(down).normalize_or(Vec3::Z);
+        x.ground = Some((foot, [side, down, front]));
+    }
+
+    /// Footprint (FUN_100d2970 step 7): 'fmrk' from the actor's part files, else DAT 0; sized by the actor, source
+    /// actor set, one element straight from the template (FUN_1004d920, no generator update).
+    fn start_print(&mut self, id: u32, f: &Frame, actors: &dyn Actors) {
+        let name = u32::from_le_bytes(*b"fmrk");
+        let from_files = actors.files(id).0.iter().find_map(|&file| {
+            let l = self.reg.lib_of(file)?;
+            self.reg.libs[l].find_global(kind::GENERATOR, name).map(|n| (l, n))
+        });
+        let Some(g) = from_files.or_else(|| {
+            self.reg.global.and_then(|l| self.reg.libs[l].find_global(kind::GENERATOR, name).map(|n| (l, n)))
+        }) else {
+            return;
+        };
+        let Some(i) = self.start(g, Owner::Step(id)) else { return };
+        let s = actors.scale(id);
+        if let Some(x) = self.insts[i].as_mut() {
+            x.actors = [sched::Who::Actor(id), sched::Who::None];
+            x.scale_b = Vec3::splat(s);
+        }
+        self.ground_frame(i, actors);
+        let Some(mut inst) = self.insts[i].take() else { return };
+        let me = self.me_pair(&inst, actors);
+        let spawn = emit::emit(&mut self.reg, &mut inst, None, f, &mut self.rng, &|a, b| actors.ground_hit(a, b), me);
+        inst.finished = true;
+        self.insts[i] = Some(inst);
+        if let Some(s) = spawn {
+            self.add_elem(i, s, f, actors);
+        }
+    }
+
+    /// One emission of generator `src` with element `e` as parent, now, run on the generator resource itself (its one
+    /// template instance; task link +0x64 0: no damage number). End-stream op 1 (`end`, FUN_1004e720): a static one's
+    /// elements go first (at most one burst's element lives per template), the count since its start is reset
+    /// (FUN_10053370), then the soft stop; emission op 0x3c only zeroes the countdown, so a static one emits once per
+    /// start.
+    fn burst(&mut self, src: Ref, e: u32, f: &Frame, acts: &dyn Actors, end: bool) {
+        let actors = self
+            .elems
+            .get(e as usize)
+            .and_then(|c| c.as_ref())
+            .and_then(|c| self.insts.get(c.inst)?.as_ref())
+            .map_or([sched::Who::None; 2], |x| x.actors);
+        let (ci, new) = match self.template_inst(src) {
+            Some(ci) => (ci, false),
+            None => match self.start(src, Owner::Element(e as usize)) {
+                Some(ci) => (ci, true),
+                None => return,
+            },
+        };
+        if new && let Some(x) = self.insts[ci].as_mut() {
+            x.actors = actors;
+        }
+        if end && self.is_static(src) {
+            self.clear_elems(ci);
+        }
+        // End op 1 restarts the resource first (FUN_10053370 clears the stop); a resource running only for bursts has no
+        // task of its own, so retail never soft-stops it and every 0x3c burst emits too.
+        if let Some(x) = self.insts[ci].as_mut().filter(|x| end || matches!(x.owner, Owner::Element(_))) {
+            x.stopping = false;
+        }
+        self.emit_once(ci, e, end, f, acts);
+        // Stopped again after the burst: a burst-only resource has no per-frame task, so it emits only when burst.
+        if let Some(x) = self.insts[ci].as_mut().filter(|x| end || new || matches!(x.owner, Owner::Element(_))) {
+            x.stopping = true;
+        }
+    }
+
+    /// FUN_100539e0: a static generator (flag 0x400, or op 1's life 0), whose elements never age.
+    pub(super) fn is_static(&self, g: Ref) -> bool {
+        self.reg.libs[g.0]
+            .generator(g.1)
+            .is_some_and(|gd| gd.flags & 0x400 != 0 || gd.template().is_some_and(|o| o.i16_at(0x22) == 0))
+    }
+
+    /// An attach mode that follows an actor (not 0 / 0xe / 0xf / 0x14; FUN_1005e0b0).
+    pub(super) fn is_attached(&self, g: Ref) -> bool {
+        self.reg.libs[g.0].generator(g.1).is_some_and(|gd| !matches!(gd.attach_mode(), 0 | 0xe | 0xf | 0x14))
+    }
+
+    /// The generator resource running as itself: its instance (no clone, no element's sub-clone), the lowest slot.
+    pub(super) fn template_inst(&self, g: Ref) -> Option<usize> {
+        let template = |i: usize| self.insts[i].as_ref().is_some_and(|x| !x.clone && x.driven.is_none());
+        self.by_src.get(&g)?.iter().copied().find(|&i| template(i))
+    }
+
+    /// FUN_100538e0(G, 0): its live elements go, the instance stays.
+    fn clear_elems(&mut self, i: usize) {
+        let live = self.insts[i].as_mut().map(|x| std::mem::take(&mut x.live)).unwrap_or_default();
+        for e in live {
+            self.drop_elem(e);
+        }
+    }
+
+    /// One emission of instance `i` with element `e` as parent (+0xcc = 0, FUN_100496f0); `reset` the count and clock
+    /// since its start first (FUN_10053370).
+    pub(super) fn emit_once(&mut self, i: usize, e: u32, reset: bool, f: &Frame, acts: &dyn Actors) {
+        let mut kept = None;
+        // The parent is an argument of this one update; the per-frame task passes none (0x1005425e).
+        let mut before = None;
+        if let Some(x) = self.insts[i].as_mut() {
+            before = Some(x.parent_elem);
+            x.parent_elem = Some(e);
+            x.countdown = 0.0;
+            if reset {
+                (x.emitted, x.elapsed, x.finished) = (0, 0.0, false);
+                // End op 1 (0x1004e81d..0x1004e861): +0xd6 = ftol(dt + 1) for this update, then back: one emission.
+                kept = Some(x.interval);
+                x.interval = ((f.dt.min(10.0) + 1.0) as i32).min(0x7fff) as i16;
+            }
+        }
+        self.update_instance(i, f, acts);
+        if let (Some(v), Some(x)) = (kept, self.insts[i].as_mut()) {
+            x.interval = v;
+        }
+        if let (Some(p), Some(x)) = (before, self.insts[i].as_mut()) {
+            x.parent_elem = p;
+        }
+    }
+
+    /// FUN_10043ca0 once life < 1: the end stream (FUN_1004d770), then delete unless held.
+    fn expire(&mut self, e: u32, f: &Frame, acts: &dyn Actors) {
+        let Some(c) = self.elems[e as usize].as_ref() else { return };
+        let inst = c.inst;
+        // The end stream is lent out while it runs, as `emit` lends stream 1, and put back below.
+        let (ops, src, actors, started) = self
+            .insts
+            .get_mut(inst)
+            .and_then(|x| x.as_mut())
+            .map(|x| (std::mem::take(&mut x.streams[3]), x.src, x.actors, Some(x.started)))
+            .unwrap_or_default();
+        for op in &ops {
+            match op.code {
+                // Burst a generator at the element / start a scheduler with the element's actor pair.
+                0x01 => {
+                    if let Some(g) = self.reg.resolve(src.0, src.1, kind::GENERATOR, op.u32(2)) {
+                        self.burst(g, e, f, acts, true);
+                    }
+                }
+                0x02 => {
+                    if let Some(r) = self.reg.resolve(src.0, src.1, kind::SCHEDULER, op.u32(2)) {
+                        self.spawn_task(r, actors[0], actors[1], None, 1.0, None);
+                    }
+                }
+                0x05 => {
+                    let c = self.elems[e as usize].as_mut().unwrap();
+                    c.life = c.max_life;
+                    let life = c.life;
+                    self.writes.push(Write::Word(e, w::LIFE, life.to_bits()));
+                    self.writes.push(Write::Word(e, w::CTRL, ctl::LIFE_SET));
+                }
+                // FUN_10063b20: the spline path's reference count (ours keep none).
+                0x04 => {}
+                _ => self.reg.unhandled(3, op.code),
+            }
+        }
+        if let Some(x) = self.insts.get_mut(inst).and_then(|x| x.as_mut()).filter(|x| Some(x.started) == started) {
+            x.streams[3] = ops;
+        }
+        // A held element goes once its linked clone has no live elements (theirs keep the clone's count at 2 or more).
+        let child = self.elems[e as usize].as_ref().and_then(|c| c.child);
+        let released =
+            child.is_some_and(|ch| self.insts.get(ch).and_then(|x| x.as_ref()).is_none_or(|x| x.live.is_empty()));
+        let Some(c) = self.elems[e as usize].as_mut() else { return };
+        if c.life < 1.0 {
+            if c.flags & 0x2000_0000 != 0 && !released {
+                c.life = 0.0;
+                self.writes.push(Write::Word(e, w::LIFE, 0));
+                self.writes.push(Write::Word(e, w::CTRL, ctl::LIFE_SET));
+            } else {
+                self.elem_gone(inst, e);
+            }
+        }
+    }
+
+    /// Element `e` of instance `inst` goes.
+    fn elem_gone(&mut self, inst: usize, e: u32) {
+        if let Some(x) = self.insts.get_mut(inst).and_then(|x| x.as_mut()) {
+            match x.live.iter().position(|&l| l == e) {
+                Some(0) => drop(x.live.pop_front()),
+                Some(k) => drop(x.live.remove(k)),
+                None => {}
+            }
+            x.emptied |= x.clone && x.live.is_empty();
+        }
+        self.drop_elem(e);
+    }
+
+    /// A footstep (FUN_100d2970 step 7): SeSep `name` (none while sneaking) in the actor's footstep folder (the
+    /// zone's 'fses', 'fser' in the rain weathers when not covered); missing there, the same folder of its model file
+    /// `model` (vtable +0x1e0; flyers keep their wing beats there) becomes its folder; else DAT 0's 'foot' (se 12, a
+    /// plain tone). One shot at `pos`, centred, at `level` (101 walking, 127 running). Then the dust generator `dust`
+    /// of that folder, if any, bursts once on actor `id`.
+    pub fn footstep(
+        &mut self,
+        id: u32,
+        model: Option<u32>,
+        pos: Vec3,
+        name: Option<[u8; 4]>,
+        dust: Option<[u8; 4]>,
+        print: bool,
+        rain: bool,
+        level: i32,
+    ) {
+        let Some(mut at) = self.foot_set(id, rain) else { return };
+        if let Some(name) = name {
+            let found = loop {
+                if let Some(n) = self.reg.libs[at.0].find_in(at.1, 0x3d, name) {
+                    break Some((at.0, n));
+                }
+                // A model file still loading: no step yet rather than the fallback tone.
+                let ml = match model {
+                    Some(m) => match self.lib_for(m) {
+                        Some(ml) => ml,
+                        None => return,
+                    },
+                    None => break None,
+                };
+                match folder_of(&self.reg.libs[ml], rain).map(|f| (ml, f)).filter(|&f| f != at) {
+                    Some(f) => {
+                        at = f;
+                        self.foot_folder.insert(id, Foot { rain, at });
+                    }
+                    None => break None,
+                }
+            };
+            let found = found.or_else(|| {
+                // Retail logs it too ("足音リソースの検索に失敗しました。").
+                log::debug!("effects: footstep {} on {id:#x} not found, DAT 0 'foot'", String::from_utf8_lossy(&name));
+                let g = self.reg.global?;
+                self.reg.libs[g].find_global(0x3d, u32::from_le_bytes(*b"foot")).map(|n| (g, n))
+            });
+            if let Some(r) = found
+                && let Some((se, loops)) = sound::sesep(self.reg.libs[r.0].data(r.1))
+            {
+                let mut s = sound::Sound::new(se, loops);
+                s.res = r;
+                s.pos = pos;
+                s.pan_in = 0.0;
+                s.vol = level;
+                self.sounds.push(s);
+            }
+        }
+        if let Some(g) = dust.and_then(|d| self.reg.libs[at.0].find_in(at.1, kind::GENERATOR, d)) {
+            self.dust.push(((at.0, g), id));
+        }
+        if print {
+            self.prints.push(id);
+        }
+    }
+
+    /// Voices the audio reports playing (FUN_1023ba50), before tick.
+    pub fn set_alive(&mut self, alive: Vec<u32>) {
+        self.alive = alive.into_iter().collect();
+    }
+
+    /// Leaving the world: every effect voice (the zone's scenery loops among them) stops at once.
+    pub fn stop_sounds(&mut self) {
+        for s in std::mem::take(&mut self.sounds) {
+            if s.handle != 0 {
+                self.sound_cmds.push(sound::SoundCmd::Stop { handle: s.handle, ticks: 0 });
+                self.voice_ended(s.handle);
+            }
+        }
+    }
+
+    /// The scene stopped ticking (a lobby screen left): voices stop; persistent sounds start again when it resumes,
+    /// one-shots are dropped.
+    pub fn pause_sounds(&mut self) {
+        for k in (0..self.sounds.len()).rev() {
+            let h = std::mem::take(&mut self.sounds[k].handle);
+            if h != 0 {
+                self.sound_cmds.push(sound::SoundCmd::Stop { handle: h, ticks: 0 });
+                self.voice_ended(h);
+            }
+            if !self.sounds[k].persistent() {
+                self.sounds.swap_remove(k);
+            }
+        }
+    }
+
+    /// Voice handles from this engine carry `base` in their high byte (see VOICE_MASK).
+    pub fn set_voice_base(&mut self, base: u32) {
+        self.voice_base = base & !VOICE_MASK;
+    }
+
+    /// FUN_10036b90 / FUN_10036af0: a voice of the one-at-a-time ids stopping frees the flag.
+    fn voice_ended(&mut self, handle: u32) {
+        if self.solo == Some(handle) {
+            self.solo = None;
+        }
+    }
+
+    /// The manager pass FUN_10035410 / FUN_100356c0 over every sound: volume and pan for the eye, voices started,
+    /// updated, restarted (persistent) or let go; at most 20 distinct sounds start a frame, repeats of one free
+    /// (FUN_10036460).
+    /// FUN_100360f0 on the current stream: level > 0 sets its volume (ftol(level x 127); the stream factors follow
+    /// in the mixer), else its voice stops.
+    fn stream_level(&mut self, level: f32) {
+        let Some(k) = self.sounds.iter().position(|s| s.cur_stream) else { return };
+        if level > 0.0 {
+            self.sounds[k].vol = (level * 127.0) as i32;
+        } else {
+            let s = self.sounds.swap_remove(k);
+            if s.handle != 0 {
+                self.sound_cmds.push(sound::SoundCmd::Stop { handle: s.handle, ticks: 0 });
+                self.voice_ended(s.handle);
+            }
+        }
+    }
+
+    /// The kind-8 fade's end (FUN_10035b00 case 8): its target, then the stream is forgotten.
+    pub(super) fn land_stream_fade(&mut self) {
+        if let Some((to, _, _)) = self.stream_fade.take() {
+            self.stream_level(to);
+            for s in self.sounds.iter_mut() {
+                s.cur_stream = false;
+            }
+        }
+    }
+
+    fn step_sounds(&mut self, f: &Frame) {
+        // FUN_10035940: left -= the frame's ticks; level = 1 + (to - 1)(1 - left / total); it ends below 0.
+        if let Some((to, total, left)) = self.stream_fade {
+            let left = left - f.dt;
+            if left < 0.0 {
+                self.land_stream_fade();
+            } else {
+                self.stream_fade = Some((to, total, left));
+                let t = if total > 0.0 { 1.0 - left / total } else { 1.0 };
+                self.stream_level(1.0 + (to - 1.0) * t);
+            }
+        }
+        let mut gone = Vec::new();
+        for k in 0..self.sounds.len() {
+            let s = &self.sounds[k];
+            // Element sounds sit where their element is (through the generator's matrix).
+            let mut pos = s.pos;
+            if let Some(e) = s.elem
+                && let Some(c) = self.elems.get(e as usize).and_then(|c| c.as_ref())
+            {
+                pos = self
+                    .insts
+                    .get(c.inst)
+                    .and_then(|x| x.as_ref())
+                    .and_then(|x| x.matrix)
+                    .map_or(pos, |m| m.transform_point3(pos));
+            }
+            if let Some(caps) = &s.sph {
+                pos = f.eye + sound::nearest(caps, f.eye);
+            }
+            let vol = match s.vol_key {
+                // 0x1004d67b: the plain day fraction (FUN_1004e310), no repeat count.
+                Some((id, prm)) => {
+                    let x = f.dayfrac;
+                    let v = self.reg.key_desc.get(id as usize).map_or(0.0, |d| {
+                        crate::dat::generator::KeyFrame {
+                            keys: self.reg.key_data[d[0] as usize..(d[0] + d[1]) as usize]
+                                .iter()
+                                .map(|p| (p[0], p[1]))
+                                .collect(),
+                        }
+                        .sample(x, prm & 0xf != 0)
+                    });
+                    (v * 127.0).round() as i32
+                }
+                None => s.vol,
+            };
+            let s = &mut self.sounds[k];
+            if s.grace > 0.0 {
+                s.grace -= f.dt;
+            }
+            let r = if s.stream {
+                Some((vol, 64))
+            } else {
+                sound::attenuate(s.pan_in, vol, pos, f.eye, f.view, s.near, s.far, s.keep, s.ymode, f.focal)
+            };
+            let Some((v, pan)) = r else {
+                if s.persistent() {
+                    if s.handle != 0 {
+                        self.sound_cmds.push(sound::SoundCmd::Stop { handle: s.handle, ticks: 0 });
+                        let h = std::mem::take(&mut s.handle);
+                        self.voice_ended(h);
+                    }
+                } else {
+                    gone.push(k);
+                }
+                continue;
+            };
+            if s.handle == 0 {
+                // FUN_10036460: 20 SeSep resources a pass; once full every start waits, repeats too.
+                if self.start_window.1.len() >= 20 {
+                    continue;
+                }
+                // FUN_10038330: 2239 / 2063 wait while one of them plays.
+                let solo = sound::ONE_AT_A_TIME.contains(&s.se);
+                if solo && self.solo.is_some() {
+                    continue;
+                }
+                if !self.start_window.1.contains(&s.res) {
+                    self.start_window.1.push(s.res);
+                }
+                self.next_voice = (self.next_voice.wrapping_add(1) & VOICE_MASK).max(1);
+                s.handle = self.voice_base | self.next_voice;
+                if solo {
+                    self.solo = Some(s.handle);
+                }
+                s.last_vol = v;
+                s.last_pan = pan;
+                s.grace = sound::GRACE_TICKS;
+                self.sound_cmds.push(sound::SoundCmd::Play {
+                    handle: s.handle,
+                    se: s.se,
+                    vol: v,
+                    pan,
+                    stream: s.stream,
+                });
+                continue;
+            }
+            if s.grace > 0.0 || self.alive.contains(&s.handle) {
+                if pan != s.last_pan {
+                    s.last_pan = pan;
+                    self.sound_cmds.push(sound::SoundCmd::Pan { handle: s.handle, pan });
+                }
+                if v != s.last_vol {
+                    s.last_vol = v;
+                    self.sound_cmds.push(sound::SoundCmd::Level { handle: s.handle, vol: v });
+                }
+            } else if s.persistent() {
+                // Over: a persistent sound starts again next pass (loop by re-trigger).
+                let h = std::mem::take(&mut s.handle);
+                self.voice_ended(h);
+            } else {
+                gone.push(k);
+            }
+        }
+        // FUN_10036230 clears FUN_10036460's start list at the end of its pass, once a retail frame (2 ticks).
+        self.start_window.0 += f.dt;
+        if self.start_window.0 >= 2.0 {
+            self.start_window.0 = (self.start_window.0 - 2.0).min(2.0);
+            self.start_window.1.clear();
+        }
+        // FUN_10035cd0: a generator's sound element that goes (voice over, out of range) fades its voice over the
+        // element's life; drop_elem does it and removes the sound. Scheduler sounds play out.
+        for k in gone.into_iter().rev() {
+            match self.sounds[k].elem.filter(|&e| self.elems.get(e as usize).is_some_and(|c| c.is_some())) {
+                Some(e) => {
+                    let inst = self.elems[e as usize].as_ref().unwrap().inst;
+                    self.elem_gone(inst, e);
+                }
+                None => {
+                    let s = self.sounds.swap_remove(k);
+                    self.voice_ended(s.handle);
+                }
+            }
+        }
+    }
+
+    /// The after-images (op 0x2c) a retail frame on; one goes with its actor. Afb points are placed through the
+    /// actor's posed root, point 0, whose rest turn RotY(pi / 2) cancels (stand-ins without one: the placement).
+    fn step_trails(&mut self, f: &Frame, actors: &dyn Actors) {
+        for slot in 0..self.trails.len() {
+            let Some(tr) = self.trails[slot].as_mut() else { continue };
+            let Some(m) = actors.matrix(tr.actor) else {
+                self.trails[slot] = None;
+                self.trails_dirty = true;
+                continue;
+            };
+            let id = tr.actor;
+            let place = || {
+                let s = Mat4::from_scale(Vec3::splat(actors.scale(id)));
+                Some(
+                    actors
+                        .point_frame(id, 0)
+                        .map_or(m * s, |p| m * p * s * Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+                )
+            };
+            let (live, changed) = tr.step(f.dt, place);
+            if !live {
+                self.trails[slot] = None;
+            }
+            self.trails_dirty |= changed;
+        }
+    }
+
+    /// The draw order of `(raw key, walk place, item)` nodes: retail's ordering table (FUN_10055300: 0x200 buckets
+    /// over 0..512, one list from the far end; walked by FUN_10055520). FUN_100553c0 puts a node after the last one
+    /// whose raw key is >= its own key clamped to [0, 512], so farther draws first, and equal clamped keys (every
+    /// key past 512 too) draw as inserted. A key below 0 clamps to 0 and so goes before every node already below
+    /// 0: those draw last, the last inserted first. Keys that are not normal numbers or 0 (FUN_1006ca20: NaN,
+    /// infinite, denormal) are not inserted. Nodes insert in their task's update, i.e. in the task walk: an
+    /// after-image's task sits by the scheduler that made it (`None`), ahead of the elements, which the factory
+    /// moves to the front of bucket 0xb (`run_order`): the newest element inserts, and draws, first.
+    fn table_order(mut v: Vec<(f32, Option<RunKey>, u32)>) -> Vec<(f32, u32)> {
+        v.retain(|n| n.0 == 0.0 || n.0.is_normal());
+        v.sort_by_key(|n| n.1.map(std::cmp::Reverse));
+        let mut v: Vec<(usize, (f32, Option<RunKey>, u32))> = v.into_iter().enumerate().collect();
+        v.sort_by(|(i, a), (j, b)| {
+            // + 0.0: -0.0 is 0 to retail's compare.
+            let (ka, kb) = (a.0.clamp(0.0, 512.0) + 0.0, b.0.clamp(0.0, 512.0) + 0.0);
+            let (na, nb) = (a.0 < 0.0, b.0 < 0.0);
+            kb.total_cmp(&ka).then(na.cmp(&nb)).then(if na { j.cmp(i) } else { i.cmp(j) })
+        });
+        v.into_iter().map(|(_, (k, _, i))| (k, i)).collect()
+    }
+
+    fn elem_nodes(&self) -> impl Iterator<Item = (f32, Option<RunKey>, u32)> + '_ {
+        self.elems.iter().enumerate().filter_map(|(i, c)| {
+            c.as_ref().filter(|c| c.draw != Draw::None && !c.hidden).map(|c| (c.key, Some(self.run_order(c)), i as u32))
+        })
+    }
+
+    /// The draw order with the after-images among the elements (`TRAIL_ITEM | slot`), each with its sort key (view
+    /// depth: larger is farther; an element's clamped to the table's range): `table_order`.
+    pub fn draw_items_keyed(&self) -> Vec<(f32, u32)> {
+        let view = self.last_frame.map_or(Mat4::IDENTITY, |f| f.view);
+        let trails = self.trails.iter().enumerate().filter_map(|(i, t)| {
+            t.as_ref().filter(|t| t.count >= 2).map(|t| (t.key(&view), None, TRAIL_ITEM | i as u32))
+        });
+        Self::table_order(trails.chain(self.elem_nodes()).collect())
+            .into_iter()
+            .map(|(k, i)| (if i & TRAIL_ITEM != 0 { k } else { k.clamp(0.0, 512.0) }, i))
+            .collect()
+    }
+
+    /// Live elements to draw, back to front (`table_order`).
+    pub fn draw_order(&self) -> Vec<u32> {
+        Self::table_order(self.elem_nodes().collect()).into_iter().map(|(_, i)| i).collect()
+    }
+
+    /// One line per instance not owned by the zone, sub-area or weather: name, owner, actors, attach, elements.
+    pub fn describe_insts(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for (i, x) in self.insts.iter().enumerate() {
+            let Some(x) = x else { continue };
+            if matches!(x.owner, Owner::Zone | Owner::SubArea | Owner::Weather(_)) {
+                continue;
+            }
+            let at = x.matrix.map(|m| m.w_axis.truncate());
+            out.push(format!(
+                "{i:4} {} file {} owner {:?} actors {:?} mode {:#x} attach {:08x} at {at:?} live {} held {} stopping {} finished {}",
+                String::from_utf8_lossy(&x.name),
+                self.reg.libs[x.src.0].file_id,
+                x.owner,
+                x.actors,
+                x.mode,
+                x.attach,
+                x.live.len(),
+                x.held,
+                x.stopping,
+                x.finished
+            ));
+        }
+        out
+    }
+
+    /// Ours (the Lamp Lights setting): the zone's lamp glows (meshes textured "light..."), its data lights (kind 0x47
+    /// elements with a table slot) by position, and the untextured mesh shells in a glow's folder, which are hidden
+    /// while `hide` (the baked lamplight the real lights stand in for).
+    pub fn lamp_scan(&mut self, hide: bool) -> LampScan {
+        let mut scan = LampScan::default();
+        let mut glow_dirs: HashSet<(usize, usize)> = HashSet::new();
+        let mut shells: Vec<(usize, (usize, usize))> = Vec::new();
+        for (i, c) in self.elems.iter().enumerate() {
+            let Some(c) = c else { continue };
+            let Some(inst) = self.insts.get(c.inst).and_then(|x| x.as_ref()) else { continue };
+            if !matches!(inst.owner, Owner::Zone | Owner::SubArea) {
+                continue;
+            }
+            let Some((pos, colour)) = c.back.map(|b| (b.world, b.color)) else { continue };
+            let lib = &self.reg.libs[inst.src.0];
+            let dir = (inst.src.0, lib.tree.nodes[inst.src.1].parent.unwrap_or(usize::MAX));
+            match c.draw {
+                Draw::Mesh(id) => {
+                    let r = self.reg.meshes[id as usize];
+                    let Some(m) = self.reg.libs[r.0].meshes.get(&r.1) else { continue };
+                    let names: Vec<String> = m
+                        .groups
+                        .iter()
+                        .filter_map(|g| g.name.as_deref().map(|n| n.trim().to_ascii_lowercase()))
+                        .filter(|n| !n.is_empty())
+                        .collect();
+                    if names.iter().any(|n| n.starts_with("light")) {
+                        scan.glows.push((pos, colour));
+                        glow_dirs.insert(dir);
+                    } else if names.is_empty() && m.mmb {
+                        shells.push((i, dir));
+                    }
+                }
+                Draw::None if inst.streams[1].first().is_some_and(|o| o.code == 0x01 && o.byte(0x21) == 0x47) => {
+                    let key = u32::from_le_bytes(inst.name);
+                    if let Some(s) = self.reg.light_keys.iter().position(|&k| k == key) {
+                        scan.lights.push((pos, s as u32));
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (i, dir) in shells {
+            let shell = glow_dirs.contains(&dir);
+            if let Some(c) = self.elems[i].as_mut() {
+                c.hidden = hide && shell;
+            }
+            if shell {
+                scan.shells += 1;
+            }
+        }
+        scan
+    }
+
+    /// One line per live element: generator path, what it draws, blend, flags, key, life.
+    pub fn describe(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for (i, c) in self.elems.iter().enumerate() {
+            let Some(c) = c else { continue };
+            let Some(inst) = self.insts.get(c.inst).and_then(|x| x.as_ref()) else { continue };
+            let l = &self.reg.libs[inst.src.0];
+            let path: Vec<String> = l
+                .tree
+                .path(inst.src.1)
+                .iter()
+                .map(|n| String::from_utf8_lossy(n).trim_end_matches(['\0', ' ']).to_string())
+                .collect();
+            let what = match c.draw {
+                Draw::Mesh(id) => {
+                    let r = self.reg.meshes[id as usize];
+                    format!("mesh {}:{}", self.reg.libs[r.0].file_id, self.reg.libs[r.0].tree.nodes[r.1].name())
+                }
+                Draw::Sprite(id) => {
+                    format!("sprite {id}{}", if self.reg.sprite_is_flare(id) { " (flare)" } else { "" })
+                }
+                Draw::Morph(id) => format!("morph {id}"),
+                Draw::Dist => "dist".into(),
+                Draw::Ring => "ring".into(),
+                Draw::DistModel(id) => format!("distmodel {id}"),
+                Draw::DistMorph(id) => format!("distmorph {id}"),
+                Draw::VuDist(n, _) => format!("vudist x{n}"),
+                Draw::DistRing => "distring".into(),
+                Draw::GroundProj(id) => format!("groundproj {id}"),
+                Draw::DamValue => "damv".into(),
+                Draw::None => "none".into(),
+            };
+            let pos = c.back.map(|b| b.world).unwrap_or_default();
+            let frame = if c.frame == NONE {
+                "-".to_string()
+            } else {
+                format!("{}{}", c.frame, if c.borrowed { " borrowed" } else { "" })
+            };
+            out.push(format!(
+                "{i:4} inst {} file {} actors {:?} frame {frame} {}/{} {what} blend {:#06x} flags {:#010x} key {:.1} life {:.0}/{:.0} at {:.1},{:.1},{:.1} argb {:08x}{}",
+                c.inst,
+                l.file_id,
+                inst.actors,
+                path.join("/"),
+                String::from_utf8_lossy(&inst.name),
+                c.blend,
+                c.flags,
+                c.key,
+                c.life,
+                c.max_life,
+                pos.x,
+                pos.y,
+                pos.z,
+                c.back.map_or(0, |b| b.color),
+                if c.drawn { format!(" drawn scale {:?}", c.back.map(|b| b.scale)) } else { String::new() }
+            ));
+        }
+        out
+    }
+
+    /// The status holds on `id` (for the log): each holding task's name, file and ticks left.
+    pub fn held_by(&self, id: u32) -> Vec<String> {
+        self.task_holds
+            .iter()
+            .filter(|h| h.1 == id && h.2 & HOLD_STATUS != 0)
+            .map(|(uid, _, _, left)| {
+                let name = self.tasks.iter().flatten().find(|t| t.uid == *uid).map_or("?".to_string(), |t| {
+                    let lib = &self.reg.libs[t.res.0];
+                    format!("{} ({})", String::from_utf8_lossy(&lib.tree.nodes[t.res.1].name), lib.file_id)
+                });
+                format!("{name} {left:.0} ticks")
+            })
+            .collect()
+    }
+
+    pub fn live_count(&self) -> usize {
+        self.elems.iter().filter(|e| e.is_some()).count()
+    }
+
+    /// Live and allocated scheduler tasks, generator instances and elements (the F12 overlay).
+    pub fn counts(&self) -> [(usize, usize); 3] {
+        [
+            (self.tasks.iter().flatten().count(), self.tasks.len()),
+            (self.insts.iter().flatten().count(), self.insts.len()),
+            (self.elems.iter().flatten().count(), self.elems.len()),
+        ]
+    }
+
+    /// The live tasks and generator instances by name and file, most first: one that keeps growing is a leak.
+    pub fn census(&self) -> Vec<(String, usize)> {
+        let mut by: HashMap<String, usize> = HashMap::new();
+        for t in self.tasks.iter().flatten() {
+            let lib = &self.reg.libs[t.res.0];
+            *by.entry(format!("task {} ({})", String::from_utf8_lossy(&lib.tree.nodes[t.res.1].name), lib.file_id))
+                .or_default() += 1;
+        }
+        for x in self.insts.iter().flatten() {
+            *by.entry(format!("gen {} ({})", String::from_utf8_lossy(&x.name), self.reg.libs[x.src.0].file_id))
+                .or_default() += 1;
+        }
+        let mut v: Vec<(String, usize)> = by.into_iter().collect();
+        v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        v
+    }
+}
+
+/// FUN_100712e0(type 1, 'fses' / 'fser') in a file.
+fn folder_of(lib: &lib::Library, rain: bool) -> Option<usize> {
+    let w = crate::dat::generator::fourcc(if rain { "fser" } else { "fses" });
+    lib.tree.nodes.iter().position(|n| n.kind == kind::FOLDER && n.name == w)
+}
+
+/// Op-1 flags 4 (camera-relative) or 0x4000000 (spawned in view space): stopped under a roof (LAB_10183a30 /
+/// LAB_10183b40).
+fn roofed(g: &crate::dat::generator::Generator) -> bool {
+    g.template().is_some_and(|o| o.u32(1) & 0x400_0004 != 0)
+}
+
+/// FUN_10052eb0 / FUN_1003afd0 for the modes the zone uses; actor modes come with the battle triggers.
+fn attach(inst: &mut Instance, f: &Frame, voyage: Mat4) {
+    match inst.mode {
+        // FUN_10052eb0 returns at once for mode 0: the matrix stays (an element sub-clone's, set at its spawn).
+        0 => {}
+        // Sun / moon (FUN_10180700): a = day fraction x 2pi; moon dir (sin a, cos a, 0), the sun opposite;
+        // placed 1000 / 900 units from the eye against the direction *(inf: the rotation of DAT_105ec978 is
+        // left out)*; FUN_1003be10 0xe / 0xf turn that point by the voyage matrix's rotation, eye included.
+        0xe | 0xf => inst.matrix = Some(Mat4::from_translation(sky_point(inst.mode == 0xe, f.dayfrac, f.eye, voyage))),
+        _ => {}
+    }
+}
+
+/// The sun's (or the moon's) place: 1000 (900) units from the eye against its direction, turned by V's rotation.
+fn sky_point(sun: bool, dayfrac: f32, eye: Vec3, voyage: Mat4) -> Vec3 {
+    use std::f32::consts::PI;
+    let a = dayfrac * 2.0 * PI;
+    let (dir, d) = if sun {
+        (Vec3::new((a + PI).sin(), (a + PI).cos(), 0.0), 1000.0)
+    } else {
+        (Vec3::new(a.sin(), a.cos(), 0.0), 900.0)
+    };
+    voyage.transform_vector3(eye - dir * d)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Retail's element walk (task bucket 0xb, each new element at its front): newest first. Within one tick the
+    /// generators ran unattached first in start order, then the attached ones newest first, so their elements come
+    /// in the reverse of that; a generator's burst, last made first.
+    #[test]
+    fn elements_run_newest_first() {
+        // (born, generator mode, generator start serial, element serial), as the walk reaches them.
+        let walk =
+            [(9, 0, 5, 40), (8, 1, 3, 31), (8, 1, 3, 30), (8, 1, 7, 33), (8, 0, 6, 34), (8, 0xe, 2, 32), (7, 1, 3, 20)];
+        let mut sorted = walk;
+        sorted.sort_by_key(|&(b, m, st, se)| std::cmp::Reverse(run_key(b, m, st, se)));
+        assert_eq!(sorted, walk);
+    }
+
+    /// The ordering table (FUN_100553c0): farther first, equal clamped keys as inserted (after-images, then the
+    /// elements newest first), keys below 0 last and the last inserted first, keys that are no number left out.
+    #[test]
+    fn table_ties_draw_as_inserted() {
+        let e = |born, serial| Some(run_key(born, 0, 1, serial));
+        let nodes = vec![
+            (5000.0, e(1, 1), 1),
+            (4000.0, e(1, 2), 2),
+            (511.0, e(1, 3), 3),
+            (512.0, e(2, 4), 4),
+            (600.0, None, 5),
+            (0.0, e(1, 6), 6),
+            (-3.0, e(1, 7), 7),
+            (-9.0, e(2, 8), 8),
+            (0.0, e(2, 9), 9),
+            (f32::NAN, e(2, 10), 10),
+            (f32::INFINITY, e(2, 11), 11),
+            (1e-40, e(2, 12), 12),
+            (-0.0, e(3, 13), 13),
+        ];
+        let order: Vec<u32> = Effects::table_order(nodes).into_iter().map(|n| n.1).collect();
+        assert_eq!(order, [5, 4, 2, 1, 3, 13, 9, 6, 7, 8]);
+    }
+
+    /// Port Bastok's harbour (zone 236, DAT 336, t_ba/effe/esea): `col1`, `1sea` and `down` on one spot, keys 4500 /
+    /// 4000 / 5000, all past the table's 512. Their generators start with the zone in file order and each makes its
+    /// one element in its first update, so they draw `down`, `1sea`, `col1`: the last made first. Port San d'Oria's
+    /// (zone 232, DAT 332, t_sa/effe): `col1` 0.2 and `down` 0 by key, then `sea2` and `sea1` at -100, which the
+    /// table puts last, the last inserted (`sea2`, made before `sea1`) first.
+    #[test]
+    fn harbour_draws_newest_first() {
+        let cfg = crate::config::Config::load();
+        let Ok(index) = crate::dat::DatIndex::open(&cfg.ffxi_dir()) else { return };
+        let Ok(dll) = std::fs::read(crate::dat::ffximain(&cfg.ffxi_dir())) else { return };
+        let eye = Vec3::new(10.0, -6.0, 20.0);
+        let view = glam::camera::rh::view::look_at_mat4(eye, Vec3::new(0.0, -6.0, 20.0), Vec3::NEG_Y);
+        let f = Frame {
+            dt: 1.0,
+            seconds: 1.0 / 60.0,
+            dayfrac: 0.5,
+            view,
+            view_rot: view,
+            eye,
+            draw_distance: 2000.0,
+            area_light: Vec3::ONE,
+            focal: 350.0,
+            moon_phase: 0,
+            weekday: 0,
+        };
+        for (file, folder, want) in [
+            (336, &["esea"][..], &["down", "1sea", "col1"][..]),
+            (332, &["wate", "sea"], &["col1", "down", "sea2", "sea1"]),
+        ] {
+            let mut fx = Effects::new();
+            fx.set_keys(std::sync::Arc::new(crate::dat::zone::Keys::from_ffximain(&dll).unwrap()));
+            fx.set_global(lib::Library::load(0, index.read(0).unwrap()).unwrap());
+            let l = fx.load_zone(lib::Library::load(file, index.read(file).unwrap()).unwrap());
+            for _ in 0..3 {
+                fx.tick(&f, &NoActors);
+            }
+            let order: Vec<String> = fx
+                .draw_order()
+                .into_iter()
+                .filter_map(|e| {
+                    let x = fx.insts[fx.elems[e as usize].as_ref()?.inst].as_ref()?;
+                    let path = fx.reg.libs[l].tree.path(x.src.1);
+                    let under =
+                        path.iter().any(|p| folder.contains(&String::from_utf8_lossy(p).trim_end_matches(['\0', ' '])));
+                    (x.src.0 == l && under).then(|| String::from_utf8_lossy(&x.name).into_owned())
+                })
+                .collect();
+            assert_eq!(order, want, "DAT {file}");
+        }
+    }
+
+    /// File 3445 gob_/vib1: a generator's task (bucket 8 / 9) makes its element before the walk reaches bucket 0xb,
+    /// so the element's first update (FUN_10045a40 -> FUN_10044ae0: the life, then the update stream with op 0x5f)
+    /// runs in the frame it is made: its first kick lands in that frame, at the life counted down once.
+    #[test]
+    fn first_kick_in_the_frame_made() {
+        let cfg = crate::config::Config::load();
+        let Ok(index) = crate::dat::DatIndex::open(&cfg.ffxi_dir()) else { return };
+        let Ok(bytes) = index.read(3445) else { return };
+        let mut fx = Effects::new();
+        let lib = lib::Library::load(3445, bytes).unwrap();
+        let node = lib.gens.iter().find(|g| &g.name == b"vib1").unwrap().node;
+        let l = fx.reg.add(lib);
+        let eye = Vec3::new(0.0, -2.0, -10.0);
+        let f = Frame {
+            dt: 2.0,
+            seconds: 1.0 / 30.0,
+            dayfrac: 0.5,
+            view: Mat4::IDENTITY,
+            view_rot: Mat4::IDENTITY,
+            eye,
+            draw_distance: 2000.0,
+            area_light: Vec3::ONE,
+            focal: 350.0,
+            moon_phase: 0,
+            weekday: 0,
+        };
+        fx.start((l, node), Owner::Zone).unwrap();
+        fx.tick(&f, &NoActors);
+        let c = fx.elems.iter().flatten().find(|c| c.quake.is_some()).expect("vib1's element");
+        assert!(c.max_life > f.dt + 1.0 && c.life == c.max_life - f.dt, "{} of {}", c.life, c.max_life);
+        assert!(!fx.quakes.is_empty() && fx.rumble > 0, "no kick in the frame it was made");
+    }
+}

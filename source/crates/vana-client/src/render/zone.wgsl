@@ -1,0 +1,997 @@
+struct Uniforms {
+    view_proj: mat4x4<f32>,
+    // xyz: direction towards the light, w: ambient level
+    light: vec4<f32>,
+    fog_color: vec4<f32>,
+    // x: fog start, y: fog end
+    fog: vec4<f32>,
+    eye: vec4<f32>,
+    inv_view_proj: mat4x4<f32>,
+    // Zone lighting (dat/weather.rs); sun.w = 1 when enabled, xyz = direction the light travels.
+    sun: vec4<f32>,
+    sun_color: vec4<f32>,
+    ambient: vec4<f32>,
+    actor_sun: vec4<f32>,
+    actor_color: vec4<f32>,
+    actor_ambient: vec4<f32>,
+    sky_info: vec4<f32>,
+    clear: vec4<f32>,
+    sky_colors: array<vec4<f32>, 8>,
+    sky_stops: array<vec4<f32>, 2>,
+    // x: the area slot of 'ev10' while a sub-area is shown (0 none); y: now (door parts); z, w: the draw distance D
+    // (0 none) and the Clipping factor K (render/cull.rs).
+    area_info: vec4<f32>,
+    // The voyage matrix (identity off a ship's voyage).
+    voyage: mat4x4<f32>,
+    // Config 0017 off: the sun and the moon (direction the light travels, colour) as two lights (FUN_10181b50).
+    two: array<vec4<f32>, 4>,
+    // x: 1 with bump mapping on (one eased light, vertex range fog), 0 off (two lights, table fog); y: 1 with
+    // Settings' Light Shading Smooth (point lights per pixel, ours), 0 Retail (per vertex).
+    modes: vec4<f32>,
+    // Windowed mode's light boost (render light_boost, FUN_1000be50): rgb factors, w = 1 on.
+    boost: vec4<f32>,
+};
+
+// FUN_1000bf30 -> FUN_1000be50 on every SetLight while windowed: a diffuse colour all of whose parts are below 0.8 is
+// multiplied by the channel factors and capped at 1.
+fn boost(c: vec3<f32>) -> vec3<f32> {
+    if (u.boost.w > 0.5 && all(c < vec3<f32>(0.8))) {
+        return min(c * u.boost.rgb, vec3<f32>(1.0));
+    }
+    return c;
+}
+
+// D3DRS_AMBIENT for the fixed-function draws (FUN_10188e00, scenery / furniture mode 0, actors mode 1): the env's
+// ambient (bytes / 255) through the windowed boost, capped at 1, as bytes trunc(a x 128); D3D then takes them / 255,
+// so the ambient term is about half the env's (with AMBIENTMATERIALSOURCE COLOR1 for scenery, set at device init).
+fn ambient_rs(a: vec3<f32>) -> vec3<f32> {
+    return floor(min(boost(a), vec3<f32>(1.0)) * 128.0);
+}
+
+// An area environment's lighting (sun.w = 1 when it has one); fog.xy = start, end.
+struct Area {
+    sun: vec4<f32>,
+    sun_color: vec4<f32>,
+    ambient: vec4<f32>,
+    fog_color: vec4<f32>,
+    fog: vec4<f32>,
+    actor_sun: vec4<f32>,
+    actor_color: vec4<f32>,
+    actor_ambient: vec4<f32>,
+    two: array<vec4<f32>, 4>,
+};
+
+@group(0) @binding(0) var<uniform> u: Uniforms;
+// Point lights (two vec4s each: position, range; colour rgb / 128 (0 when unlit), intensity I), from the effects
+// (MODLOG "Point lights on scenery"; D3D8 POINT, Att2 = 1 / I, or 1 when I <= 0).
+@group(0) @binding(1) var<storage, read> plights: array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read> areas: array<Area>;
+
+// A door part (scheduler ops 0x0d / 0x0c): rotation and translation from, to, (start tick, ticks); u.area_info.y is now.
+struct Part {
+    rot_from: vec4<f32>,
+    rot_to: vec4<f32>,
+    rot_time: vec4<f32>,
+    pos_from: vec4<f32>,
+    pos_to: vec4<f32>,
+    pos_time: vec4<f32>,
+};
+@group(0) @binding(3) var<storage, read> parts: array<Part>;
+
+// Lamp shadows (ours, render/lampshadow.rs; its receive pass darkens the scenery): per layer the lamp's light slot + 1
+// (0 = unused) and its matrix; misc.z REACH, misc.w the fraction of a light's range within which a lamp takes over the
+// main shadow (vs_skinned_sun_lamped).
+struct LampShadowU {
+    slots: vec4<u32>,
+    vp: array<mat4x4<f32>, 4>,
+    misc: vec4<f32>,
+};
+@group(0) @binding(5) var<uniform> lamp_sh: LampShadowU;
+// Config 0011: the animated meshes' vertex deltas (vertex flags >> 8, minus 1); the instance's sway is area.y.
+@group(0) @binding(4) var<storage, read> deltas: array<vec4<f32>>;
+
+fn part_k(time: vec4<f32>) -> f32 {
+    return select(clamp((u.area_info.y - time.x) / time.y, 0.0, 1.0), 1.0, time.y <= 0.0);
+}
+
+// FUN_100acef0: the part's world matrix = base * T(t) * Rx(a.x) * Ry(a.y) * Rz(a.z) (column vectors).
+fn part_matrix(slot: u32) -> mat4x4<f32> {
+    let p = parts[slot];
+    let a = mix(p.rot_from.xyz, p.rot_to.xyz, part_k(p.rot_time));
+    let t = mix(p.pos_from.xyz, p.pos_to.xyz, part_k(p.pos_time));
+    let cx = cos(a.x); let sx = sin(a.x);
+    let cy = cos(a.y); let sy = sin(a.y);
+    let cz = cos(a.z); let sz = sin(a.z);
+    let rx = mat4x4<f32>(vec4<f32>(1.0, 0.0, 0.0, 0.0), vec4<f32>(0.0, cx, sx, 0.0), vec4<f32>(0.0, -sx, cx, 0.0), vec4<f32>(0.0, 0.0, 0.0, 1.0));
+    let ry = mat4x4<f32>(vec4<f32>(cy, 0.0, -sy, 0.0), vec4<f32>(0.0, 1.0, 0.0, 0.0), vec4<f32>(sy, 0.0, cy, 0.0), vec4<f32>(0.0, 0.0, 0.0, 1.0));
+    let rz = mat4x4<f32>(vec4<f32>(cz, sz, 0.0, 0.0), vec4<f32>(-sz, cz, 0.0, 0.0), vec4<f32>(0.0, 0.0, 1.0, 0.0), vec4<f32>(0.0, 0.0, 0.0, 1.0));
+    let tr = mat4x4<f32>(vec4<f32>(1.0, 0.0, 0.0, 0.0), vec4<f32>(0.0, 1.0, 0.0, 0.0), vec4<f32>(0.0, 0.0, 1.0, 0.0), vec4<f32>(t, 1.0));
+    return tr * rx * ry * rz;
+}
+@group(1) @binding(0) var tex: texture_2d<f32>;
+@group(1) @binding(1) var samp: sampler;
+
+struct VertexIn {
+    @location(0) pos: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) color: vec4<f32>,
+    @location(3) uv: vec2<f32>,
+    @location(4) m0: vec4<f32>,
+    @location(5) m1: vec4<f32>,
+    @location(6) m2: vec4<f32>,
+    @location(7) m3: vec4<f32>,
+    // The placement's four lights (table slot + 1, 0 = none).
+    @location(8) lights: vec4<u32>,
+    // Bit 0: the model's 'ev10' flag (MMB +0x10 bit 28).
+    @location(9) flags: u32,
+    // x: the placement's area slot (0 = the zone's); y: the sway step (render/sway.rs); z: 1 with NORMALIZENORMALS.
+    @location(10) area: vec4<u32>,
+    // Level of detail: drawn while x < d^2 <= y from the eye to the placement's origin; y 0 = always.
+    @location(11) band: vec4<f32>,
+};
+
+struct VertexOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) color: vec4<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) world: vec3<f32>,
+    @location(3) normal: vec3<f32>,
+    @location(4) depth: f32,
+    // Target flash (FUN_100c94a0): ambient lerp toward 220 / 255, fog colour scale.
+    @location(5) flash: vec2<f32>,
+    // Actors: the floor lamp, per vertex. Scenery: its point lights per vertex (Light Shading Retail; vc x the sum,
+    // clamped for fixed function), 0 with Smooth (per pixel from `lights`).
+    @location(6) point: vec3<f32>,
+    // The placement's four light slots (+1, 0 = none) for the per-pixel point lights.
+    @location(7) @interpolate(flat) lights: vec4<u32>,
+    // The area slot it is lit by (0 = the zone's); bit 15: the 'ev10' path, which keeps the zone's fog range.
+    @location(8) @interpolate(flat) area: u32,
+    // Actors: the model colour's RGB (actor +0x660, 0x80 = 1.0), the material colour of the ambient and diffuse terms.
+    @location(9) @interpolate(flat) tint: vec3<f32>,
+    // Config 0017's bumped corners: 0.5 (T.L, B.L, N.L) + 0.5 (the vertex shader's oD1).
+    @location(10) tsl: vec3<f32>,
+    // The eye distance, for the vertex (range) fog of bump-mapping mode.
+    @location(11) range: f32,
+    // Scenery: the transformed normal's length, which scales every N.L (NORMALIZENORMALS off); 1 for actors.
+    @location(12) nscale: f32,
+};
+
+// FUN_100c94a0: of the floor's lights, the strongest w = 1 / max(d^2 Att2, 1e-4) at the actor's position within
+// its range (an unlit one competes too), as a directional light from the lamp: C x w x max(N.L, 0).
+fn actor_lamp(packed: u32, pos: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
+    var best = 0.0;
+    var col = vec3<f32>(0.0);
+    var dir = vec3<f32>(0.0);
+    for (var k = 0u; k < 4u; k = k + 1u) {
+        let s = (packed >> (8u * k)) & 0xffu;
+        if (s == 0u) { continue; }
+        let a = plights[2u * (s - 1u)];
+        let c = plights[2u * (s - 1u) + 1u];
+        let l = a.xyz - pos;
+        let d2 = dot(l, l);
+        if (sqrt(d2) > a.w) { continue; }
+        let att2 = select(1.0, 1.0 / c.w, c.w > 0.0);
+        let wt = 1.0 / max(d2 * att2, 1e-4);
+        if (wt > best) {
+            best = wt;
+            col = boost(c.rgb) * wt;
+            dir = l * inverseSqrt(max(d2, 1e-12));
+        }
+    }
+    return col * max(dot(n, dir), 0.0);
+}
+
+// Settings' Light Shading Smooth (ours, u.modes.y = 1): the D3D8 term per pixel with the distance floored at 1 and a
+// smooth window over the range instead of the hard cut (not retail; retail's per-vertex lights draw triangles of
+// light on coarse walls).
+fn point_lights(lights: vec4<u32>, p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
+    var sum = vec3<f32>(0.0);
+    if (u.modes.y < 0.5) {
+        return sum;
+    }
+    for (var k = 0u; k < 4u; k = k + 1u) {
+        let s = lights[k];
+        if (s == 0u) { continue; }
+        let a = plights[2u * (s - 1u)];
+        let c = plights[2u * (s - 1u) + 1u];
+        let l = a.xyz - p;
+        let d2 = dot(l, l);
+        let r2 = a.w * a.w;
+        if (d2 >= r2) { continue; }
+        let q = d2 / r2;
+        let win = (1.0 - q * q) * (1.0 - q * q);
+        sum = sum + boost(c.rgb) * c.w * max(dot(n, l * inverseSqrt(max(d2, 1e-6))), 0.0) * win / max(d2, 1.0);
+    }
+    return sum;
+}
+
+// Retail's fixed function (FUN_1017c9c0, D3D8 POINT lights from the table, FUN_10178530: Att0 = Att1 = 0, Att2 =
+// 1 / I, Diffuse rgb / 128 or 0 when I <= 0), per vertex: C x I x max(N.L, 0) / d^2 with N the world normal as it
+// comes (NORMALIZENORMALS off: `nt`, not unit), none past the range.
+fn ff_points(lights: vec4<u32>, p: vec3<f32>, nt: vec3<f32>) -> vec3<f32> {
+    var sum = vec3<f32>(0.0);
+    for (var k = 0u; k < 4u; k = k + 1u) {
+        let s = lights[k];
+        if (s == 0u) { continue; }
+        let a = plights[2u * (s - 1u)];
+        let c = plights[2u * (s - 1u) + 1u];
+        let l = a.xyz - p;
+        let d2 = max(dot(l, l), 1e-12);
+        if (d2 > a.w * a.w) { continue; }
+        sum = sum + boost(c.rgb) * c.w * max(dot(nt, l) * inverseSqrt(d2), 0.0) / d2;
+    }
+    return sum;
+}
+
+// Config 0017's type-3 meshes (the vertex shaders at 0x10376ff8.. for 0..4 lights, built by FUN_10178250): in object
+// space, c11..c14 = the light position x placement +0x80 (the placement's inverse, T(-p) Rz Ry Rx S^-1, even on a
+// voyage) against the vertex v0 and its raw normal v3: sum_k c15..c17[k] x max(N.(P - V), 0) / d^3 x (d^2 <= c18[k]
+// = Range^2), c15..c17 the boosted Diffuse x I per lane (zeroed per draw). So a placement scaled by s sees I s^2 / d^2
+// and the range R s. `inv`'s columns are the rows of the inverse of the placement's 3 x 3 part, `t` its translation.
+// The inverse's row for axis `a` of a placement S Rx Ry Rz T (`b`, `c` the next two axes in turn).
+fn inv_axis(a: vec3<f32>, b: vec3<f32>, c: vec3<f32>) -> vec3<f32> {
+    let s2 = dot(a, a);
+    if (s2 > 0.0) {
+        return a / s2;
+    }
+    let n = cross(b, c);
+    return n * inverseSqrt(max(dot(n, n), 1e-30));
+}
+
+fn bump_points(lights: vec4<u32>, v: vec3<f32>, n: vec3<f32>, inv: mat3x3<f32>, t: vec3<f32>) -> vec3<f32> {
+    var sum = vec3<f32>(0.0);
+    for (var k = 0u; k < 4u; k = k + 1u) {
+        let s = lights[k];
+        if (s == 0u) { continue; }
+        let a = plights[2u * (s - 1u)];
+        let c = plights[2u * (s - 1u) + 1u];
+        let r = (a.xyz - t) * inv - v;
+        let d2 = max(dot(r, r), 1e-12);
+        if (d2 > a.w * a.w) { continue; }
+        sum = sum + boost(c.rgb) * c.w * max(dot(r, n) * inverseSqrt(d2) / d2, 0.0);
+    }
+    return sum;
+}
+
+@vertex
+fn vs_main(v: VertexIn) -> VertexOut {
+    var model = mat4x4<f32>(v.m0, v.m1, v.m2, v.m3);
+    let part = u32(v.band.z);
+    if (part != 0u) {
+        model = model * part_matrix(part);
+    }
+    // FUN_1017c9c0 for scene slot type 3 while a voyage runs: the instance through V.
+    let voyaged = v.band.w != 0.0;
+    if (voyaged) {
+        model = u.voyage * model;
+    }
+    // FUN_10175ac0 binds position buffer trunc((N - 1) s) = pos + k delta (render/sway.rs writes k).
+    var pos = v.pos;
+    let di = v.flags >> 8u;
+    let bumped = (v.flags & 2u) != 0u;
+    if (di != 0u && !bumped) {
+        pos = pos + bitcast<f32>(v.area.y) * deltas[di - 1u].xyz;
+    }
+    let world = model * vec4<f32>(pos, 1.0);
+    var out: VertexOut;
+    out.clip = u.view_proj * world;
+    out.color = v.color;
+    out.uv = v.uv;
+    out.world = world.xyz;
+    // D3D8 lights with the normal through the inverse transpose of the world matrix (its cofactors / det), and with
+    // NORMALIZENORMALS off (FUN_1017c9c0 sets it from placement +0xe) uses it as it comes: a placement scaled by s
+    // sees N.L / s, and the vertex normal's length counts too.
+    let ma = model[0].xyz;
+    let mb = model[1].xyz;
+    let mc = model[2].xyz;
+    let det = dot(ma, cross(mb, mc));
+    let nt = (cross(mb, mc) * v.normal.x + cross(mc, ma) * v.normal.y + cross(ma, mb) * v.normal.z) / det;
+    let nl = length(nt);
+    out.normal = select(vec3<f32>(0.0, 1.0, 0.0), nt / nl, nl > 1e-12);
+    out.nscale = select(nl, 1.0, v.area.z != 0u);
+    out.range = distance(world.xyz, u.eye.xyz);
+    // The bumped vertex shader's oD1 (a colour, so clamped): the sun vector in object space (c4 = -(sun direction x
+    // the inverse world)) against the object-space T, B = N x T and N, unnormalised. On a voyage FUN_1017c9c0 takes
+    // the transpose of world x V (D3DXMatrixTranspose) as the inverse: no 1 / s^2.
+    if (bumped && di != 0u) {
+        let t = deltas[di - 1u].xyz;
+        let n = v.normal;
+        let b = cross(n, t);
+        var sun = u.sun.xyz;
+        let slot = v.area.x;
+        if (slot != 0u && areas[slot].sun.w > 0.5) {
+            sun = areas[slot].sun.xyz;
+        }
+        let ws = -sun;
+        var l = vec3<f32>(dot(cross(mb, mc), ws), dot(cross(mc, ma), ws), dot(cross(ma, mb), ws)) / det;
+        if (voyaged) {
+            l = vec3<f32>(dot(ma, ws), dot(mb, ws), dot(mc, ws));
+        }
+        out.tsl = clamp(0.5 * vec3<f32>(dot(t, l), dot(b, l), dot(n, l)) + 0.5, vec3<f32>(0.0), vec3<f32>(1.0));
+    }
+    // Retail's point lights per vertex (Light Shading Retail): fixed function in world space, the bumped path in the
+    // placement's object space (oT3's lamp part, x vc, interpolated unclamped; t3 clamps it per pixel). Fixed
+    // function clamps the vertex colour, so its part is clamped here.
+    if (u.modes.y < 0.5 && any(v.lights != vec4<u32>(0u))) {
+        if (bumped && di != 0u) {
+            // Placement +0x80 (FUN_10179430): T(-p) Rz(-z) Ry(-y) Rx(-x) S(1 / s), so row k is the placement's axis
+            // k over s_k^2; a zero scale takes 1 (the unit axis, from the other two).
+            let ba = v.m0.xyz;
+            let bb = v.m1.xyz;
+            let bc = v.m2.xyz;
+            let inv = mat3x3<f32>(inv_axis(ba, bb, bc), inv_axis(bb, bc, ba), inv_axis(bc, ba, bb));
+            out.point = v.color.rgb * bump_points(v.lights, v.pos, v.normal, inv, v.m3.xyz);
+        } else {
+            out.point = clamp(v.color.rgb * ff_points(v.lights, world.xyz, out.normal * out.nscale), vec3<f32>(0.0), vec3<f32>(1.0));
+        }
+    }
+    out.depth = out.clip.w;
+    out.flash = vec2<f32>(0.0, 1.0);
+    out.tint = vec3<f32>(1.0);
+    out.lights = v.lights;
+    let ev10 = u32(u.area_info.x);
+    out.area = select(v.area.x, ev10 | 0x8000u, (v.flags & 1u) != 0u && ev10 != 0u);
+    // FUN_1017c9c0's LOD pick: an instance outside its band collapses to nothing.
+    let origin = select(v.m3.xyz, (u.voyage * v.m3).xyz, voyaged);
+    let d = u.eye.xyz - origin;
+    let d2 = dot(d, d);
+    if (v.band.y > 0.0 && !(d2 > v.band.x && d2 <= v.band.y)) {
+        out.clip = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    }
+    return out;
+}
+
+// Skinned actors (ZoneRenderer::pose_actor): model matrix, (alpha, flash ambient, flash fog, lamp lights), (area slot,
+// model colour r, g, b), then (quat, translation) per bone.
+@group(2) @binding(0) var<storage, read> pose: array<vec4<f32>>;
+
+struct SkinIn {
+    @location(0) p0: vec3<f32>,
+    @location(1) n0: vec3<f32>,
+    @location(2) p1: vec3<f32>,
+    @location(3) n1: vec3<f32>,
+    @location(4) bones: vec2<u32>,
+    @location(5) w: vec2<f32>,
+    @location(6) uv: vec2<f32>,
+    @location(7) mat: vec2<f32>,
+    @location(8) cloth: u32,
+};
+
+fn qrot(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    let t = 2.0 * cross(q.xyz, v);
+    return v + q.w * t + cross(q.xyz, t);
+}
+
+// As character::skin: p = sum(r * (s * pos) + t * w), n = normalize_or_zero(sum(r * normal)); pos and normal come
+// pre-weighted; s is the bone's accumulated scale (FUN_100339b0 pass 2).
+@vertex
+fn vs_skinned(v: SkinIn) -> VertexOut {
+    return skin(v);
+}
+
+fn skin(v: SkinIn) -> VertexOut {
+    let a = 6u + 3u * v.bones.x;
+    let b = 6u + 3u * v.bones.y;
+    var p = qrot(pose[a], pose[a + 2u].xyz * v.p0) + pose[a + 1u].xyz * v.w.x + qrot(pose[b], pose[b + 2u].xyz * v.p1) + pose[b + 1u].xyz * v.w.y;
+    var n = qrot(pose[a], v.n0) + qrot(pose[b], v.n1);
+    // A cloth particle (client/cloth.rs): the simulation's normal, and its position when free (w 1 = set).
+    let c = v.cloth & 0x7fffffffu;
+    if (c != 0u) {
+        let cp = pose[c];
+        let cn = pose[c + 1u];
+        if ((v.cloth & 0x80000000u) != 0u && cp.w == 1.0) {
+            p = cp.xyz;
+        }
+        if (cn.w == 1.0) {
+            n = cn.xyz;
+        }
+    }
+    let len = length(n);
+    let nn = select(vec3<f32>(0.0), n / len, len > 1e-12);
+    let model = mat4x4<f32>(pose[0], pose[1], pose[2], pose[3]);
+    let world = model * vec4<f32>(p, 1.0);
+    var out: VertexOut;
+    out.clip = u.view_proj * world;
+    // As the CPU path's Unorm8 colour: red the material light factor (0x80 = 1.0), green its cloth flag; alpha
+    // 0x80 = opaque.
+    out.color = vec4<f32>(round(v.mat.x * 128.0) / 255.0, v.mat.y, 128.0 / 255.0, round(pose[4].x * 128.0) / 255.0);
+    out.uv = v.uv;
+    out.world = world.xyz;
+    out.normal = normalize((model * vec4<f32>(nn, 0.0)).xyz);
+    out.depth = out.clip.w;
+    out.flash = pose[4].yz;
+    out.point = actor_lamp(bitcast<u32>(pose[4].w), model[3].xyz, out.normal);
+    out.area = u32(pose[5].x);
+    out.tint = pose[5].yzw;
+    out.nscale = 1.0;
+    return out;
+}
+
+// The shadow silhouette (render/shadow.rs, FUN_100329e0): the actor drawn flat white from its light, through the
+// caster's matrix at group 3 (a dynamic offset into the casters' outputs).
+@group(3) @binding(0) var<storage, read> sil_vp: mat4x4<f32>;
+
+@vertex
+fn vs_skinned_silhouette(v: SkinIn) -> VertexOut {
+    var out = skin(v);
+    out.clip = sil_vp * vec4<f32>(out.world, 1.0);
+    return out;
+}
+
+// Real shadows from the sun (render/sunshadow.rs): the actor's depth through the light matrix, and its feet height
+// (its origin's y) for the shadow's height fade.
+struct SunOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) @interpolate(flat) feet: f32,
+};
+
+@vertex
+fn vs_skinned_sun(v: SkinIn) -> SunOut {
+    let s = skin(v);
+    var out: SunOut;
+    out.clip = sil_vp * vec4<f32>(s.world, 1.0);
+    out.feet = pose[3].y;
+    return out;
+}
+
+// The sun's depth for our character (or mount) while a lamp map takes it in (ActorGpu::lamp_lit): left out, so the
+// lamp's shadow is its main one, while one of those lamps is lit and its live range (at most REACH) reaches the
+// character well inside its fade (lampshadow::receive); otherwise drawn as vs_skinned_sun.
+@vertex
+fn vs_skinned_sun_lamped(v: SkinIn) -> SunOut {
+    let sk = skin(v);
+    var out: SunOut;
+    out.clip = sil_vp * vec4<f32>(sk.world, 1.0);
+    out.feet = pose[3].y;
+    let centre = pose[3].xyz - vec3<f32>(0.0, 0.9, 0.0);
+    for (var j = 0; j < 4; j++) {
+        let s = lamp_sh.slots[j];
+        if (s == 0u) { continue; }
+        let a = plights[2u * (s - 1u)];
+        let c = plights[2u * (s - 1u) + 1u];
+        if (c.w <= 0.0 || max(c.r, max(c.g, c.b)) <= 0.0) { continue; }
+        if (distance(centre, a.xyz) >= lamp_sh.misc.w * min(a.w, lamp_sh.misc.z)) { continue; }
+        let q = lamp_sh.vp[j] * vec4<f32>(centre, 1.0);
+        if (q.w <= 0.0) { continue; }
+        let p = q.xyz / q.w;
+        if (abs(p.x) < 1.0 && abs(p.y) < 1.0 && p.z > 0.0 && p.z < 1.0) {
+            out.clip = vec4<f32>(0.0, 0.0, 2.0, 1.0);
+        }
+    }
+    return out;
+}
+
+@fragment
+fn fs_sun_feet(i: SunOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(i.feet, 0.0, 0.0, 1.0);
+}
+
+// TFACTOR 0x80FFFFFF selected for colour and alpha (textures ignored, so cutouts fill solid).
+@fragment
+fn fs_silhouette() -> @location(0) vec4<f32> {
+    return vec4<f32>(1.0);
+}
+
+// The actor shine overlay (scheduler ops 0x40..0x47): U / V scroll, TFACTOR (RGBA 0..1).
+struct ShineU {
+    uv: vec4<f32>,
+    tf: vec4<f32>,
+};
+@group(3) @binding(0) var<uniform> shine: ShineU;
+
+// The skinned vertices as words (SkinVertex, 21 a vertex: n0 at 3, n1 at 9, bones at 12), for the wrap.
+@group(3) @binding(1) var<storage, read> shine_verts: array<u32>;
+
+fn shine_coords(i: u32) -> vec2<f32> {
+    let o = 21u * i;
+    let w = &shine_verts;
+    let n0 = vec3<f32>(bitcast<f32>((*w)[o + 3u]), bitcast<f32>((*w)[o + 4u]), bitcast<f32>((*w)[o + 5u]));
+    let n1 = vec3<f32>(bitcast<f32>((*w)[o + 9u]), bitcast<f32>((*w)[o + 10u]), bitcast<f32>((*w)[o + 11u]));
+    let a = 6u + 3u * (*w)[o + 12u];
+    let b = 6u + 3u * (*w)[o + 13u];
+    let n = qrot(pose[a], n0) + qrot(pose[b], n1);
+    let len = length(n);
+    let nn = select(vec3<f32>(0.0), n / len, len > 1e-12);
+    let model = mat4x4<f32>(pose[0], pose[1], pose[2], pose[3]);
+    let wn = normalize((model * vec4<f32>(nn, 0.0)).xyz);
+    return vec2<f32>(0.5 * wn.x + 0.5 + shine.uv.x, 0.5 * wn.y + 0.5 + shine.uv.y);
+}
+
+// FUN_1002b6e0's second pass: texture coordinates from the camera-space normal through the inverse view rotation
+// (the world normal), x 0.5 + 0.5, plus the scroll. With 0040 Off (uv.z = 1, D3DRS_WRAP0 = 7) each coordinate runs the
+// short way round the 0 / 1 seam across a triangle: taken relative to the triangle's first corner.
+@vertex
+fn vs_skinned_shine(v: SkinIn, @builtin(vertex_index) vi: u32) -> VertexOut {
+    var out = skin(v);
+    out.uv = vec2<f32>(0.5 * out.normal.x + 0.5 + shine.uv.x, 0.5 * out.normal.y + 0.5 + shine.uv.y);
+    if (shine.uv.z > 0.5) {
+        let first = shine_coords(vi - vi % 3u);
+        let d = out.uv - first;
+        out.uv = first + d - round(d);
+    }
+    return out;
+}
+
+// Stages MODULATE2X(TEXTURE, DIFFUSE white), MODULATE2X(CURRENT, TFACTOR), added SRCALPHA / ONE. Texture alpha comes
+// doubled from the upload. Fog fades it out *(inf: the base pass's fog state)*.
+@fragment
+fn fs_actor_shine(in: VertexOut) -> @location(0) vec4<f32> {
+    let t = textureSample(tex, samp, in.uv);
+    let rgb = clamp(clamp(2.0 * t.rgb, vec3<f32>(0.0), vec3<f32>(1.0)) * 2.0 * shine.tf.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    let a = clamp(clamp(t.a, 0.0, 1.0) * 2.0 * shine.tf.a, 0.0, 1.0);
+    let dist = distance(in.world, u.eye.xyz);
+    let fog = clamp((dist - u.fog.x) / (u.fog.y - u.fog.x), 0.0, 1.0);
+    // D3D8 fogs the pass's colour toward the fog colour before the add (the base pass's fog state stays on).
+    let o = mix(rgb, u.fog_color.rgb, fog);
+    return vec4<f32>(select(o, pow(o, vec3<f32>(1.0 / 2.2)), u.fog.z > 0.5), a);
+}
+
+// The actor refraction pass (scheduler ops 0x48 / 0x49): a = (L, r, k, 0), p = (P00, P11, 0, 0).
+struct RefrU {
+    a: vec4<f32>,
+    p: vec4<f32>,
+};
+@group(3) @binding(0) var<uniform> refr: RefrU;
+
+// D3DTS_TEXTURE0 = PROJ x T(0.5, -0.5 scale, 0.5 offset) + (L P11, L P22) on _41 / _42, CAMERASPACEPOSITION, COUNT4 |
+// PROJECTED: the pixel's screen uv shifted by (L P11, L P22) / w (right and down).
+@vertex
+fn vs_skinned_refract(v: SkinIn) -> VertexOut {
+    var out = skin(v);
+    let c = out.clip;
+    out.uv = vec2<f32>(0.5 * c.x + 0.5 * c.w + refr.a.x * refr.p.x, -0.5 * c.y + 0.5 * c.w + refr.a.x * refr.p.y);
+    out.depth = c.w;
+    return out;
+}
+
+// Stage 0 colour = the copy, alpha MODULATE2X(copy, TFACTOR r); stage 1 colour MODULATE2X(CURRENT, 0x80), alpha
+// MODULATE4X(CURRENT, r); times the draw alpha k (retail composites a translucent actor at k); fogged as the base pass.
+@fragment
+fn fs_actor_refract(in: VertexOut) -> @location(0) vec4<f32> {
+    let c = textureSample(tex, samp, in.uv / in.depth);
+    let enc = u.fog.z > 0.5;
+    let lin = select(c.rgb, pow(c.rgb, vec3<f32>(2.2)), enc);
+    let rgb = min(lin * 2.0 * (128.0 / 255.0), vec3<f32>(1.0));
+    let a0 = min(2.0 * c.a * refr.a.y, 1.0);
+    let a = min(4.0 * a0 * refr.a.y, 1.0) * refr.a.z;
+    let dist = distance(in.world, u.eye.xyz);
+    let fog = clamp((dist - u.fog.x) / (u.fog.y - u.fog.x), 0.0, 1.0);
+    let o = mix(rgb, u.fog_color.rgb, fog);
+    return vec4<f32>(select(o, pow(o, vec3<f32>(1.0 / 2.2)), enc), a);
+}
+
+// FFXI vertex colours are half intensity (0x80 = 1.0).
+fn shade(in: VertexOut, color: vec4<f32>) -> vec4<f32> {
+    let dist = distance(in.world, u.eye.xyz);
+    let fog = clamp((dist - u.fog.x) / (u.fog.y - u.fog.x), 0.0, 1.0);
+    let rgb = mix(color.rgb, u.fog_color.rgb, fog);
+    // fog.z = 1 when the target is not sRGB and gamma has to be applied here.
+    return vec4<f32>(select(rgb, pow(rgb, vec3<f32>(1.0 / 2.2)), u.fog.z > 0.5), 1.0);
+}
+
+// Most scenery is opaque; its texture alpha carries something other than coverage.
+@fragment
+fn fs_opaque(in: VertexOut) -> @location(0) vec4<f32> {
+    if (u.sun.w > 0.5) {
+        return lit_zone(in, textureSample(tex, samp, in.uv));
+    }
+    return shade(in, textureSample(tex, samp, in.uv) * in.color * 2.0);
+}
+
+// Characters carry no baked lighting: shade by the normal. Placeholder until the D3D8 light setup is known.
+@fragment
+fn fs_actor(in: VertexOut) -> @location(0) vec4<f32> {
+    return actor_colour(in);
+}
+
+fn actor_colour(in: VertexOut) -> vec4<f32> {
+    let texel = textureSample(tex, samp, in.uv);
+    if (texel.a < 0.3) {
+        discard;
+    }
+    // Vertex alpha carries the model colour alpha (0x80 = 1.0).
+    let alpha = clamp(in.color.a * 2.0, 0.0, 1.0);
+    if (u.sun.w > 0.5) {
+        return vec4<f32>(lit_actor(in, texel).rgb, alpha);
+    }
+    let diffuse = max(dot(normalize(in.normal), normalize(-u.light.xyz)), 0.0);
+    let lit = texel.rgb * (u.light.w + (1.0 - u.light.w) * diffuse) * in.tint;
+    return vec4<f32>(shade(in, vec4<f32>(lit, 1.0)).rgb, alpha);
+}
+
+// A faded actor's offscreen pass (FUN_1002b6e0 with FUN_1001d240 on): drawn opaque, alpha test only (ALPHAREF 0x45,
+// TFACTOR alpha fixed 0x80), into a target cleared to 0; render_faded then blends it as one quad.
+@fragment
+fn fs_actor_solid(in: VertexOut) -> @location(0) vec4<f32> {
+    let c = actor_colour(in);
+    return vec4<f32>(c.rgb, 1.0);
+}
+
+struct FadedOut {
+    @builtin(position) clip: vec4<f32>,
+};
+
+@vertex
+fn vs_faded(@builtin(vertex_index) i: u32) -> FadedOut {
+    let p = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u)) * 2.0 - 1.0;
+    var out: FadedOut;
+    out.clip = vec4<f32>(p, 0.0, 1.0);
+    return out;
+}
+
+// Zeroes the offscreen target where a faded actor is about to be drawn (under its scissor rect).
+@fragment
+fn fs_faded_clear(in: FadedOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(0.0);
+}
+
+// FUN_1001d3b0: the offscreen target over the viewport, point sampled, colour MODULATE2X(TEX, 0x80 grey) = the
+// texel, alpha MODULATE2X(fade alpha, TEX alpha); SRCALPHA / INVSRCALPHA, z off. refr.a.z = the fade alpha (1 = 0x80).
+@fragment
+fn fs_faded(in: FadedOut) -> @location(0) vec4<f32> {
+    let c = textureLoad(tex, vec2<i32>(in.clip.xy), 0);
+    return vec4<f32>(c.rgb, clamp(c.a * refr.a.z, 0.0, 1.0));
+}
+
+// Placements named '_': D3DRS_ALPHAFUNC GREATER, ALPHAREF 0x60 on alpha = tex.a x vertex.a x 4 (MODULATE4X; ours with
+// the texture alpha already doubled).
+@fragment
+fn fs_alpha_test(in: VertexOut) -> @location(0) vec4<f32> {
+    let color = textureSample(tex, samp, in.uv) * in.color * 2.0;
+    if (color.a <= 96.0 / 255.0) {
+        discard;
+    }
+    if (u.sun.w > 0.5) {
+        return lit_zone(in, textureSample(tex, samp, in.uv));
+    }
+    return shade(in, color);
+}
+
+// MMB models with bit 31: blended by that alpha (SRCALPHA / INVSRCALPHA), alpha-tested only on '_' placements.
+fn blended(in: VertexOut) -> vec4<f32> {
+    let t = textureSample(tex, samp, in.uv);
+    let a = clamp(t.a * in.color.a * 2.0, 0.0, 1.0);
+    if (u.sun.w > 0.5) {
+        return vec4<f32>(lit_zone(in, t).rgb, a);
+    }
+    return vec4<f32>(shade(in, t * in.color * 2.0).rgb, a);
+}
+
+@fragment
+fn fs_blend(in: VertexOut) -> @location(0) vec4<f32> {
+    return blended(in);
+}
+
+@fragment
+fn fs_blend_test(in: VertexOut) -> @location(0) vec4<f32> {
+    let c = blended(in);
+    if (c.a <= 96.0 / 255.0) {
+        discard;
+    }
+    return c;
+}
+
+// ---- D3D8 fixed-function zone lighting (dat/weather.rs; FUN_10174610, FUN_10008d60 defaults) ----
+// Retail: COLORVERTEX on, DIFFUSE/AMBIENT material source = vertex colour, stage 0 COLOROP MODULATE2X,
+// ALPHAOP MODULATE4X, table fog LINEAR on view depth. Maths in gamma space as on D3D8.
+
+fn to_gamma(c: vec3<f32>) -> vec3<f32> {
+    return pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.2));
+}
+
+fn d3d_out(in: VertexOut, rgb: vec3<f32>) -> vec4<f32> {
+    return d3d_out_fog(in, rgb, u.fog_color.rgb);
+}
+
+fn d3d_out_fog(in: VertexOut, rgb: vec3<f32>, fog_color: vec3<f32>) -> vec4<f32> {
+    let f = clamp((u.fog.y - in.depth) / (u.fog.y - u.fog.x), 0.0, 1.0);
+    let c = mix(fog_color, rgb, f);
+    return vec4<f32>(select(pow(c, vec3<f32>(2.2)), c, u.fog.z > 0.5), 1.0);
+}
+
+// lit = clamp(vc * (ambient bytes / 255 + sun * max(N.-L, 0))); out = tex * lit * 2. The light, ambient and fog are the zone's,
+// or the area's (FUN_10183da0: FUN_10188ca0 lights, FUN_10188e00 ambient, FUN_10189120 fog).
+fn lit_zone(in: VertexOut, t: vec4<f32>) -> vec4<f32> {
+    var sun = u.sun.xyz;
+    var sun_color = u.sun_color.rgb;
+    var ambient = u.ambient.rgb;
+    var fog_color = u.fog_color.rgb;
+    var fog = u.fog.xy;
+    let slot = in.area & 0x7fffu;
+    if (slot != 0u && areas[slot].sun.w > 0.5) {
+        let a = areas[slot];
+        sun = a.sun.xyz;
+        sun_color = a.sun_color.rgb;
+        ambient = a.ambient.rgb;
+        fog_color = a.fog_color.rgb;
+        fog = select(a.fog.xy, u.fog.xy, (in.area & 0x8000u) != 0u);
+    }
+    let n = normalize(in.normal);
+    // Config 0017 (FUN_10174610): on, the one eased light and vertex fog over the eye range; off, the sun and the
+    // moon as two lights (the zone's, or the area's) and table fog over the view depth.
+    var direct = boost(sun_color) * max(dot(n, -sun), 0.0);
+    var d = in.range;
+    if (u.modes.x < 0.5) {
+        var two = u.two;
+        if (slot != 0u && areas[slot].sun.w > 0.5) {
+            two = areas[slot].two;
+        }
+        direct = boost(two[1].rgb) * max(dot(n, -two[0].xyz), 0.0) + boost(two[3].rgb) * max(dot(n, -two[2].xyz), 0.0);
+        d = in.depth;
+    }
+    // Every N.L takes the normal's length (NORMALIZENORMALS off).
+    let lit = clamp(in.color.rgb * (ambient_rs(ambient) / 255.0 + in.nscale * (direct + point_lights(in.lights, in.world, n))) + in.point, vec3<f32>(0.0), vec3<f32>(1.0));
+    let rgb = clamp(to_gamma(t.rgb) * lit * 2.0, vec3<f32>(0.0), vec3<f32>(1.0));
+    let f = clamp((fog.y - d) / (fog.y - fog.x), 0.0, 1.0);
+    let c = mix(fog_color, rgb, f);
+    return vec4<f32>(select(pow(c, vec3<f32>(2.2)), c, u.fog.z > 0.5), 1.0);
+}
+
+// Config 0017's type-3 meshes (FUN_10175ac0 case 3, ps.1.1 at 0x1036b264): the normal map against the interpolated
+// light, r1 = sat(t1_bx2 . v1_bx2); r1 = r1 x t2 + t3 with t2 = sat(diffuse x vc) and t3 = sat((ambient + point lights)
+// x vc); rgb = 2 r1 t0. Fog by the view depth (the vertex shader's oFog). The ambient constant is FUN_10188fa0's:
+// the env's ambient through the windowed boost (capped at 1) x 0.5, not rounded to bytes.
+@group(2) @binding(0) var bump_tex: texture_2d<f32>;
+@group(2) @binding(1) var bump_samp: sampler;
+
+@fragment
+fn fs_bump(in: VertexOut) -> @location(0) vec4<f32> {
+    let t0 = textureSample(tex, samp, in.uv);
+    let t1 = textureSample(bump_tex, bump_samp, in.uv).rgb;
+    var sun_color = u.sun_color.rgb;
+    var ambient = u.ambient.rgb;
+    var fog_color = u.fog_color.rgb;
+    var fog = u.fog.xy;
+    let slot = in.area & 0x7fffu;
+    if (slot != 0u && areas[slot].sun.w > 0.5) {
+        let a = areas[slot];
+        sun_color = a.sun_color.rgb;
+        ambient = a.ambient.rgb;
+        fog_color = a.fog_color.rgb;
+        fog = select(a.fog.xy, u.fog.xy, (in.area & 0x8000u) != 0u);
+    }
+    let r1 = clamp(dot(t1 * 2.0 - 1.0, in.tsl * 2.0 - 1.0), 0.0, 1.0);
+    let n = normalize(in.normal);
+    let t2 = clamp(boost(sun_color) * in.color.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    let t3 = clamp((min(boost(ambient), vec3<f32>(1.0)) * 0.5 + point_lights(in.lights, in.world, n)) * in.color.rgb + in.point, vec3<f32>(0.0), vec3<f32>(1.0));
+    let rgb = clamp(2.0 * (r1 * t2 + t3) * to_gamma(t0.rgb), vec3<f32>(0.0), vec3<f32>(1.0));
+    let f = clamp((fog.y - in.depth) / (fog.y - fog.x), 0.0, 1.0);
+    let c = mix(fog_color, rgb, f);
+    return vec4<f32>(select(pow(c, vec3<f32>(2.2)), c, u.fog.z > 0.5), 1.0);
+}
+
+// Actors: no vertex colour; material diffuse 0.5, ambient 0x80 / 128 = 1 (DAT_10346380, FUN_1002a8c0). Lit by the
+// zone, or by the area they stand in (the actor update FUN_1018b9a0 and draw FUN_1018b9e0 / FUN_1018ba20 with vtable
+// +0x188's area).
+fn lit_actor(in: VertexOut, t: vec4<f32>) -> vec4<f32> {
+    // Area 0x10000: model +0xa8 set (event op 0x59 7 / 8), the scenery's lights (FUN_1018b9a0 mode 0).
+    let bg = (in.area & 0x10000u) != 0u;
+    let slot = in.area & 0xffffu;
+    var sun = select(u.actor_sun.xyz, u.sun.xyz, bg);
+    var color = select(u.actor_color.rgb, u.sun_color.rgb, bg);
+    var ambient = select(u.actor_ambient.rgb, u.ambient.rgb, bg);
+    var fog_color = u.fog_color.rgb;
+    var fog = u.fog.xy;
+    if (slot != 0u && areas[slot].sun.w > 0.5) {
+        let a = areas[slot];
+        sun = select(a.actor_sun.xyz, a.sun.xyz, bg);
+        color = select(a.actor_color.rgb, a.sun_color.rgb, bg);
+        ambient = select(a.actor_ambient.rgb, a.ambient.rgb, bg);
+        fog_color = a.fog_color.rgb;
+        fog = a.fog.xy;
+    }
+    color = boost(color);
+    let ndl = max(dot(normalize(in.normal), -sun), 0.0);
+    // D3DRS_AMBIENT (ambient_rs); the target flash mixes those bytes toward 220 and scales the fog colour
+    // (FUN_100c94a0).
+    let amb = floor(mix(ambient_rs(ambient), vec3<f32>(220.0), in.flash.x)) / 255.0;
+    // The material's light factor f (red, 0x80 = 1.0): body meshes scale the ambient bytes (clamped) and the lights by it
+    // (FUN_1002cdf0), cloth ones the lights and add emissive max(f - 1.5, 0) (FUN_100216a0).
+    let mf = in.color.r * 255.0 / 128.0;
+    let cloth = in.color.g > 0.5;
+    let ga = select(min(floor(amb * 255.0 * mf) / 255.0, vec3<f32>(1.0)), amb, cloth);
+    let em = select(0.0, max(mf - 1.5, 0.0), cloth);
+    let lit = clamp((ga + 0.5 * mf * (color * ndl + in.point)) * in.tint + em, vec3<f32>(0.0), vec3<f32>(1.0));
+    let rgb = clamp(to_gamma(t.rgb) * lit * 2.0, vec3<f32>(0.0), vec3<f32>(1.0));
+    let f = clamp((fog.y - in.depth) / (fog.y - fog.x), 0.0, 1.0);
+    let c = mix(fog_color * in.flash.y, rgb, f);
+    return vec4<f32>(select(pow(c, vec3<f32>(2.2)), c, u.fog.z > 0.5), 1.0);
+}
+
+struct SkyOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) ndc: vec2<f32>,
+};
+
+@vertex
+fn vs_sky(@builtin(vertex_index) i: u32) -> SkyOut {
+    let p = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u)) * 2.0 - 1.0;
+    var out: SkyOut;
+    out.clip = vec4<f32>(p, 0.0, 1.0);
+    out.ndc = p;
+    return out;
+}
+
+fn sky_stop(k: u32) -> f32 {
+    return u.sky_stops[k / 4u][k % 4u];
+}
+
+// Sky dome (FUN_1003cd20 / FUN_1003c800): 8 rings, elevation = stop * 90 degrees, linear between rings.
+@fragment
+fn fs_sky(in: SkyOut) -> @location(0) vec4<f32> {
+    let far = u.inv_view_proj * vec4<f32>(in.ndc, 1.0, 1.0);
+    let ray = normalize(far.xyz / far.w - u.eye.xyz);
+    let e = asin(clamp(-ray.y, -1.0, 1.0)) / 1.5707963;
+    var c = u.clear.rgb;
+    if (u.sky_info.x > 0.5) {
+        c = u.sky_colors[0].rgb;
+        for (var k = 0u; k < 7u; k = k + 1u) {
+            let a = sky_stop(k);
+            let b = sky_stop(k + 1u);
+            if (e >= a && b > a) {
+                c = mix(u.sky_colors[k].rgb, u.sky_colors[k + 1u].rgb, clamp((e - a) / (b - a), 0.0, 1.0));
+            }
+        }
+    }
+    return vec4<f32>(select(pow(c, vec3<f32>(2.2)), c, u.fog.z > 0.5), 1.0);
+}
+
+// Frustum culling (render/cull.rs, ours): cs_cull_vis marks each instance, cs_cull_compact copies each run's visible
+// instances in order and writes its draws' indirect arguments.
+struct CullRun {
+    inst_start: u32,
+    inst_end: u32,
+    out_start: u32,
+    args_start: u32,
+    args_count: u32,
+    pad0: u32,
+    pad1: u32,
+    pad2: u32,
+}
+struct CullArg {
+    index_count: u32,
+    first_index: u32,
+    base_vertex: u32,
+    pad: u32,
+}
+@group(3) @binding(0) var<storage, read> cull_runs: array<CullRun>;
+// Per instance: its mesh's box centre, then half extents (model space).
+@group(3) @binding(1) var<storage, read> cull_bounds: array<vec4<f32>>;
+// Instances as the vertex buffer holds them, 28 words each (render::Instance).
+@group(3) @binding(2) var<storage, read> cull_src: array<u32>;
+@group(3) @binding(3) var<storage, read_write> cull_dst: array<u32>;
+@group(3) @binding(4) var<storage, read> cull_run_args: array<u32>;
+@group(3) @binding(5) var<storage, read> cull_arg_base: array<CullArg>;
+// DrawIndexedIndirect arguments, 5 words each.
+@group(3) @binding(6) var<storage, read_write> cull_args: array<u32>;
+@group(3) @binding(7) var<storage, read_write> cull_vis: array<u32>;
+// Word 0: a camera list is in force (FUN_1017b510); then a bit per instance that may draw.
+@group(3) @binding(8) var<storage, read> cull_mask: array<u32>;
+
+const INST_WORDS: u32 = 28u;
+
+fn cull_col(i: u32, k: u32) -> vec4<f32> {
+    let b = i * INST_WORDS + k * 4u;
+    return vec4<f32>(bitcast<f32>(cull_src[b]), bitcast<f32>(cull_src[b + 1u]), bitcast<f32>(cull_src[b + 2u]), bitcast<f32>(cull_src[b + 3u]));
+}
+
+// FUN_1017b510: only the camera list's placements while one is in force; FUN_1017c9c0: the draw distance to the
+// origin (D, or the placement's times K; a door group's within both), the LOD band as vs_main tests it, then the
+// mesh's box (through the model as vs_main places it) against the six planes of the view frustum (clip x, y in
+// -w..w, z in 0..w) and retail's far plane at view depth D.
+fn cull_visible(i: u32) -> bool {
+    let m3 = cull_col(i, 3u);
+    var model = mat4x4<f32>(cull_col(i, 0u), cull_col(i, 1u), cull_col(i, 2u), m3);
+    let band = cull_col(i, 6u);
+    let voyaged = band.w != 0.0;
+    let origin = select(m3.xyz, (u.voyage * m3).xyz, voyaged);
+    let d = u.eye.xyz - origin;
+    let d2 = dot(d, d);
+    // The camera list (render/cull.rs set_mask): listed, or unlisted and marked to draw beyond the reach.
+    if (cull_mask[0] != 0u) {
+        let w = i / 32u;
+        let bit = 1u << (i % 32u);
+        if ((cull_mask[3u + w] & bit) == 0u) {
+            let beyond = (cull_mask[3u + cull_mask[2] + w] & bit) != 0u;
+            if (!beyond || d2 <= bitcast<f32>(cull_mask[1])) {
+                return false;
+            }
+        }
+    }
+    let c = cull_bounds[2u * i];
+    let h = cull_bounds[2u * i + 1u];
+    let far = u.area_info.z;
+    // Its distance always holds; D 0 (Settings' Unlimited) lifts only the zone's.
+    let own = u.area_info.w * c.w;
+    let zone_d = select(3.4e38, far * far, far > 0.0);
+    let limit = select(zone_d, select(own, min(own, zone_d), h.w > 1.5), h.w > 0.5);
+    if (d2 > limit) {
+        return false;
+    }
+    if (band.y > 0.0 && !(d2 > band.x && d2 <= band.y)) {
+        return false;
+    }
+    let part = u32(band.z);
+    if (part != 0u) {
+        model = model * part_matrix(part);
+    }
+    if (voyaged) {
+        model = u.voyage * model;
+    }
+    let centre = (model * vec4<f32>(c.xyz, 1.0)).xyz;
+    let ax = model[0].xyz * h.x;
+    let ay = model[1].xyz * h.y;
+    let az = model[2].xyz * h.z;
+    let rows = transpose(u.view_proj);
+    // Clip w is the view depth: the seventh plane keeps w <= D (none when D is 0).
+    let depth = select(vec4<f32>(0.0, 0.0, 0.0, 1.0), vec4<f32>(0.0, 0.0, 0.0, far) - rows[3], far > 0.0);
+    let planes = array<vec4<f32>, 7>(rows[3] + rows[0], rows[3] - rows[0], rows[3] + rows[1], rows[3] - rows[1], rows[2], rows[3] - rows[2], depth);
+    for (var k = 0u; k < 7u; k++) {
+        let p = planes[k];
+        let reach = abs(dot(p.xyz, ax)) + abs(dot(p.xyz, ay)) + abs(dot(p.xyz, az));
+        if (dot(p.xyz, centre) + p.w < -reach) {
+            return false;
+        }
+    }
+    return true;
+}
+
+@compute @workgroup_size(64)
+fn cs_cull_vis(@builtin(global_invocation_id) id: vec3<u32>) {
+    if (id.x < arrayLength(&cull_vis)) {
+        cull_vis[id.x] = select(0u, 1u, cull_visible(id.x));
+    }
+}
+
+var<workgroup> cull_scan: array<u32, 64>;
+var<workgroup> cull_base: u32;
+
+// One workgroup a run: 64 instances at a time, an inclusive scan of their flags places each visible one after the
+// ones before it.
+@compute @workgroup_size(64)
+fn cs_cull_compact(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) lid: u32) {
+    let run = cull_runs[wg.x];
+    if (lid == 0u) {
+        cull_base = 0u;
+    }
+    workgroupBarrier();
+    for (var start = run.inst_start; start < run.inst_end; start += 64u) {
+        let i = start + lid;
+        let v = select(0u, cull_vis[min(i, run.inst_end - 1u)], i < run.inst_end);
+        cull_scan[lid] = v;
+        workgroupBarrier();
+        for (var off = 1u; off < 64u; off <<= 1u) {
+            var t = 0u;
+            if (lid >= off) {
+                t = cull_scan[lid - off];
+            }
+            workgroupBarrier();
+            cull_scan[lid] += t;
+            workgroupBarrier();
+        }
+        let base = workgroupUniformLoad(&cull_base);
+        if (v != 0u) {
+            let s = i * INST_WORDS;
+            let o = (run.out_start + base + cull_scan[lid] - 1u) * INST_WORDS;
+            for (var k = 0u; k < INST_WORDS; k++) {
+                cull_dst[o + k] = cull_src[s + k];
+            }
+        }
+        workgroupBarrier();
+        if (lid == 63u) {
+            cull_base = base + cull_scan[63];
+        }
+        workgroupBarrier();
+    }
+    let n = workgroupUniformLoad(&cull_base);
+    for (var a = lid; a < run.args_count; a += 64u) {
+        let slot = cull_run_args[run.args_start + a];
+        let b = cull_arg_base[slot];
+        let o = slot * 5u;
+        cull_args[o] = b.index_count;
+        cull_args[o + 1u] = n;
+        cull_args[o + 2u] = b.first_index;
+        cull_args[o + 3u] = b.base_vertex;
+        cull_args[o + 4u] = run.out_start;
+    }
+}

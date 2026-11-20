@@ -1,7 +1,11 @@
 # TimelessXI client
 
-Releases and the mod list for the TimelessXI client: [vana-client](https://github.com/lenonk/vana-client) built for
-the TimelessXI server. This repository holds no client source, only what players' clients download.
+The TimelessXI client: [vana-client](https://github.com/lenonk/vana-client) built for the TimelessXI server. This
+repository holds its source, its releases and the mod list players' clients download.
+
+- **`source/`:** the client's source, vana-client with TimelessXI's changes (the Timeless interface, the Timeless
+  hotbars and Actions window, Timeless Fishing ...). `source/TIMELESS.md` lists every change and where it lives; each
+  is marked with a `Timeless XI:` comment for upstream merges. Build on Windows with `source\build_timeless.bat`.
 
 - **Releases:** `vana-client-windows-x86_64.exe` and its `.sig`. The client checks this repository's latest release
   at start, and installs a newer one only when its signature matches TimelessXI's release key built into the client.
@@ -9,6 +13,6 @@ the TimelessXI server. This repository holds no client source, only what players
   pinned to the source commit the client is built from, plus TimelessXI's own mods in `mods/`.
 - **`catalogue/game.json`:** the newest Square Enix game version players may update to (`{"version": "30261102_0"}`). The client holds back retail game updates past it. Try a new retail update on the test server first, then raise this and push.
 - **`mods/`:** TimelessXI's mods. After changing one, raise its `version` in `mod.toml`, run
-  `tools/make_catalogue.py <client source folder>`, and commit `mods/` and `catalogue/` together.
+  `tools/make_catalogue.py source`, and commit `mods/` and `catalogue/` together.
 
 vana-client is MIT licensed (Copyright (c) 2026 Lenon Kitchens); see `LICENSE-vana-client`.

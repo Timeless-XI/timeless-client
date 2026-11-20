@@ -1,0 +1,3533 @@
+//! The zone session on a separate thread: decodes what the server sends into events and
+//! keeps the session alive with our position. Follows zone changes to the next server.
+
+use crate::net::lobby::MapLogin;
+use crate::net::map::compress::Codec;
+use crate::net::map::session::{MapSession, SubPacket, build};
+use anyhow::Result;
+use std::net::{Ipv4Addr, SocketAddr};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering, Ordering::Relaxed};
+use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EntityKind {
+    Npc,
+    Player,
+}
+
+#[derive(Clone, Debug)]
+pub struct EntityUpdate {
+    /// 0x00D u16 @0x30 (0x10099cd6): the costume, an NPC model id (0 none; FUN_1008cce0).
+    pub costume: Option<u16>,
+    pub id: u32,
+    pub index: u16,
+    pub kind: EntityKind,
+    pub pos: Option<[f32; 3]>,
+    pub dir: u8,
+    /// HP bit 0x04 also carries the status byte @0x1F; speed @0x1C comes with the position bit.
+    pub hpp: Option<u8>,
+    pub name: Option<String>,
+    /// 0x00E without a name of its own, index below 0x700 (asm 0x1009b78f): the zone list's name for the id, else
+    /// "NPC", written on every update.
+    pub listed: bool,
+    pub despawn: bool,
+    /// Model ids (GrapIDTbl) when the update carries them.
+    pub look: Option<[u16; 9]>,
+    /// An NPC or monster model, when a 0x00E carries one.
+    pub npc: Option<crate::dat::npc::NpcLook>,
+    pub motion: MotionState,
+    /// Claim owner u32 @0x2C (claim bit 0x02), 0 when unclaimed.
+    pub claim: Option<u32>,
+    /// The monster flag (actor +0x120 bit 13): @0x20 bit 0, read with masks 1 / 2 / 4. (@0x25 is the hitbox size.)
+    pub mob: Option<bool>,
+    /// Name-colour marks (mask 0x04), FUN_1008db40's inputs.
+    pub marks: Option<Marks>,
+    pub plate: Option<PlateExtra>,
+    /// 0x00D / 0x00E mask 0x04, u32 @0x20 bit 15: male (+0x124 bit 25; every actor kind, FUN_10099ae0 / FUN_1009b550):
+    /// the [a/b] picks and event values 0x7f0b / 0x7f8b.
+    pub male: Option<bool>,
+    /// u32 @0x24 bits 29 (named: no article) and 30 (plural verbs), read by the 0x00D/0x00E handlers.
+    pub name_flags: Option<(bool, bool)>,
+    /// u16 @0x18 & 0x1fff, the movement counter (FUN_1008b610), and whether y is snapped to the ground:
+    /// NPC ids without u32 @0x18 bit 15, kind (@0x30 & 7) not 2 / 3 (LAB_10099c80).
+    pub counter: u16,
+    pub ground: bool,
+    /// GroundFlag (+0x120 bit 20, u32 @0x18 bit 15) and HackMove (+0x128 bit 14, u32 @0x20 bit 27): either one, or
+    /// op 0x33's bit 21, stops the event ground snaps and the model's ground tilt (FUN_10084640, batch 6 item 14).
+    pub no_snap: Option<bool>,
+    /// Update mask (u8 @0x0a) and status bits u8 @0x20 & 7 (actor +0x120 bits 13 / 14 / 18, 0x1009a397).
+    pub mask: u8,
+    pub status: u8,
+    /// u8 @0x30 & 7 (0x00E): the model kind byte.
+    pub look_kind: u8,
+    /// SubKind 2 (a door): the door id at @0x34 (FUN 0x1009cb37: actor +0xf8), sent on every update.
+    pub door: Option<u32>,
+    /// SubKind 3 (a lift, asm 0x1009ccc9): the RID id @0x34, the move's start @0x38 (Vana'diel-epoch seconds) and
+    /// its end, start + u16 @0x3c.
+    pub lift: Option<(u32, u32, u32)>,
+    /// SubKind 4 (a ship, the same block): the ship id @0x34 and the sequence's start @0x38 (Vana'diel-epoch seconds);
+    /// u16 @0x3c is not used (MODLOG "Ship actors").
+    pub ship: Option<(u32, u32)>,
+    /// 0x00E with mask 0x04 (0x1009adbb): u8 @0x22 bit 0 sets actor +0x130 bit 20 and clears +0x128 bit 3,
+    /// else +0x128 bit 3 = u8 @0x2B bit 0x20. Either hides the target gauge; bit 3 also the name plate.
+    pub hp_bits: Option<(bool, bool)>,
+    /// u8 @0x2B bit 0x08 with mask 0x04 (actor +0x130 bit 7, 0x1009ad2e): an attackable target is dropped.
+    pub untargetable: Option<bool>,
+    /// TargetOffFlag u32 @0x20 bit 19 with mask 0x04 (+0x128 bit 4; 0x00E 0x1009c0a3, 0x00D 0x1009a477): never a
+    /// target candidate (FUN_10084580).
+    pub target_off: Option<bool>,
+    /// 0x00E u32 @0x24 bit 31 with mask 0x04 (entity +0x13c bit 23, 0x1009c3fb): shown only while an s2c 0x077 lists it.
+    pub listed_only: Option<bool>,
+    /// Mask 0x04: InvisFlag u32 @0x20 bit 29 (+0x128 bit 6), 0x00E u8 @0x2B bit 0x40 (+0x130 bit 15), 0x00D's
+    /// Monstrosity word u16 @0x3E (+0x210): the radar's tests (FUN_10098210, FUN_102203b0).
+    pub radar: Option<(bool, bool, u16)>,
+    /// 0x00D mask 0x04 u8 @0x40 / @0x41 (+0x212 / +0x213, 0x1009a979..): the Monstrosity name prefixes.
+    pub mon_prefix: Option<[u8; 2]>,
+    /// 0x00D mask 0x04 with @0x3E set: u8 @0x2A & 7 into +0x124 bits 1..3 (0x1009a185), the form a Monipulator's moves
+    /// test (FUN_102231f0).
+    pub mon_form: Option<u8>,
+    /// The sub-animation (actor +0x124 bits 1..3): 0x00E mask 0x04, @0x2A & 7 when @0x20 bit 0 (monster) or u32 @0x28
+    /// bit 26 (asm 0x1009be45; LSB animationsub).
+    pub sub_anim: Option<u8>,
+    /// 0x00E mask 0x04: u32 @0x28 bit 26 (entity +0x130 bit 2, asm 0x1009c5a2).
+    pub sub_flag: Option<bool>,
+    /// MonStat (actor +0x124 bits 13..14): 0x00E mask 0x04 without those two bits, @0x2A & 3 (asm 0x1009be5d).
+    pub mon_stat: Option<u8>,
+    /// 0x00E u32 @0x28 bit 31 -> entity +0x130 bit 18 (FUN_100cd040): the character draws at half alpha, whatever the
+    /// near-camera fade says. Cleared on our entity by 0x037.
+    pub half_fade: Option<bool>,
+    /// The face target's ActIndex, (u32 @0x18 >> 17) & 0x7fff with the position (actor +0x1f8; LSB facetarget).
+    pub face: Option<u16>,
+    /// Mask 0x04, u8 @0x28 bit 0x04 (LSB PetNewFlag; actor +0x12c bit 23): the model is made with 'spop'.
+    pub spawn_fx: Option<bool>,
+    /// Mask 0x04, u8 @0x27 bit 1 (entity +0x12c bit 10; asm 0x10098e1a / 0x1009aaa5): a model made with no shadow.
+    pub shadowless: Option<bool>,
+    /// 0x00E u32 @0x18 bit 16 (KingFlag): counted toward 0x00A SendCount before c2s 0x01A 0x14 (all.asm 167839).
+    pub king: bool,
+    /// 0x00D mask 0x04: ChocoboIndex u32 @0x20 bits 5..7 (asm 0x1009a1e7), the mount id u32 @0x44 bits 4..11 (asm
+    /// 0x1009aa8d), CustomProperties @0x34 / @0x38 (FUN_1009ab40).
+    pub ride: Option<Ride>,
+    /// Mask 0x04: the model radius x 0.1 into actor +0x208, 0x00D u8 @0x43 (asm 0x1009aa40), 0x00E u8 @0x25 (0x1009c7cb).
+    pub hitbox: Option<f32>,
+    /// 0x00D (General) u8 @0x42: the Geomancer Indi aura byte (client/indi.rs).
+    pub indi: Option<u8>,
+    /// Mask 0x04: the fenced-content gate into +0x13f (+0x13c bits 24..27): 0x00D u8 @0x44 low nibble (asm
+    /// 0x1009aa6a), 0x00E u8 @0x26 high nibble (0x1009c7f3).
+    pub gate: Option<u8>,
+}
+
+/// Riding (MODLOG "Riding"): ChocoboIndex, the mount id (0 none) and CustomProperties (a personal or Noble
+/// chocobo's look).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Ride {
+    pub chocobo: u8,
+    pub mount: u8,
+    pub custom: [u32; 2],
+}
+
+/// The bytes FUN_1008db40 colours a name by (0x00E / 0x00D, mask 0x04): charm @0x27 bit 3, trust @0x28 bit 0,
+/// pet @0x28 bit 6, @0x2B bit 1, allegiance @0x29, GM level @0x23 & 7, yell (0x00E: call for help) u32 @0x20 bit 13;
+/// PCs only (0x00D): LFG bit 11, anonymous bit 12, auto-party u32 @0x24 bit 31, LFG master @0x28 bit 1.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Marks {
+    pub charm: bool,
+    pub trust: bool,
+    pub npc_pet: bool,
+    /// u8 @0x28 bit 3 (entity +0x12f bit 0): LSB sets it for a monster still with HP in its death animation.
+    pub death_flag: bool,
+    pub b2b1: bool,
+    pub alleg: u8,
+    pub gm: u8,
+    pub yell: bool,
+    pub lfg: bool,
+    pub anon: bool,
+    pub auto: bool,
+    pub lfg_master: bool,
+    /// Flags1 u32 @0x20 bit 31 (actor +0x128 bit 9): the player has a bazaar.
+    pub bazaar: bool,
+    /// The name plate's icon flags (MODLOG "Name plate icons"): Flags1 b14 away, b16 PlayOnline, b17 linkshell, b18
+    /// link dead; Flags2 @0x24..0x26 the linkshell colour, b28 GmIconFlag; Flags3 b23 New Adventurer, b24 mentor.
+    pub away: bool,
+    pub pol: bool,
+    pub ls: bool,
+    pub link_dead: bool,
+    pub ls_colour: [u8; 3],
+    pub gm_icon_off: bool,
+    pub new_char: bool,
+    pub mentor: bool,
+    /// Sneak (actor +0x128 bit 8): 0x00D / 0x00E u32 @0x28 bit 21, 0x037 u32 @0x38 bit 2; no footstep sound.
+    pub silent: bool,
+}
+
+/// Our plate's fields from 0x037 (MODLOG "Name plate icons"): Flags0 u32 @0x28, Flags1 @0x2c, the linkshell colour
+/// @0x31..0x33, Flags2 @0x34, Flags3 @0x38 (Ballista info @0x39), Monstrosity u16 @0x54, job master @0x58 bit 7, the
+/// ranks @0x5a.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SelfPlate {
+    pub marks: Marks,
+    pub extra: PlateExtra,
+    pub invisible: bool,
+    /// flags1 bits 13 (frozen: +0x128 bit 15) and 30 (charmed: +0x12c bit 13).
+    pub frozen: bool,
+    pub charmed: bool,
+    pub monstrosity: u16,
+    /// @0x56 / @0x57: the Monstrosity name prefixes (+0x212 / +0x213).
+    pub mon_prefix: [u8; 2],
+    /// Flags0 bit 9 (actor +0x18c, FUN_101cc330): a zone treasure pool (LSB's Treasure-flag zones, e.g. Dynamis).
+    pub zone_pool: bool,
+    /// u8 @0x59 x 0.1 (asm 0x1009d90c): our model radius, actor +0x208.
+    pub hitbox: f32,
+    /// GroundFlag (flags0 bit 2) or HackMove (flags1 bit 12): no event ground snap, no ground tilt (batch 6 item 14).
+    pub no_snap: bool,
+    /// Timeless XI: HackMove alone (0x037 flags1 bit 12, zone-in Flags1 bit 27; LSB's GM !wallhack): our own moves go
+    /// through walls and floors with no gravity (client/mod.rs).
+    pub hack: bool,
+}
+
+/// Our own flags at zone-in. s2c 0x00A carries them in 0x00D's layout (Flags0 u32 @0x18, Flags1 @0x20, Flags2 @0x24,
+/// Flags3 @0x28); its handler FUN_100faf90 packs them into the character data (+0x40e5c..+0x40e62, +0x40e90..+0x40e94)
+/// and the zone-in FUN_10094190 puts them on our new entity before any 0x037 arrives: GM level (@0x23 & 7), seeking
+/// (Flags1 bit 11), anonymous (12), the call for help (13), away (14), PlayOnline (16), linkshell (17), link dead (18),
+/// HackMove (27), invisible (29), bazaar (31), GroundFlag (Flags0 bit 15), the linkshell colour (@0x24..0x26),
+/// GmIconFlag (Flags2 bit 28), auto-party (31) and the party-seek master (Flags3 bit 1). The entity is new, so every
+/// flag the zone-in does not write (frozen, charmed, sneak, New Adventurer, mentor, allegiance) starts clear.
+fn zone_in_plate(p: &SubPacket) -> SelfPlate {
+    let (f0, f1, f2, f3) = (p.u32(0x18), p.u32(0x20), p.u32(0x24), p.u32(0x28));
+    let bit = |w: u32, b: u32| w >> b & 1 != 0;
+    SelfPlate {
+        marks: Marks {
+            gm: p.u8(0x23) & 7,
+            lfg: bit(f1, 11),
+            anon: bit(f1, 12),
+            yell: bit(f1, 13),
+            away: bit(f1, 14),
+            pol: bit(f1, 16),
+            ls: bit(f1, 17),
+            link_dead: bit(f1, 18),
+            bazaar: bit(f1, 31),
+            ls_colour: [p.u8(0x24), p.u8(0x25), p.u8(0x26)],
+            gm_icon_off: bit(f2, 28),
+            auto: bit(f2, 31),
+            lfg_master: bit(f3, 1),
+            ..Marks::default()
+        },
+        invisible: bit(f1, 29),
+        no_snap: bit(f0, 15) || bit(f1, 27),
+        hack: bit(f1, 27),
+        ..SelfPlate::default()
+    }
+}
+
+fn self_plate(p: &SubPacket) -> SelfPlate {
+    let (f0, f1, f2, f3) = (p.u32(0x28), p.u32(0x2c), p.u32(0x34), p.u32(0x38));
+    let bit = |w: u32, b: u32| w >> b & 1 != 0;
+    let marks = Marks {
+        alleg: (f2 >> 21) as u8,
+        gm: (f0 >> 29) as u8,
+        lfg: bit(f0, 4),
+        anon: bit(f0, 5),
+        auto: bit(f2, 2),
+        lfg_master: bit(f3, 0),
+        bazaar: bit(f1, 29),
+        away: bit(f0, 7),
+        pol: bit(f0, 24),
+        ls: bit(f0, 25),
+        link_dead: bit(f0, 26),
+        ls_colour: [p.u8(0x31), p.u8(0x32), p.u8(0x33)],
+        gm_icon_off: bit(f1, 31),
+        new_char: bit(f3, 3),
+        mentor: bit(f3, 4),
+        silent: bit(f3, 2),
+        ..Marks::default()
+    };
+    let r = p.u8(0x5a);
+    let extra = PlateExtra {
+        ballista: p.u8(0x39),
+        trial: bit(f3, 1),
+        job_master: p.u8(0x58) & 0x80 != 0,
+        ranks: (r & 3) << 2 | (r >> 2 & 3),
+    };
+    SelfPlate {
+        marks,
+        extra,
+        invisible: bit(f1, 15),
+        frozen: bit(f1, 13),
+        charmed: bit(f1, 30),
+        monstrosity: p.u16(0x54),
+        mon_prefix: [p.u8(0x56), p.u8(0x57)],
+        zone_pool: bit(f0, 9),
+        hitbox: p.u8(0x59) as f32 * 0.1,
+        no_snap: bit(f0, 2) || bit(f1, 12),
+        hack: bit(f1, 12),
+    }
+}
+
+/// The rest of the plate's fields: u8 @0x32 (+0x294 Ballista info) and @0x33 bit 1 trial, bit 6 job master, bits 4..5 /
+/// 2..3 the Belligerency ranks (+0x13c bits 2..3 / 4..5), read on every 0x00D but a despawn; 0x037 has its places.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PlateExtra {
+    pub ballista: u8,
+    pub trial: bool,
+    pub job_master: bool,
+    /// +0x13c bits 2..5: bits 0..1 the gladiator rank, 2..3 the Monstrosity rank.
+    pub ranks: u8,
+}
+
+/// A battle message packet: 0x029 (FUN_1009cf70) or 0x02D (FUN_1009d1b0).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BattleMessage {
+    pub actor: u32,
+    pub target: u32,
+    pub actor_index: u16,
+    pub target_index: u16,
+    pub data: [i32; 2],
+    pub message: u16,
+    /// The queue's message (FUN_100c3300 +0x50): `message` for the ones the handler names, else Type i8 @0x1a.
+    pub queued: u16,
+}
+
+/// LAB_1009e8d0 / LAB_1009eb10: 9, 0xb, 0x32, 0x2cf, 0x2d (0x02D also 0x32b, 0x32d) queue as themselves.
+fn queued_message(m: u16, kind: u8, two: bool) -> u16 {
+    if matches!(m, 9 | 0xb | 0x32 | 0x2cf | 0x2d) || (two && matches!(m, 0x32b | 0x32d)) {
+        m
+    } else {
+        kind as i8 as i16 as u16
+    }
+}
+
+/// 0x029: @4 caster, @8 target, @0xc / @0x10 data, @0x14 / @0x16 indices, @0x18 message, @0x1a Type.
+/// 0x00A's voyage (asm 0x100fb3a7..0x100fb3e8): ShipStart u32 @0x78, start + u16 @0x7c (LSB's "ShipEnd" is the
+/// length), reverse = u32 @0x24 bit 26, route = u32 @0x28 bits 19..20.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShipData {
+    pub start: u32,
+    pub end: u32,
+    pub reverse: bool,
+    pub route: u8,
+}
+
+/// FUN_10094190 starts a voyage only when both ends are non-zero.
+fn ship_data(p: &SubPacket) -> Option<ShipData> {
+    let start = p.u32(0x78);
+    let end = start.wrapping_add(p.u16(0x7c) as u32);
+    (start != 0 && end != 0 && end != start).then(|| ShipData {
+        start,
+        end,
+        reverse: p.u32(0x24) >> 26 & 1 != 0,
+        route: (p.u32(0x28) >> 19 & 3) as u8,
+    })
+}
+
+pub fn battle_message(p: &SubPacket) -> BattleMessage {
+    let message = p.u16(0x18);
+    BattleMessage {
+        actor: p.u32(4),
+        target: p.u32(8),
+        data: [p.u32(12) as i32, p.u32(16) as i32],
+        actor_index: p.u16(0x14),
+        target_index: p.u16(0x16),
+        message,
+        queued: queued_message(message, p.u8(0x1a), false),
+    }
+}
+
+/// 0x02D: @4 / @8 ids, @0xc / @0xe indices, @0x10 / @0x14 data, @0x18 message, @0x1a Type.
+pub fn battle_message2(p: &SubPacket) -> BattleMessage {
+    let message = p.u16(0x18);
+    BattleMessage {
+        actor: p.u32(4),
+        target: p.u32(8),
+        actor_index: p.u16(0xc),
+        target_index: p.u16(0xe),
+        data: [p.u32(0x10) as i32, p.u32(0x14) as i32],
+        message,
+        queued: queued_message(message, p.u8(0x1a), true),
+    }
+}
+
+/// s2c 0x0D2 (GP_SERV_COMMAND_TROPHY_LIST): TrophyItemNum @4, TargetUniqueNo @8, Gold @0xc, TrophyItemNo @0x10,
+/// slot @0x14, Entry @0x15, IsContainer @0x16, StartTime @0x18, IsLocallyLotted @0x1c / Point @0x1e, LootUniqueNo
+/// @0x20, LootPoint @0x26, LootActName @0x28.
+#[derive(Clone, Debug, Default)]
+pub struct TrophyList {
+    pub slot: u8,
+    pub item: u16,
+    pub qty: u32,
+    pub target: u32,
+    pub gold: u16,
+    pub container: bool,
+    pub entry: u8,
+    pub start: u32,
+    pub own_lot: i16,
+    pub loot_id: u32,
+    pub loot_point: u16,
+    pub loot_name: String,
+}
+
+/// Speed, status and size as POS_HEAD carries them (0x00A/0x00D/0x00E).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MotionState {
+    /// Speed @0x1C and SpeedBase @0x1D, x0.1 = units per second.
+    pub speed: u8,
+    pub speed_base: u8,
+    /// Status @0x1F (LSB Animation): 0 standing, 1 engaged, 2/3 dead, 33 resting...
+    pub status: u8,
+    /// GraphSize: u32 @0x20 bits 9-10.
+    pub graph_size: u8,
+}
+
+fn motion_state(p: &SubPacket) -> MotionState {
+    MotionState {
+        speed: p.u8(0x1C),
+        speed_base: p.u8(0x1D),
+        status: p.u8(0x1F),
+        graph_size: ((p.u32(0x20) >> 9) & 3) as u8,
+    }
+}
+
+/// An event start: s2c 0x032 / 0x034 / 0x033, or the 0x00A login event.
+#[derive(Clone, Debug, Default)]
+pub struct EventStart {
+    /// Target UniqueNo / ActIndex (the NPC, or ourselves).
+    pub target: u32,
+    pub index: u16,
+    /// EventNum (zone), EventPara (event id), Mode, EventNum2, EventPara2.
+    pub zone: u16,
+    pub event: u16,
+    pub mode: u16,
+    pub zone2: u16,
+    pub para2: u16,
+    pub params: [u32; 8],
+    pub strings: Vec<String>,
+    /// The 0x00A login event (its Mode bit 0x80 starts it in cinema mode, 0x100952e7).
+    pub login: bool,
+}
+
+/// A zone dialogue line sent by the server: 0x036 (talk) or 0x02A (with num[4]).
+#[derive(Clone, Debug, Default)]
+pub struct ZoneText {
+    /// The packet: 0x036, 0x02A, 0x027, 0x043 or 0x03B.
+    pub packet: u16,
+    pub actor: u32,
+    pub index: u16,
+    /// MesNum; bit 15 = no speaker name.
+    pub mes: u16,
+    /// Type: the log mode by table 0x1035b944 below 8.
+    pub kind: u8,
+    pub num: [i32; 8],
+    /// 0x02A String: the speaker name when the server sends it.
+    pub name: String,
+    /// String slots from 0 (0x027 String1, 0x043 sName); 0x027's String2 and Flags.
+    pub strings: Vec<String>,
+    pub name2: String,
+    pub flags: u8,
+}
+
+/// Our pet as s2c 0x068 type 4 gives it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PetSync {
+    pub index: u16,
+    pub hpp: u8,
+    pub mpp: u8,
+    pub tp: u16,
+    pub target: u32,
+}
+
+#[derive(Clone, Debug)]
+pub enum NetEvent {
+    /// Ours (docs/lua-mods.md 3.3): while a mod hooks incoming packets, a received batch for the hooks, undecoded,
+    /// with its session's number; it comes back as NetCommand::Decode.
+    RawIn(u32, Vec<SubPacket>),
+    /// While a mod hooks outgoing packets, a batch about to be sent; it comes back as NetCommand::SendBatch.
+    RawOut(u32, Vec<Vec<u8>>),
+    /// `game_time` @0x3C (Earth seconds since the Vana'diel epoch), `weather` number @0x68; `area` the log line.
+    ZoneIn {
+        zone: u16,
+        pos: [f32; 3],
+        dir: u8,
+        char_id: u32,
+        index: u16,
+        name: String,
+        look: [u16; 9],
+        motion: MotionState,
+        game_time: u32,
+        weather: u16,
+        music: [u16; 5],
+        event: Option<EventStart>,
+        area: Option<AreaLine>,
+        sub_map: u16,
+        scene: u16,
+        myroom: Option<MyRoom>,
+        room_flag: bool,
+        dead_counter: u32,
+        play_time: u32,
+        mog_zone: bool,
+        send_count: u16,
+        ship: Option<ShipData>,
+        monstrosity: bool,
+        /// LoginState 3..5: the login that follows an exit to PlayOnline (`pol_return`).
+        pol_return: bool,
+        /// Our own flags as the zone-in applies them (`zone_in_plate`).
+        plate: SelfPlate,
+    },
+    /// s2c 0x053 (GP_SERV_COMMAND_SYSTEMMES): para @4, para2 @8, Number @0xc (file 7031).
+    SystemMessage {
+        id: u16,
+        para: u32,
+        para2: u32,
+    },
+    /// s2c 0x03E (SHOP_OPEN): ShopListNum @4.
+    ShopOpen {
+        count: u16,
+    },
+    /// s2c 0x03C (SHOP_LIST): Flags @6 (bit 0 last), 12-byte entries from @8 (price, ItemNo, ShopIndex, Skill, GuildInfo).
+    ShopList {
+        last: bool,
+        entries: Vec<(u32, u16, u8, u16, u16)>,
+    },
+    /// s2c 0x03F (SHOP_BUY): ShopItemIndex @4, Count @8.
+    ShopBuy {
+        index: u16,
+        count: u32,
+    },
+    /// s2c 0x03D (SHOP_SELL): Price @4, slot @8, Type @9 (0 appraisal), Count @0xc.
+    ShopSell {
+        price: u32,
+        slot: u8,
+        kind: u8,
+        count: u32,
+    },
+    /// s2c 0x086 (GUILD_OPEN): Stat @4 (0 open, 1 closed, 2 holiday), Time @8 (open hour bits / weekday; bit 31 passive).
+    GuildOpen {
+        stat: u8,
+        time: u32,
+    },
+    /// s2c 0x01D (ITEM_SAME): State @4 (1: the item updates are all in).
+    ItemsSettled(u8, u32),
+    /// s2c 0x062 (CLISTATUS2): skill_base[64] u16 from @0x80 (crafts: the rank in bits 0..4).
+    SkillBase([u16; 64]),
+    /// s2c 0x083 / 0x085 (GUILD_BUYLIST / GUILD_SELLLIST): up to 30 {ItemNo u16, Count u8, Max u8, Price i32} from @4,
+    /// Count @0xf4, Stat @0xf5 (0x40 first, 0x80 last).
+    GuildList {
+        sell: bool,
+        stat: u8,
+        entries: Vec<(u16, u8, u8, u32)>,
+    },
+    /// s2c 0x082 / 0x084 (GUILD_BUY / GUILD_SELL): ItemNo @4 (0 refused), Count @6 (the guild's stock), Trade @7.
+    GuildResult {
+        sell: bool,
+        item: u16,
+        count: u8,
+        trade: i8,
+    },
+    /// s2c 0x021 (ITEM_TRADE_REQ): UniqueNo @4, ActIndex @8.
+    TradeRequest {
+        id: u32,
+        index: u16,
+    },
+    /// s2c 0x022 (ITEM_TRADE_RES): UniqueNo @4, Kind @8, ActIndex @0xc.
+    TradeResponse {
+        id: u32,
+        kind: u32,
+        index: u16,
+    },
+    /// s2c 0x023 (ITEM_TRADE_LIST): ItemNum @4, TradeCounter @8, ItemNo @0xa, TradeIndex @0xd, Attr @0xe (24).
+    TradeTheirs {
+        n: u32,
+        counter: u16,
+        item: u16,
+        slot: u8,
+        attr: [u8; 24],
+    },
+    /// s2c 0x025 (ITEM_TRADE_MYLIST): ItemNum @4, ItemNo @8, TradeIndex @0xa, ItemIndex @0xb.
+    TradeMine {
+        n: u32,
+        item: u16,
+        slot: u8,
+        inv: u8,
+    },
+    /// s2c 0x0E0 (GP_SERV_COMMAND_GROUP_COMLINK): LinkshellNum @4, ItemIndex @5, Category (bag) @6.
+    LinkshellEquip {
+        num: u8,
+        index: u8,
+        bag: u8,
+    },
+    /// s2c 0x0CC (GP_SERV_COMMAND_LINKSHELL_MESSAGE), raw.
+    LinkshellMessage(Vec<u8>),
+    /// s2c 0x048: the Linkshell Concierge's slots.
+    Concierge(Vec<u8>),
+    /// s2c 0x0C9 (the checked player's equipment / jobs) and 0x0CA (title, bazaar message), raw.
+    InspectEquip(Vec<u8>),
+    /// s2c 0x008 (GP_SERV_COMMAND_ENTERZONE, LAB_100facd0): the visited-zone bits @4.
+    KnownZones([u8; 0x30]),
+    /// s2c 0x05E (GP_SERV_COMMAND_CONQUEST) and 0x071 (campaign / colonization), raw.
+    Conquest(Vec<u8>),
+    Influence(Vec<u8>),
+    InspectMessage(Vec<u8>),
+    /// s2c 0x04D (GP_SERV_COMMAND_FRAGMENTS): the whole packet (client/servmes.rs reads it).
+    Fragments(Vec<u8>),
+    /// s2c 0x009 (GP_SERV_COMMAND_MESSAGE): MesNo @0xa, Data @0xd as keys (see std_data).
+    MessageStd {
+        id: u16,
+        cas: u32,
+        para: [i32; 4],
+        strings: [String; 2],
+    },
+    /// s2c 0x0D2 (GP_SERV_COMMAND_TROPHY_LIST): TargetUniqueNo @8, Gold @0xc, TrophyItemNo @0x10, TrophyItemIndex @0x14,
+    /// IsContainer @0x16.
+    TrophyList(TrophyList),
+    /// s2c 0x0D3 (GP_SERV_COMMAND_TROPHY_SOLUTION): LootUniqueNo @4, EntryUniqueNo @8, EntryPoint @0x12,
+    /// TrophyItemIndex @0x14, JudgeFlg @0x15, sLootName @0x16, sLootName2 @0x26.
+    TrophySolution {
+        slot: u8,
+        judge: u8,
+        loot: u32,
+        loot_point: i16,
+        entry: u32,
+        entry_point: i16,
+        entry_flg: bool,
+        loot_name: String,
+        entry_name: String,
+    },
+    Event(EventStart),
+    /// 0x05D: the event's four string slots.
+    EventStrings(Vec<String>),
+    /// 0x05C: event params into Z2..Z9.
+    EventParams([u32; 8]),
+    /// 0x052: release mode (low byte) and, for mode 2, the event id.
+    EventRelease {
+        mode: u8,
+        event: u16,
+    },
+    /// 0x05B / 0x065: a position set by the server (WPOS), with its mode.
+    Wpos {
+        id: u32,
+        pos: [f32; 3],
+        dir: u8,
+        mode: u8,
+    },
+    ZoneText(ZoneText),
+    /// s2c 0x067 kind 2 (char sync): the character, the owner of the Mog House being visited (@0x20, our client
+    /// only; 0 = none / ours) and the 2F flag (@0x27 bit 0, the owner's when visiting).
+    /// @0x25: the main job's level before any level restriction (player +0x40c42).
+    /// `custom`: CustomProperties @0x18 / @0x1C, our personal chocobo's look (FUN_1009ab40).
+    CharSync {
+        id: u32,
+        owner: u32,
+        floors: bool,
+        open: bool,
+        level: u8,
+        sync: u8,
+        custom: [u32; 2],
+    },
+    /// s2c 0x067 kind 3 (FUN_1009b4xx, 2019 asm 0x1009b6ad): ActIndex @6, id @8, the master's ActIndex u16 @0x0C.
+    EntityMaster {
+        index: u16,
+        id: u32,
+        master: u16,
+    },
+    /// s2c 0x11A (the answer to c2s 0x119): unlocked job emotes (u32 @4, bit job - 1) and chairs (u16 @8).
+    EmoteUnlocks {
+        jobs: u32,
+        chairs: u16,
+    },
+    /// s2c 0x04B (GP_SERV_COMMAND_PBX_RESULT).
+    Pbx(super::post::Pbx),
+    /// s2c 0x01B (GP_MYROOM_DANCER): get_job_flag @0xc, job_lev @0x10 (jobs 0..15), job_lev2 @0x48 (16..23),
+    /// sjobflg @0x44.
+    JobInfo(super::moogle::JobInfo),
+    /// s2c 0x044 EXTENDED_JOB (FUN_100fcb70): 0x9c bytes from @4 (job, IsSubJob, pad, then the job's data: BLU's 20
+    /// set spells and a u32 stamp; PUP's attachments).
+    ExtJob(Vec<u8>),
+    /// s2c 0x02E (header only): open the moogle menu.
+    MogMenu,
+    /// s2c 0x0AE: the owned mounts, 64 bits (LSB: key items 3072 + n).
+    Mounts(u64),
+    /// s2c 0x119 u32 @0xfc: the mount recast in seconds (one shared timer).
+    MountRecast(u32),
+    /// s2c 0x068 type 4 (LSB CPetSyncPacket): our pet (ActIndex u16 @0xc, HP% @0xe, MP% @0xf, TP u16 @0x10, its
+    /// target u32 @0x14 while attacking), none without a pet.
+    PetSync(Option<PetSync>),
+    /// 0x01C: container sizes (ItemNum, 1 + size).
+    ItemMax([u8; 18], [u16; 18]),
+    /// 0x01E: count of a slot (0 = emptied).
+    ItemNum {
+        container: u8,
+        index: u8,
+        count: u32,
+    },
+    /// 0x01F / 0x020: item in a slot.
+    /// 0x01F / 0x020; 0x020 carries the 24-byte extdata (Attr @0x11).
+    /// LockFlg (0x01F @0xc, 0x020 @0x10): 0 free, 5 equipped, 0x0F in use, 0x13 linkshell, 0x19, 0x1B mannequin.
+    Item {
+        container: u8,
+        index: u8,
+        id: u16,
+        count: u32,
+        ext: Option<[u8; 24]>,
+        lock: u8,
+        price: Option<u32>,
+    },
+    /// s2c 0x108 BAZAAR_SHOPPING: State @8, HideLevel @0xc, the customer's name @0x10.
+    BazaarShopper {
+        state: u32,
+        hide: u16,
+        name: String,
+    },
+    /// s2c 0x10A BAZAAR_SALE: ItemNum @4, ItemNo @8, the buyer's name @0xa.
+    BazaarSale {
+        count: u32,
+        item: u16,
+        name: String,
+    },
+    /// s2c 0x105 BAZAAR_LIST: Price @4, ItemNum @8, TaxRate @0xc, ItemNo @0xe, ItemIndex @0x10, Attr @0x11.
+    BazaarItem {
+        price: u32,
+        count: u32,
+        tax: u16,
+        item: u16,
+        index: u8,
+        attr: [u8; 24],
+    },
+    /// s2c 0x106 BAZAAR_BUY: State @4 (0 bought), the seller's name @8.
+    BazaarBuy {
+        state: u32,
+        name: String,
+    },
+    /// s2c 0x107 BAZAAR_CLOSE: the seller's name @4.
+    BazaarClosed {
+        name: String,
+    },
+    /// s2c 0x109 BAZAAR_SELL (another customer bought): ItemNum @8, BazaarActIndex @0xe, the buyer's name @0x10,
+    /// ItemIndex @0x20.
+    BazaarSold {
+        count: u32,
+        owner: u16,
+        name: String,
+        index: u8,
+    },
+    /// 0x050: equipment slot -> container slot (index 0 = removed).
+    Equip {
+        slot: u8,
+        index: u8,
+        container: u8,
+    },
+    /// s2c 0x04F (LAB_100e5ac0): every equipment slot empties (G+0x19a54, 16 x 8 bytes), then the equipment hook.
+    EquipClear,
+    /// 0x061: our stats.
+    CharStats(super::items::CharStats),
+    /// 0x05F: a music slot changed.
+    Music {
+        slot: u16,
+        id: u16,
+    },
+    /// Weather change (0x057): number @8, crossfade in Vana'diel minutes @0x0a.
+    Weather(u16, u16),
+    /// 0x058 (GP_SERV_COMMAND_ASSIST): UniqueNo @4, AssistNo @8 (the client reads only these).
+    Assist {
+        player: u32,
+        target: u32,
+    },
+    /// s2c 0x055: key item table TableIndex @0x84, owned bits GetItemFlag[16] @4.
+    KeyItems {
+        table: u16,
+        bits: [u32; 16],
+        seen: [u32; 16],
+    },
+    /// Our equipment changed (0x051).
+    SelfLook([u16; 9]),
+    /// The server is moving us to another zone; a ZoneIn follows.
+    Zoning,
+    Entity(EntityUpdate),
+    /// Our status (0x037): LSB Animation @0x30, HP% (u32 @0x28 bits 16-23), and while dead the
+    /// seconds until the forced return home (dead_counter1 @0x38, 60 Hz, includes a 6 minute floor).
+    /// `dead`: dead_counter1 u32 @0x3C (60 Hz ticks) and dead_counter2 u32 @0x40 (Earth seconds since the Vana'diel
+    /// epoch), the time the server sends us home (@0x38 is Flags3).
+    /// `icons`: the status icon ids (u8 @4 + i and 2 bits each @0x4C; 0xffff none).
+    /// `team`: the PvP team byte (+0x1ff, u32 @0x34 >> 21; LSB allegiance).
+    /// `ride`: ChocoboIndex u32 @0x28 bits 13..15 and the mount id u8 @0x5B.
+    /// `speed`: flags1 (u32 @0x2C) Speed bits 0..11 and SpeedBase bits 17..24 (FUN_1009d0f0 -> actor +0x15c / +0x9c).
+    SelfStatus {
+        speed: (u8, u8),
+        status: u8,
+        hpp: u8,
+        dead: (u32, u32),
+        pet: u16,
+        flags: u32,
+        icons: [u16; 32],
+        team: u8,
+        fellow: u16,
+        /// u16 @0x46 (our entity +0x2a2): the actor we are made to follow (forced.rs), 0 none.
+        follow: u16,
+        plate: SelfPlate,
+        ride: (u8, u8),
+        indi: u8,
+        fish_timer: u16,
+        gate: u8,
+        costume: u16,
+    },
+    /// s2c 0x115: the hooked fish.
+    Fish(super::fishing::FishParams),
+    /// Timeless XI: s2c 0x115 rewritten by a Timeless server into the bar game's settings.
+    TimelessFish(super::timeless::fishing::Bite),
+    /// s2c 0x076: party members' status icons (UniqueNo, 32 icons), five rows (ourselves not included).
+    PartyEffects(Vec<(u32, [u16; 32])>),
+    /// s2c 0x075 (GP_SERV_COMMAND_BATTLEFIELD): the whole packet (client/objective.rs).
+    Objective(Vec<u8>),
+    /// s2c 0x063 type 2 (FUN_10099270): limit points u16 @8, bits u16 @0xa (merits 0..6, bit 13 canUseMeritMode, 14
+    /// EXP capped or merit mode), max merits @0xc; type 5 the job point access @8; types 3 / 4 (Monstrosity): type 3's
+    /// u32 @0xc (gladiator rank bits 2..3) and u16 @0x14 (prestige).
+    Merits {
+        limit: u16,
+        bits: u16,
+        max: u8,
+    },
+    JobPoints(u8, [[u16; 3]; 24]),
+    /// s2c 0x08C (0x100e4ca0): merit records {u16 id (index * 2, bit 0 = delete), u8 next cost, u8 level} from @8.
+    MeritList(Vec<(u16, u8, u8)>),
+    /// s2c 0x0B6 SET_GMMSG (LAB_101132b0): msgId u32 @4, seqId u16 @8, pktNum u16 @0xa (0 = the last), text @0xc (244).
+    GmMessage {
+        id: u32,
+        seq: u16,
+        last: bool,
+        text: Vec<u8>,
+    },
+    /// s2c 0x04C: the auction house.
+    Auc(super::auction::AucPacket),
+    /// s2c 0x08D (LAB_100e4fd0): 64 job point records @4 {u16 entry id, u16 next cost | level << 10}.
+    JobPointList(Vec<(u16, u8, u16)>),
+    /// s2c 0x08E: u16 points @4, u8 upgrades[32] @8, u16 costs[32] @0x28.
+    AlterEgo(super::aepoints::AeData),
+    /// s2c 0x08F: the celestites owned and the six sets (client/celestite.rs).
+    Celestites(super::celestite::CelData),
+    /// 0x063 types 3 / 4: the blocks from @8 (212 / 172 bytes).
+    Monstrosity {
+        kind: u16,
+        data: Vec<u8>,
+    },
+    /// s2c 0x063 sub 9: the icons and their end times (1/60 s since the Vana'diel epoch; 0x7fffffff no timer).
+    StatusTimers {
+        ids: [u16; 32],
+        ends: [u32; 32],
+    },
+    /// Our HP, MP and TP (0x0DF).
+    Vitals {
+        hp: u32,
+        mp: u32,
+        tp: u32,
+        hpp: u8,
+        mpp: u8,
+    },
+    /// s2c 0x0C8 GROUP_TBL (kind 0 party / 5 alliance), 0x0DD / 0x0E2 GROUP_LIST (0x0E2 creates), 0x0DF GROUP_ATTR.
+    PartyTable(Vec<super::party::TableEntry>),
+    PartyList(super::party::ListUpdate, bool),
+    PartyAttr(super::party::AttrUpdate),
+    /// s2c 0x05A MOTIONMES (LAB_100a06e0): caster @4, target @8 (0 none), emote u16 @0x10, Param @0x12, Mode @0x16.
+    Emote {
+        caster: u32,
+        target: u32,
+        emote: u16,
+        param: u16,
+        mode: u8,
+    },
+    /// s2c 0x0BF REGISTRATION (battlefield registration NPCs): Result u16 @6, ActIndex u32 @0xC.
+    Registration {
+        index: u32,
+        result: u16,
+    },
+    /// s2c 0x0A0 MAP_GROUP: a party member's position for the map.
+    MapGroup {
+        id: u32,
+        zone: u16,
+        pos: [f32; 3],
+    },
+    /// s2c 0x0F4 TRACKING_LIST: a Wide Scan result.
+    TrackEntry(super::widescan::Entry),
+    /// s2c 0x0F5 TRACKING_POS: the tracked target's position and state.
+    TrackPos {
+        index: u16,
+        level: u8,
+        pos: [f32; 3],
+        state: u32,
+    },
+    /// s2c 0x0F6 TRACKING_STATE: the list state (1 start, 2 end).
+    TrackState(u32),
+    /// s2c 0x031 RECIPE, 0x059 FRIENDPASS, 0x10E REQSUBMAPNUM: answers to event ops, whole packet with its header.
+    EventAnswer {
+        id: u16,
+        data: Vec<u8>,
+    },
+    /// s2c 0x0F9 RES {UniqueNo @4, ActIndex @8, u16 type @0xA}: 1 raise offered, 2 tractor (handler 0x100a2540 reads
+    /// only the type).
+    ResOffer {
+        kind: u16,
+    },
+    /// s2c 0x026: a mannequin look record (MODLOG "Mog House mannequins"): +0 is_used, +1 container, +2 slot, +4 u16
+    /// the pose-8 item, +6 race / hair (unused), +8..+0x17 head, body, hands, legs, feet, main, sub, range (slot
+    /// nibbles).
+    MannequinLook {
+        rec: [u8; 24],
+    },
+    /// s2c 0x110 (Sparks u24 @4, Deeds u16 @8, Plaudits u16 @0xa, 8 bytes @0xc: LSB's Unity Shared day and Leader
+    /// week), 0x111 (64 objective records @4), 0x112 (Data[128] @4, Offset u16 @0x84): Records of Eminence.
+    RoeUnity {
+        sparks: u32,
+        deeds: u16,
+        plaudits: u16,
+        rot: [u8; 8],
+    },
+    RoeActive([u32; 64]),
+    RoeLog {
+        offset: u16,
+        data: [u8; 128],
+    },
+    /// s2c 0x056 (LAB_10098ad0): a quest / mission record, data u32[8] @4 and Port @0x24.
+    MissionLog {
+        port: u16,
+        data: [u32; 8],
+    },
+    /// s2c 0x0B4 CONFIG (LAB_100e4f20): the 12 SAVE_CONF bytes @4 (flags, message filters).
+    ConfSys([u8; 12]),
+    /// s2c 0x0DC GROUP_SOLICIT_REQ (LAB_10203a50): AnonFlag @0xa, Kind @0xb (0 party, 5 alliance), the name @0xc,
+    /// RaceNo @0x1c.
+    Invite {
+        anon: u8,
+        kind: u8,
+        name: String,
+        race: u16,
+    },
+    /// s2c 0x11D PARTYREQ (LAB_100a2610): Status @0xb (0 requesting, 1 stopped), sName @0xc (client/partyreq.rs).
+    PartyRequest {
+        status: u8,
+        name: String,
+    },
+    /// s2c 0x041 BLACK_LIST: List[12] {u32 ID, Name[16]} @4, Stat @0xf4 (bit 0 reset, bit 1 last), Num @0xf5.
+    Blacklist {
+        stat: u8,
+        entries: Vec<(u32, String)>,
+    },
+    /// s2c 0x078 SWITCH_START: UniqueNo @4, AllNum @8, ActIndex @0xc, sName[15] @0xe, Kind @0x1d, Str @0x1e.
+    PollStart {
+        name: String,
+        kind: u8,
+        text: String,
+    },
+    /// s2c 0x077 ENTITY_VIS (LAB_10098f30): with Flags @4 bit 0, UniqueNo[32] @8 (FUN_10087ae0; zeroes kept): the
+    /// listed-only NPCs shown.
+    EntityVis(Vec<u32>),
+    /// s2c 0x079 SWITCH_PROC: AllNum @4, VoteNumTbl[9] u16 @8, Kind @0x1a, State @0x1b, QuestionNum @0x1c, sPropName[15]
+    /// @0x1d, Str @0x2c.
+    PollState {
+        votes: [u16; 9],
+        kind: u8,
+        state: u8,
+        questions: u8,
+        name: String,
+        text: String,
+    },
+    /// s2c 0x047 TRANSLATE: ItemNo u16 @4, From @6, To @7, FromString[64] @8, ToString[64] @0x48.
+    Translate {
+        item: u16,
+        from: u8,
+        to: u8,
+        from_text: String,
+        to_text: String,
+    },
+    /// s2c 0x049 ITEMSEARCH: ItemNo u16 @4, Flag u8 @6, ItemName @8.
+    ItemSearch {
+        item: u16,
+        flag: u8,
+    },
+    /// s2c 0x042 BLACK_EDIT: {u32 ID, Name[16]} @4, Mode @0x18 (0 added, 1 removed, 2 failed).
+    BlackEdit {
+        id: u32,
+        name: String,
+        mode: u8,
+    },
+    /// s2c 0x0E1 GROUP_CHECKID (LAB_100ea7f0): GroupID @4, the answer to c2s 0x078.
+    GroupId(u32),
+    /// s2c 0x113 (mode 1) / 0x118 (mode 2): the currencies, the whole packet (MODLOG "Currencies and Currencies 2").
+    Currencies {
+        mode: u8,
+        data: Vec<u8>,
+    },
+    /// s2c 0x116 EQUIPSET_VALID: the 16 slot entries at @4 (client/equipsets.rs).
+    EquipSetValid([[u8; 4]; 16]),
+    /// s2c 0x117 EQUIPSET_RES: Count @4, ItemsChanged @8 and ItemsEquipped @0x48 ({index, slot, container, 0}).
+    EquipSetRes {
+        count: u8,
+        changed: [[u8; 4]; 16],
+        equipped: [[u8; 4]; 16],
+    },
+    /// s2c 0x11b (u8 @4): the lockstyle flag; s2c 0x11c LOCKSTYLE_ERROR: Count @4 item ids from @8.
+    LockStyleFlag(u8),
+    LockStyleError(Vec<u16>),
+    /// s2c 0x063 type 7: week @8 (0 previous, 1 current), dataType @9, 0x80 bytes from @0xc.
+    UnityTable {
+        week: u8,
+        d: u8,
+        data: [u8; 0x80],
+    },
+    /// s2c 0x063 type 6 (0x10099330): the teleport point masks, 0x40 bytes from @8 (Home Points, Survival Guides,
+    /// Waypoints, Telepoints, Atmos(S), Eschan portals).
+    PointMasks([u8; 0x40]),
+    /// s2c 0x119 ABIL_RECAST: 31 x {u16 seconds, u8 Calc1, u8 timer id, i16 Calc2, u16} (FUN_10099430), kept as
+    /// (timer id, seconds, Calc1, Calc2).
+    AbilityRecasts(Vec<(u16, u16, u8, i16)>),
+    /// s2c 0x0AA MAGIC_DATA: learned spells, one bit per spell id.
+    MagicKnown(Vec<u8>),
+    /// s2c 0x0AC COMMAND_DATA: weapon skill, job ability, pet command bits (64 bytes each), traits (32).
+    CommandsKnown(Vec<u8>),
+    /// s2c 0x0AD DUNGEON: the learned maze vouchers (8 bytes) and runes (64), 56 unread.
+    Dungeon(Vec<u8>),
+    /// s2c 0x017: Kind @4, Attr @5 (bit 0 GM), Data @6 (the yell's zone; assist: mastery, mentor rank), name @8,
+    /// text @0x17.
+    Chat {
+        kind: u8,
+        attr: u8,
+        data: u16,
+        from: String,
+        text: String,
+    },
+    Battle(BattleMessage),
+    Action(crate::net::action::Action),
+    /// 0x038: run scheduler `name` (a 4cc such as "kesu") on an actor.
+    Scheduler {
+        actor: u32,
+        target: u32,
+        name: [u8; 4],
+    },
+    /// s2c 0x039 (GP_SERV_COMMAND_MAPSCHEDULOR): a zone scheduler on (caster, target), ids and ActIndexes.
+    MapScheduler {
+        ids: (u32, u32),
+        indices: (u16, u16),
+        name: [u8; 4],
+    },
+    /// s2c 0x03A (GP_SERV_COMMAND_MAGICSCHEDULOR): an action file on (caster, target) by type.
+    MagicScheduler {
+        ids: (u32, u32),
+        indices: (u16, u16),
+        file: u16,
+        kind: u8,
+    },
+    /// s2c 0x069 / 0x073 / 0x074: chocobo racing (client/racing.rs), the whole packet.
+    Racing {
+        id: u16,
+        data: Vec<u8>,
+    },
+    /// s2c 0x02F (GP_SERV_COMMAND_DIG): TarUniqueNo, TarActIndex, Flags.
+    Dig {
+        id: u32,
+        index: u16,
+        flags: u8,
+    },
+    /// s2c 0x11E: ActIndex @4 used /jump.
+    Jump(u16),
+    /// Ours: s2c 0x1F0, a page of the GM level and command list (client/gm.rs), the whole sub-packet.
+    GmCatalog(Vec<u8>),
+    /// Ours: s2c 0x1F1, a GM window command's result and output, the whole sub-packet.
+    GmResult(Vec<u8>),
+    /// s2c 0x030 (GP_SERV_COMMAND_EFFECT): UniqueNo @4, ActIndex @8, EffectNum @0xa, Type @0xc, Status @0xd, Timer @0xe.
+    SynthEffect {
+        id: u32,
+        index: u16,
+        effect: i16,
+        kind: i8,
+        status: i8,
+        timer: u16,
+    },
+    /// s2c 0x06F / 0x070 (COMBINE_ANS / COMBINE_INF).
+    SynthResult(super::synth::Answer),
+    SynthOthers(super::synth::Answer),
+    Logout {
+        state: u32,
+    },
+    Error(String),
+}
+
+/// What FUN_100f7de0 prints on zone-in by LoginState (0x00A u32 @0x80).
+#[derive(Clone, Copy, Debug)]
+pub enum AreaLine {
+    /// "=== Area: <group 5 name> ===" (FUN_100f8730).
+    Zone(u16),
+    /// Group 9 0x126 + floor, "=== Area: Mog House 1F ===" (FUN_100f87c0).
+    MogHouse(u8),
+}
+
+/// The Mog House from a MYROOM 0x00A (LoginState 1): MyroomMapNumber @0xaa, floor (u8 @0xa8 >> 1) & 3 (0 = 1F),
+/// MyRoomExitBit @0xae.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MyRoom {
+    pub map: u16,
+    pub floor: u8,
+    pub exit_bit: u8,
+}
+
+/// LAB_100facf0 / FUN_10094190: the scene (map number) a 0x00A loads: MyroomMapNumber in the Mog House, else
+/// MapNumber @0x42 (+ 0x1bc from 0x100, e.g. 256 Western Adoulin -> 0x2bc).
+pub fn scene_of(p: &SubPacket) -> (u16, Option<MyRoom>) {
+    if p.u32(0x80) == 1 {
+        let room = MyRoom { map: p.u16(0xaa), floor: (p.u8(0xa8) >> 1) & 3, exit_bit: p.u8(0xae) };
+        return (room.map, Some(room));
+    }
+    let map = p.u16(0x42);
+    (if map >= 0x100 { map + 0x1bc } else { map }, None)
+}
+
+/// The s2c 0x00A handler FUN_100fae40's LoginState switch (jump table 0x100fb790): 3 POLEXIT, 4 JOBEXIT and 5
+/// POLEXIT_MYROOM set zone flag 0x200 / 0x2000, which hands the game over to the PlayOnline viewer (FUN_100daf30);
+/// 1 MYROOM and everything else (2 GAME, 0, 6 and up) are a plain zone-in.
+pub fn pol_return(login_state: u32) -> bool {
+    matches!(login_state, 3..=5)
+}
+
+/// FUN_100f7de0: GAME (2), 0 and 6 print the area; MYROOM (1) the area for maps 0x118 / 0x11d, else the Mog
+/// House floor when FUN_100f6740 says there is one; 3..5 (exits) nothing.
+pub fn area_line(p: &SubPacket) -> Option<AreaLine> {
+    let zone = p.u16(0x30);
+    match p.u32(0x80) {
+        1 if matches!(p.u16(0x42), 0x118 | 0x11d) => Some(AreaLine::Zone(zone)),
+        1 => {
+            let floor = (p.u8(0xa8) >> 1) & 3;
+            (floor != 0 || (0x121..=0x123).contains(&p.u16(0xaa))).then_some(AreaLine::MogHouse(floor))
+        }
+        3..=5 => None,
+        _ => Some(AreaLine::Zone(zone)),
+    }
+}
+
+#[derive(Debug)]
+pub enum NetCommand {
+    /// Ours (docs/lua-mods.md 3.3): packets to decode as if received (the hooks' results, injected ones), for the
+    /// session numbered (0: whichever is current); a batch from a session that has ended is dropped.
+    Decode(u32, Vec<SubPacket>),
+    /// Packets to send as they are (the hooks' results, injected ones already hooked); as Decode.
+    SendBatch(u32, Vec<Vec<u8>>),
+    /// c2s 0x0B5: kind 0 say, 1 shout, 4 party, 5 linkshell, 0x1a yell, 0x1b linkshell 2, 0x21 unity.
+    Chat { kind: u8, text: String },
+    /// c2s 0x0B6: a tell (name 15 bytes, then the message).
+    Tell { name: String, text: String },
+    /// c2s 0x0E8 {u32 Mode}: 0 toggle, 1 on, 2 off (/heal).
+    Heal(u32),
+    /// c2s 0x0E7 {u16 Mode, u16 Kind}: Mode 0 toggle, 1 on, 2 off, 3 shutdown on; Kind 1 logout, 3 shutdown.
+    Logout { mode: u16, kind: u16 },
+    /// Accept "Return to home point" while dead (0x01A action 0x0B).
+    /// c2s 0x01A 0x0B, StatusId @0xC (LSB HOMEPOINTMENU): 0 home point, in Monstrosity 1 Cancel / 2 Retry.
+    HomePoint(u32),
+    /// 0x01A on a target: 2 attack, 4 disengage, 0x0f change target (GP_CLI_COMMAND_ACTION).
+    Act { target: u32, index: u16, action: u16 },
+    /// 0x0DD equip inspect: kind 0 /check, 1 /checkname, 2 /checkparam.
+    Check { target: u32, index: u16, kind: u8 },
+    /// Any c2s packet: id and body (after the 4-byte header).
+    Packet { id: u16, body: Vec<u8> },
+    /// Ours: a packet of a gated id held until FUN_100fc3c0's gate opens for it, where Packet would be dropped (the
+    /// modern storage view's moves, the sorts' 0x03A). The gate's time is the net thread's, so callers need not
+    /// guess it.
+    PacketHeld { id: u16, body: Vec<u8> },
+    /// c2s 0x0F1 {u16 BuffNo}: cancel a status effect (FUN_100a0590).
+    CancelStatus(u16),
+    /// c2s 0x076 {u8 Kind = 0}: the roster's names (FUN_100e9550); LSB answers with 0x0C8 and 0x0DD.
+    GroupListReq,
+    /// Touched a zone line: its tag, and where we are.
+    ZoneLine { tag: u32, pos: [f32; 3] },
+    /// c2s 0x05B: mode 0 end, 1 update.
+    EventEnd { target: u32, index: u16, option: u32, zone: u16, event: u16, mode: u16 },
+    /// c2s 0x05C: event position update (mode 1).
+    EventPos { pos: [f32; 3], dir: u8, target: u32, index: u16, option: u32, zone: u16, event: u16 },
+    /// c2s 0x050: equip container slot `index` (0 = remove) into equipment `slot`.
+    Equip { index: u8, slot: u8, container: u8 },
+    /// c2s 0x061 (FUN_100967e0): ask for our stats (0x061 and friends); 1 from the Equipment command.
+    StatusRequest(u8),
+    /// c2s 0x016 CHARREQ (FUN_100ad230): ActIndex @4; LSB answers with a full 0x00E / 0x00D.
+    CharReq(u16),
+    /// c2s 0x05E RectID 'zmrq' (FUN_1008aec0): leave the Mog House, MyRoomExitBit @0x16, MyRoomExitMode @0x17 (0 the
+    /// area entered from, 1..4 the exit list, 0x7d / 0x7e change floors, 0x7f Mog Garden).
+    MyRoomExit { bit: u8, mode: u8 },
+    /// c2s 0x0F2 (FUN_100fc680) {u16 State @4, u16 SubMapNumber @6}: 1 a sub-area loaded (0 = none), 2 from an
+    /// event (op 0x75 sub 2).
+    SubMap { state: u16, id: u16 },
+}
+
+/// c2s 0x05B body (FUN_1009ebb0 / FUN_1009ed00).
+pub fn event_end_body(target: u32, index: u16, option: u32, zone: u16, event: u16, mode: u16) -> Vec<u8> {
+    let mut b = Vec::with_capacity(16);
+    b.extend_from_slice(&target.to_le_bytes());
+    b.extend_from_slice(&option.to_le_bytes());
+    b.extend_from_slice(&index.to_le_bytes());
+    b.extend_from_slice(&mode.to_le_bytes());
+    b.extend_from_slice(&zone.to_le_bytes());
+    b.extend_from_slice(&event.to_le_bytes());
+    b
+}
+
+/// s2c 0x032 / 0x034 / 0x033 as LSB writes them (offsets include the header). All three handlers store Mode with
+/// bit 0x2000 set (FUN_100a0200 / FUN_100a02d0 / FUN_100a03c0: `Mode | 0x2000`), so a 0x052 mode 0 does nothing to
+/// an event a packet started; only the 0x00A login event keeps its Mode as sent.
+pub fn event_start(p: &SubPacket) -> EventStart {
+    let mut s = event_start_raw(p);
+    s.mode |= super::event::mode::PACKET_START as u16;
+    s
+}
+
+fn event_start_raw(p: &SubPacket) -> EventStart {
+    match p.id {
+        0x034 => EventStart {
+            target: p.u32(4),
+            params: std::array::from_fn(|i| p.u32(8 + 4 * i)),
+            index: p.u16(0x28),
+            zone: p.u16(0x2a),
+            event: p.u16(0x2c),
+            mode: p.u16(0x2e),
+            zone2: p.u16(0x30),
+            para2: p.u16(0x32),
+            strings: Vec::new(),
+            login: false,
+        },
+        0x033 => {
+            let mode = p.u16(0xe);
+            EventStart {
+                target: p.u32(4),
+                index: p.u16(8),
+                zone: p.u16(0xa),
+                event: p.u16(0xc),
+                mode,
+                zone2: p.u16(0xa),
+                para2: 0,
+                // Data[8] counts only with Mode & 8 (1009ea60).
+                params: if mode & 8 != 0 { std::array::from_fn(|i| p.u32(0x50 + 4 * i)) } else { [0; 8] },
+                strings: (0..4).map(|i| p.str(0x10 + 16 * i, 16)).collect(),
+                login: false,
+            }
+        }
+        _ => EventStart {
+            target: p.u32(4),
+            index: p.u16(8),
+            zone: p.u16(0xa),
+            event: p.u16(0xc),
+            mode: p.u16(0xe),
+            zone2: p.u16(0x10),
+            para2: p.u16(0x12),
+            ..Default::default()
+        },
+    }
+}
+
+/// What we report about ourselves every tick.
+#[derive(Clone, Copy, Default)]
+pub struct SelfState {
+    pub pos: [f32; 3],
+    pub dir: u8,
+    pub moving: bool,
+    /// c2s 0x015 @0x12 (FUN_10096c00): the ticks of the move so far; others' clients slide us by its steps.
+    pub move_time: u16,
+    /// The current target's ActIndex (0 none): c2s 0x015 @0x16 facetarget, the server's cursor target.
+    pub target: u16,
+    /// c2s 0x015 @0x15 bit 2, GroundMode (FUN_100983f0): HackMove, GroundFlag or entity +0x120 bit 21.
+    pub ground_mode: bool,
+    /// FUN_100983f0 builds no 0x015 (the datagram still goes): our status in force is 0x1c / 0x1f, or we are bound to
+    /// the running event without Mode bit 4 (`event::no_position`).
+    pub silent: bool,
+    /// The control lock (World::control_lock, DAT_10482f18 in 30261006_0): FUN_100983f0 builds no c2s 0x015 while
+    /// it is set (0x10098530). Ours sets it for a talk request, a zone-in event and op 0x20.
+    pub locked: bool,
+}
+
+pub struct NetHandle {
+    pub events: Receiver<NetEvent>,
+    pub commands: Sender<NetCommand>,
+    pub me: Arc<Mutex<SelfState>>,
+    pub stats: Arc<NetStats>,
+    /// Which directions the mods hook (HOOK_IN, HOOK_OUT); the net thread routes batches through them then.
+    pub hooks: Arc<AtomicU8>,
+}
+
+pub const HOOK_IN: u8 = 1;
+pub const HOOK_OUT: u8 = 2;
+/// A mod may read packets.last: the net thread keeps the last of each id.
+pub const HOOK_LAST: u8 = 4;
+
+/// Datagram bytes sent and received (whole UDP payloads, as FUN_100f9b80 / FUN_100f9b90 count them) and
+/// when the last server datagram came, in ms since the session started.
+#[derive(Default)]
+pub struct NetStats {
+    pub sent: std::sync::atomic::AtomicU64,
+    pub received: std::sync::atomic::AtomicU64,
+    pub last_rx_ms: std::sync::atomic::AtomicU64,
+    pub start: std::sync::OnceLock<Instant>,
+    /// A mod's datagram interval in ms (client.set_option send_interval); 0 retail's 400.
+    pub send_ms: std::sync::atomic::AtomicU32,
+    /// Settings' Send Rate in ms, used on a private server when no mod sets one (0 before the first frame sets it).
+    pub rate_ms: std::sync::atomic::AtomicU32,
+    /// Send queue slots taken (sent and unacknowledged, queued, the position's), for `call_gate`'s room test.
+    pub waiting: std::sync::atomic::AtomicU32,
+    /// Config `gm_window`: the zone-in asks a private server for the GM list (c2s 0x1F0).
+    pub gm_window: std::sync::atomic::AtomicBool,
+    /// The last sub-packet of each id each way (packets.last), kept while HOOK_LAST is set.
+    pub last_in: Mutex<std::collections::HashMap<u16, Vec<u8>>>,
+    pub last_out: Mutex<std::collections::HashMap<u16, Vec<u8>>>,
+    /// The ids the mods hook each way (in, out; a bit an id), published each frame: only a batch holding one goes
+    /// through the main thread, the rest decode or go out at once.
+    pub hooked: [[AtomicU64; 8]; 2],
+}
+
+/// Retail's PacketCnt from the config (+0xd0): the datagram interval in ms until s2c 0x005 sets another.
+const RETAIL_INTERVAL: u32 = 400;
+/// s2c 0x005: the server's PacketCnt.
+const S2C_PACKET_CONTROL: u16 = 0x005;
+/// c2s 0x00D: the answer to a zone change or logout (s2c 0x00B), the session's last datagram.
+const C2S_NETEND: u16 = 0x00D;
+
+/// The datagram interval in force, one rule: a mod's interval, then a Send Rate faster than retail's on a private
+/// server (LSB answers every datagram), then the server's s2c 0x005, then retail's 400.
+fn wanted_interval(stats: &NetStats, private: bool, server: Option<u32>) -> u32 {
+    let retail = server.unwrap_or(RETAIL_INTERVAL);
+    match stats.send_ms.load(Relaxed) {
+        0 if private => match stats.rate_ms.load(Relaxed) {
+            n @ 1..RETAIL_INTERVAL => n.max(50),
+            _ => retail,
+        },
+        0 => retail,
+        n => n,
+    }
+}
+
+/// A sub-packet's id (its first 9 bits).
+fn sub_id(data: &[u8]) -> u16 {
+    if data.len() < 2 { 0 } else { u16::from_le_bytes([data[0], data[1]]) & 0x1ff }
+}
+
+impl NetStats {
+    /// Keeps a sub-packet as the last of its id.
+    pub fn keep_last(&self, out: bool, data: &[u8]) {
+        if let Ok(mut m) = if out { &self.last_out } else { &self.last_in }.lock() {
+            let e = m.entry(sub_id(data)).or_default();
+            e.clear();
+            e.extend_from_slice(data);
+        }
+    }
+
+    /// The hooked ids one way (`out`), a bit an id.
+    pub fn set_hooked(&self, out: bool, ids: &[u64; 8]) {
+        for (a, v) in self.hooked[out as usize].iter().zip(ids) {
+            a.store(*v, Ordering::Relaxed);
+        }
+    }
+
+    fn hooked(&self, out: bool, id: u16) -> bool {
+        let i = (id & 0x1ff) as usize;
+        self.hooked[out as usize][i / 64].load(Ordering::Relaxed) >> (i % 64) & 1 != 0
+    }
+}
+
+impl NetStats {
+    pub fn now_ms(&self) -> u64 {
+        self.start.get_or_init(Instant::now).elapsed().as_millis() as u64
+    }
+}
+
+/// c2s 0x016 body: u16 ActIndex, u16 pad.
+pub fn charreq_body(index: u16) -> [u8; 4] {
+    let [lo, hi] = index.to_le_bytes();
+    [lo, hi, 0, 0]
+}
+
+/// FUN_100983f0 builds c2s 0x015 neither while our status in force is a rider's nor under the control lock (the test at
+/// 0x10098530 in 30261006_0). The retail server answers an event's 0x05C with the place it has stored for us, so a
+/// 0x015 riding with the 0x05C would give it the pre-event place back (Port Jeuno's airship doors).
+fn sends_position(s: &SelfState) -> bool {
+    !s.silent && !s.locked
+}
+
+/// The tick's 0x015 into the datagram: last, as retail. Ours, not retail: the server starts a cast, a ranged attack or
+/// an item where it last heard we were, and stops it on any move after that or when the last two positions were apart
+/// (LSB HasMoved, m_lastMoveDistance). Standing still, the position goes before such an action, twice, so it starts
+/// where we stopped.
+fn add_position(queue: &mut Vec<Vec<u8>>, pos: Vec<u8>, moving: bool) {
+    if !moving && queue.iter().any(|p| stopped_by_moving(p)) {
+        queue.splice(0..0, [pos.clone(), pos]);
+    } else {
+        queue.push(pos);
+    }
+}
+
+/// c2s ids FUN_100fc3c0 is always asked to gate (force 0 at every call site). Ids sent with force, or with a force
+/// that depends on the caller, are left out, and so are chat and tells (0x0B5 / 0x0B6) and fishing (0x110): their
+/// callers act on a refusal, so they are gated there (`call_gate`).
+const GATED: &[u16] = &[
+    0x0C, 0x0F, 0x11, 0x17, 0x1B, 0x1C, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x32, 0x34, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3D,
+    0x41, 0x51, 0x52, 0x53, 0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x60, 0x61, 0x63, 0x64, 0x66, 0x6E, 0x6F, 0x70, 0x71,
+    0x72, 0x73, 0x74, 0x75, 0x77, 0x85, 0x8C, 0x8D, 0x96, 0x9B, 0xA0, 0xA1, 0xA2, 0xAA, 0xAB, 0xAC, 0xAD, 0xB7, 0xC3,
+    0xC4, 0xCD, 0xCE, 0xCF, 0xD0, 0xD2, 0xD4, 0xD5, 0xD8, 0xDD, 0xDE, 0xE0, 0xE2, 0xE4, 0xE7, 0xE9, 0xEA, 0xEB, 0xEC,
+    0xF0, 0xF1, 0xF5, 0xF6, 0x100, 0x102, 0x106, 0x109, 0x10A, 0x10B, 0x10C, 0x10D, 0x10F, 0x112, 0x113, 0x114, 0x115,
+    0x117, 0x118, 0x119, 0x11A, 0x11B, 0x11C, 0x11D,
+];
+
+/// Gated ids whose retail callers retry a refused send (batch 11 addendum): event ops 0x43 / 0xa7 / 0x47 and the event
+/// end stay on it (0x05B / 0x05C), the zone-in keeps its pending flag (0x00C / 0x011), and persona / mp_stat /
+/// FUN_101d3260 ask for 0x061 again. Ours holds these and sends them once the gate allows; the rest are dropped.
+const RETRIED: &[u16] = &[0x00C, 0x011, 0x05B, 0x05C, 0x061];
+
+/// FUN_100fc3c0's per-id gate: a gated id sent again within 1000 ms of its last gated send is refused (retail returns
+/// NULL). Per the callers, a refused packet is dropped (nothing queued, no message) or held and retried.
+#[derive(Default)]
+struct SendGate {
+    /// char data +0x41b4: the last gated send per id.
+    last: std::collections::HashMap<u16, Instant>,
+    /// Refused packets of the retried ids, oldest first.
+    held: std::collections::VecDeque<Vec<u8>>,
+}
+
+fn packet_id(p: &[u8]) -> u16 {
+    u16::from_le_bytes([p[0], p[1]]) & 0x1ff
+}
+
+/// FUN_100fc510's test (0x100fc56a): refused while now <= last + 1000 on the ms clock, so the gate opens at 1001 ms.
+fn gate_open(last: Instant, now: Instant) -> bool {
+    now.duration_since(last).as_millis() > 1000
+}
+
+/// FUN_100dda60's room test (the send queue: 30 slots of 0x110 bytes, 10 kept back): a slot is given while at least
+/// 10 are free, so with 21 or more waiting (queued, or sent and not acknowledged) a send is refused; c2s 0x00C and
+/// 0x0F2 (the ids FUN_100fa000 registers, FUN_100dddc0) may take the kept ones, up to 29 waiting.
+fn queue_room(id: u16, waiting: usize) -> bool {
+    waiting < if matches!(id, 0x00C | 0x0F2) { QUEUE_SLOTS - 1 } else { QUEUE_SLOTS - QUEUE_KEPT + 1 }
+}
+
+const QUEUE_SLOTS: usize = 30;
+const QUEUE_KEPT: usize = 10;
+
+/// FUN_100fa000: the interval at the connect is 5 x the base, from the config's 400 in retail (2000 ms). Ours caps it
+/// there, so a slower mod interval does not slow the login and the first sends after the zone-in.
+fn connect_interval(base: u32) -> u32 {
+    base.saturating_mul(5).min(5 * RETAIL_INTERVAL)
+}
+
+/// FUN_100fab40's interval step (0x100fab53), run before each datagram once zoned in: when the datagram about to go
+/// and the server's last acknowledgement are more than one apart (`lag`, MapSession::lag) the interval grows 50 ms,
+/// up to the base + 3000; otherwise an interval above the base drops by the base, not below it.
+fn step_interval(interval: u32, base: u32, lag: i32) -> u32 {
+    if !(-1..=1).contains(&lag) {
+        interval.wrapping_add(50).min(base.wrapping_add(3000))
+    } else if interval > base {
+        (interval - base).max(base)
+    } else {
+        interval
+    }
+}
+
+/// FUN_100fc3c0's answer to one send.
+#[derive(Debug, PartialEq)]
+enum Ask {
+    Given,
+    /// A gated id within its second.
+    Shut,
+    /// No queue slot (FUN_100dda60).
+    Full,
+}
+
+/// FUN_100fc3c0 for one packet with `waiting` slots taken: a gated id's time is stored before the queue is asked
+/// for a slot (0x100fc5d9), so a full queue still uses the second.
+fn ask(last: &mut std::collections::HashMap<u16, Instant>, id: u16, gated: bool, waiting: usize, now: Instant) -> Ask {
+    if gated {
+        if last.get(&id).is_some_and(|t| !gate_open(*t, now)) {
+            return Ask::Shut;
+        }
+        last.insert(id, now);
+    }
+    if queue_room(id, waiting) { Ask::Given } else { Ask::Full }
+}
+
+/// c2s chat, tells and fishing: their callers act on a refusal, so they ask the gate where they are made. The GM
+/// prompt's answer tells skip it (retail retries them each frame; ours sends each once, client/gmtell.rs).
+pub const C2S_CHAT: u16 = 0x0B5;
+pub const C2S_TELL: u16 = 0x0B6;
+pub const C2S_FISHING: u16 = 0x110;
+const CALLER_GATED: &[u16] = &[C2S_CHAT, C2S_TELL, C2S_FISHING];
+
+/// FUN_100fc3c0 for a caller that acts on the answer (chat and tells refuse before their echo): the gate's second
+/// and the queue's room, from the slots the net thread last published (NetStats::waiting).
+pub fn call_gate(last: &mut std::collections::HashMap<u16, Instant>, id: u16, stats: &NetStats, now: Instant) -> bool {
+    ask(last, id, true, stats.waiting.load(Relaxed) as usize, now) == Ask::Given
+}
+
+impl SendGate {
+    /// FUN_100fc3c0 for a packet of ours; one behind a held packet of its id is shut until that one goes.
+    fn ask(&mut self, id: u16, waiting: usize, now: Instant) -> Ask {
+        let gated = GATED.binary_search(&id).is_ok();
+        if gated && self.held.iter().any(|h| packet_id(h) == id) {
+            return Ask::Shut;
+        }
+        ask(&mut self.last, id, gated, waiting, now)
+    }
+
+    /// Gates the packets a command queued from `from` on. `sent` is the count already sent and not acknowledged,
+    /// which with the queue and the position's slot is what holds retail's queue slots.
+    fn admit(&mut self, queue: &mut Vec<Vec<u8>>, from: usize, sent: usize, now: Instant) {
+        let mut k = from;
+        while k < queue.len() {
+            let id = packet_id(&queue[k]);
+            let answer = if CALLER_GATED.contains(&id) { Ask::Given } else { self.ask(id, sent + 1 + k, now) };
+            if answer == Ask::Given {
+                k += 1;
+                continue;
+            }
+            let p = queue.remove(k);
+            if RETRIED.contains(&id) {
+                log::info!("c2s {id:#05x} held: FUN_100fc3c0 refused it ({answer:?})");
+                self.held.push_back(p);
+            } else if answer == Ask::Full {
+                log::warn!("c2s {id:#05x} refused: the send queue is full ({} waiting for the server)", sent + 1 + k);
+            } else {
+                log::warn!("c2s {id:#05x} refused: sent again within 1000 ms (FUN_100fc3c0's gate)");
+            }
+        }
+    }
+
+    /// A packet to hold rather than drop: queued if FUN_100fc3c0 gives it a slot, else held for release. A sort
+    /// (0x03A) of a container already waiting is not held twice.
+    fn hold(&mut self, queue: &mut Vec<Vec<u8>>, p: Vec<u8>, sent: usize, now: Instant) {
+        let id = packet_id(&p);
+        if id == 0x03A && self.held.iter().any(|h| packet_id(h) == id && h.get(4..) == p.get(4..)) {
+            return;
+        }
+        match self.ask(id, sent + 1 + queue.len(), now) {
+            Ask::Given => queue.push(p),
+            answer => {
+                log::info!("c2s {id:#05x} held: FUN_100fc3c0 refused it ({answer:?})");
+                self.held.push_back(p);
+            }
+        }
+    }
+
+    /// The retried sends: the first held packet of each id asks again, as the retail callers retry.
+    fn release(&mut self, queue: &mut Vec<Vec<u8>>, sent: usize, now: Instant) {
+        let mut seen = Vec::new();
+        let mut k = 0;
+        while k < self.held.len() {
+            let id = packet_id(&self.held[k]);
+            let first = !seen.contains(&id);
+            seen.push(id);
+            let gated = GATED.binary_search(&id).is_ok();
+            if first && ask(&mut self.last, id, gated, sent + 1 + queue.len(), now) == Ask::Given {
+                queue.extend(self.held.remove(k));
+                continue;
+            }
+            k += 1;
+        }
+    }
+}
+
+/// A built sub-packet the server interrupts on movement (LSB HasMoved): 0x01A magic (3) or ranged attack (0x10),
+/// 0x037 item use.
+fn stopped_by_moving(p: &[u8]) -> bool {
+    let id = u16::from_le_bytes([p[0], p[1]]) & 0x1ff;
+    let category = p.get(10..12).map_or(0, |c| u16::from_le_bytes([c[0], c[1]]));
+    (id == 0x01A && matches!(category, 0x03 | 0x10)) || id == 0x037
+}
+
+/// c2s 0x01A body (FUN_10077120, size 0x1c): UniqueNo, ActIndex, ActionID, ActionBuf[4] zeroed.
+pub fn action_body(target: u32, index: u16, action: u16) -> Vec<u8> {
+    let mut body = vec![0u8; 24];
+    body[0..4].copy_from_slice(&target.to_le_bytes());
+    body[4..6].copy_from_slice(&index.to_le_bytes());
+    body[6..8].copy_from_slice(&action.to_le_bytes());
+    body
+}
+
+/// s2c 0x009's Data (LAB_100fbd40): each key found anywhere (strstr), numbers by atoi, string2 / string3 up to 24
+/// bytes to a space, tab or NUL. TarUniqueNo lands in CasUniqueNo's slot (retail's), so it wins when present.
+/// Returns (cas, Para0..3, [string2, string3]).
+fn std_data(data: &str) -> (u32, [i32; 4], [String; 2]) {
+    let after = |key: &str| data.find(key).map(|i| data[i + key.len()..].trim_start_matches([' ', '\t']));
+    let num = |key: &str| {
+        after(key).map_or(0, |v| {
+            let end = v
+                .char_indices()
+                .find(|&(i, c)| !(c.is_ascii_digit() || (i == 0 && c == '-')))
+                .map_or(v.len(), |(i, _)| i);
+            v[..end].parse::<i64>().unwrap_or(0) as i32
+        })
+    };
+    let word = |key: &str| {
+        after(key).map_or(String::new(), |v| v.split([' ', '\t', '\0']).next().unwrap_or("").chars().take(24).collect())
+    };
+    let cas = if data.contains("TarUniqueNo") { num("TarUniqueNo") } else { num("CasUniqueNo") };
+    (cas as u32, [num("Para0"), num("Para1"), num("Para2"), num("Para3")], [word("string2"), word("string3")])
+}
+
+/// Chat text as sent: Shift-JIS cut to 150 bytes at a character's end (a pair or a phrase block is not split).
+fn chat_bytes(text: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut buf = [0u8; 4];
+    let mut block = Vec::new();
+    for ch in text.chars() {
+        let b = crate::dat::font::encode_sjis(ch.encode_utf8(&mut buf));
+        // A phrase is four chars; it goes whole or not at all.
+        let cp = ch as u32;
+        if (crate::dat::font::PHRASE_BASE..crate::dat::font::PHRASE_BASE + 0x400).contains(&cp) {
+            block.extend_from_slice(&b);
+            if (cp - crate::dat::font::PHRASE_BASE) / 0x100 < 3 {
+                continue;
+            }
+        }
+        let piece = if block.is_empty() { b } else { std::mem::take(&mut block) };
+        if out.len() + piece.len() > 150 {
+            break;
+        }
+        out.extend_from_slice(&piece);
+    }
+    out
+}
+
+/// c2s 0x0B6 (FUN_100e3570): @4 = 3, the name at @6, the text at @0x15. Retail sizes it 4 × ceil((len + 0x15) / 4),
+/// leaving out the NUL after the text when it would need another word (batch 5 item 2); the padding is the NUL
+/// otherwise.
+fn tell_packet(name: &str, text: &str) -> Vec<u8> {
+    let mut body = vec![0u8; 17];
+    body[0] = 3;
+    let n = name.len().min(15);
+    body[2..2 + n].copy_from_slice(&name.as_bytes()[..n]);
+    body.extend_from_slice(&chat_bytes(text));
+    build(C2S_TELL, &body)
+}
+
+/// The Kinds whose line never carries the sender's name (client/mod.rs chat_line): the system announcements 6 / 7 and
+/// the "NS" text-only kinds. A control byte in their unused name cannot reach the formatted line.
+fn chat_nameless(kind: u8) -> bool {
+    matches!(kind, 6 | 7 | 0xd..=0x17 | 0x1c | 0x1d | 0x1f | 0x20)
+}
+
+/// s2c 0x017's name @8 and text @0x17, each cut at a control byte (FUN_1018fc40). Retail cuts the formatted line, so a
+/// cut in the name drops the text too, but only where the line holds the name: the text-only kinds keep their text,
+/// and the assist kinds 0x22 / 0x23 (an icon line) cut the name and the text apart.
+fn chat_text(p: &SubPacket) -> (String, String) {
+    let raw = |at: usize, len: usize| -> &[u8] {
+        let end = (at + len).min(p.data.len());
+        let b = &p.data[at.min(end)..end];
+        &b[..b.iter().position(|&x| x == 0).unwrap_or(b.len())]
+    };
+    let (name, text) = (raw(8, 15), raw(23, 150));
+    let (nk, tk) = (crate::dat::font::chat_cut(name), crate::dat::font::chat_cut(text));
+    let decode = crate::dat::font::decode_sjis;
+    // Kind 0x19 takes the name only when the packet sent one, so an all-control-byte name there is a text-only line.
+    let kind = p.u8(4);
+    let named = !chat_nameless(kind) && !matches!(kind, 0x22 | 0x23) && !(kind == 0x19 && name.is_empty());
+    let text = if nk < name.len() && named { String::new() } else { decode(&text[..tk]) };
+    (decode(&name[..nk]), text)
+}
+
+fn text(p: &SubPacket, at: usize, len: usize) -> String {
+    p.str(at, len)
+}
+
+fn look_at(p: &SubPacket, at: usize) -> [u16; 9] {
+    std::array::from_fn(|i| p.u16(at + i * 2))
+}
+
+/// FUN_100dde40(dst, 0x10, src, lim, size): how many characters of a name a 0x00D / 0x00E gives: the sub-packet's
+/// size less `lim` (0x00E: 4 past the name's start, 0x00D: 2 past it), 15 at most. The compare is unsigned, so a
+/// packet shorter than `lim` gives 15 too.
+fn name_len(size: usize, lim: usize) -> usize {
+    let n = (size as u32).wrapping_sub(lim as u32);
+    if n >= 0x10 { 15 } else { n as usize }
+}
+
+/// 0x00E's name (FUN_1009b550, asm 0x1009b666..0x1009b7b5), read before the despawn and first-update tests:
+/// 1. SubKind 0 / 1 / 5 / 6 / 7 with 0x08 at an index from 0x700: @0x34 (doors, lifts and ships keep their id words
+///    there, and never name themselves);
+/// 2. SubKind 1 with 0x40: @0x44 at an index from 0x700, and below 0x400 when its first byte is above a space;
+/// 3. below 0x400 with 0x08 (not a SubKind 1 with 0x40 named by rule 2), a byte 1 @0x34 and a byte above a space
+///    @0x35: the text from @0x35, which FUN_10093430 copies itself (24 bytes, no size test);
+/// 4. else below 0x700 the zone's list or "NPC" (`Some(None)`), and from 0x700 no change (`None`).
+fn npc_name(p: &SubPacket) -> Option<Option<String>> {
+    let (index, mask, sub) = (p.u16(8), p.u8(10), p.u8(0x30) & 7);
+    let size = (p.u16(0) >> 9) as usize * 4;
+    let sized = |at: usize| Some(Some(text(p, at, name_len(size, at + 4))));
+    if matches!(sub, 0 | 1 | 5 | 6 | 7) && mask & 0x08 != 0 && index >= 0x700 {
+        return sized(0x34);
+    }
+    let long = sub == 1 && mask & 0x40 != 0;
+    if long && index >= 0x700 {
+        return sized(0x44);
+    }
+    if long && index < 0x400 && p.u8(0x44) > 0x20 {
+        return sized(0x44);
+    }
+    if index < 0x400 && mask & 0x08 != 0 && p.u8(0x34) == 1 && p.u8(0x35) > 0x20 {
+        return Some(Some(text(p, 0x35, 24)));
+    }
+    (index < 0x700).then_some(None)
+}
+
+fn entity(p: &SubPacket, kind: EntityKind) -> EntityUpdate {
+    let flags = p.u8(10);
+    let name_at = if kind == EntityKind::Npc { 0x34 } else { 0x5A };
+    let size = (p.u16(0) >> 9) as usize * 4;
+    let npc_name = (kind == EntityKind::Npc).then(|| npc_name(p)).flatten();
+    // 0x00E mask 0x04: u32 @0x28 bit 26, the server's sub-animation flag (entity +0x130 bit 2, asm 0x1009c5a2).
+    let sub_flag =
+        (kind == EntityKind::Npc && flags & 0x04 != 0 && p.data.len() >= 0x2C).then(|| p.u32(0x28) & (1 << 26) != 0);
+    EntityUpdate {
+        id: p.u32(4),
+        index: p.u16(8),
+        kind,
+        pos: (flags & 1 != 0).then(|| [p.f32(12), p.f32(16), p.f32(20)]),
+        dir: p.u8(11),
+        hpp: (flags & 0x04 != 0).then(|| p.u8(0x1E)),
+        name: match kind {
+            EntityKind::Npc => npc_name.clone().flatten(),
+            // 0x00D (0x10099e36): the name @0x5A with 0x08, never on a despawn.
+            _ => (flags & 0x28 == 0x08 && p.data.len() > name_at)
+                .then(|| text(p, name_at, name_len(size, 0x5c)))
+                .filter(|n| !n.is_empty() && n.chars().all(|c| !c.is_control() && c != '\u{fffd}')),
+        },
+        listed: npc_name == Some(None),
+        despawn: flags & 0x20 != 0,
+        look: (kind == EntityKind::Player && flags & 0x10 != 0 && p.data.len() >= 0x48 + 18).then(|| look_at(p, 0x48)),
+        motion: motion_state(p),
+        // FUN_1009b550's look switch: a model id (kind 0) and doors / lifts / ships on every update, the slot looks
+        // (kinds 1 / 7) only with 0x10. It reads @0x30 whatever the size: a server may trim the packet after the
+        // model or the name (a "Moogle" ends near 0x3c), so the look is read zero-padded.
+        npc: (kind == EntityKind::Npc
+            && flags & 0x20 == 0
+            && p.data.len() >= 0x34
+            && (!matches!(p.u8(0x30) & 7, 1 | 7) || flags & 0x10 != 0))
+            .then(|| crate::dat::npc::parse_look(&std::array::from_fn::<u8, 20, _>(|i| p.u8(0x30 + i))).ok())
+            .flatten(),
+        claim: (kind == EntityKind::Npc && flags & 0x02 != 0).then(|| p.u32(0x2C)),
+        mob: (kind == EntityKind::Npc && flags & 7 != 0).then(|| p.u8(0x20) & 1 != 0),
+        male: (flags & 0x04 != 0 && p.data.len() >= 0x24).then(|| p.u32(0x20) >> 15 & 1 != 0),
+        marks: (flags & 0x04 != 0 && p.data.len() >= 0x2C).then(|| {
+            let pc = kind == EntityKind::Player;
+            Marks {
+                charm: p.u8(0x27) & 0x08 != 0,
+                trust: p.u8(0x28) & 0x01 != 0,
+                npc_pet: p.u8(0x28) & 0x40 != 0,
+                death_flag: p.u8(0x28) & 0x08 != 0,
+                b2b1: p.u8(0x2B) & 0x02 != 0,
+                alleg: p.u8(0x29),
+                gm: p.u8(0x23) & 7,
+                yell: p.u32(0x20) >> 13 & 1 != 0,
+                lfg: pc && p.u32(0x20) >> 11 & 1 != 0,
+                anon: pc && p.u32(0x20) >> 12 & 1 != 0,
+                auto: pc && p.u32(0x24) >> 31 != 0,
+                lfg_master: pc && p.u8(0x28) & 0x02 != 0,
+                bazaar: pc && p.u32(0x20) >> 31 != 0,
+                away: p.u32(0x20) >> 14 & 1 != 0,
+                pol: pc && p.u32(0x20) >> 16 & 1 != 0,
+                ls: pc && p.u32(0x20) >> 17 & 1 != 0,
+                link_dead: pc && p.u32(0x20) >> 18 & 1 != 0,
+                ls_colour: [p.u8(0x24), p.u8(0x25), p.u8(0x26)],
+                gm_icon_off: p.u32(0x24) >> 28 & 1 != 0,
+                new_char: pc && p.u32(0x28) >> 23 & 1 != 0,
+                mentor: p.u8(0x2B) & 1 != 0,
+                silent: p.u32(0x28) >> 21 & 1 != 0,
+            }
+        }),
+        plate: (kind == EntityKind::Player && flags & 0x20 == 0 && p.data.len() >= 0x34).then(|| {
+            let b = p.u8(0x33);
+            PlateExtra {
+                ballista: p.u8(0x32),
+                trial: b & 2 != 0,
+                job_master: b & 0x40 != 0,
+                ranks: (b >> 4 & 3) | (b >> 2 & 3) << 2,
+            }
+        }),
+        name_flags: (flags & 0x04 != 0 && p.data.len() >= 0x28)
+            .then(|| (p.u32(0x24) >> 29 & 1 != 0, p.u32(0x24) >> 30 & 1 != 0)),
+        counter: p.u16(0x18) & 0x1fff,
+        ground: p.u32(4) >> 24 == 1 && p.u32(0x18) & 0x8000 == 0 && !matches!(p.u8(0x30) & 7, 2 | 3),
+        no_snap: (flags & 0x04 != 0 && p.data.len() >= 0x24)
+            .then(|| p.u32(0x18) & 0x8000 != 0 || p.u32(0x20) >> 27 & 1 != 0),
+        mask: flags,
+        status: p.u8(0x20) & 7,
+        look_kind: p.u8(0x30) & 7,
+        costume: (kind == EntityKind::Player && flags & 0x20 == 0 && p.data.len() >= 0x32).then(|| p.u16(0x30)),
+        door: (kind == EntityKind::Npc && p.u8(0x30) & 7 == 2 && p.data.len() >= 0x38)
+            .then(|| p.u32(0x34))
+            .filter(|d| *d != 0),
+        lift: (kind == EntityKind::Npc && p.u8(0x30) & 7 == 3 && p.data.len() >= 0x3e)
+            .then(|| (p.u32(0x34), p.u32(0x38), p.u32(0x38).wrapping_add(p.u16(0x3c) as u32)))
+            .filter(|l| l.0 != 0),
+        ship: (kind == EntityKind::Npc && p.u8(0x30) & 7 == 4 && p.data.len() >= 0x3c)
+            .then(|| (p.u32(0x34), p.u32(0x38))),
+        untargetable: (kind == EntityKind::Npc && flags & 0x04 != 0 && p.data.len() >= 0x2C)
+            .then(|| p.u8(0x2B) & 0x08 != 0),
+        target_off: (flags & 0x04 != 0 && p.data.len() >= 0x24).then(|| p.u32(0x20) >> 19 & 1 != 0),
+        listed_only: (kind == EntityKind::Npc && flags & 0x04 != 0 && p.data.len() >= 0x28)
+            .then(|| p.u32(0x24) >> 31 != 0),
+        radar: (flags & 0x04 != 0 && p.data.len() >= 0x2C).then(|| {
+            let npc = kind == EntityKind::Npc;
+            (
+                p.u32(0x20) >> 29 & 1 != 0,
+                npc && p.u8(0x2B) & 0x40 != 0,
+                if !npc && p.data.len() >= 0x40 { p.u16(0x3E) } else { 0 },
+            )
+        }),
+        mon_prefix: (kind == EntityKind::Player && flags & 0x04 != 0 && p.data.len() >= 0x42)
+            .then(|| [p.u8(0x40), p.u8(0x41)]),
+        mon_form: (kind == EntityKind::Player && flags & 0x04 != 0 && p.data.len() >= 0x40 && p.u16(0x3E) != 0)
+            .then(|| p.u8(0x2A) & 7),
+        sub_anim: sub_flag.filter(|&f| f || p.u8(0x20) & 1 != 0).map(|_| p.u8(0x2A) & 7),
+        sub_flag,
+        mon_stat: sub_flag.filter(|&f| !f && p.u8(0x20) & 1 == 0).map(|_| p.u8(0x2A) & 3),
+        half_fade: (kind == EntityKind::Npc && flags & 0x04 != 0 && p.data.len() >= 0x2C)
+            .then(|| p.u32(0x28) >> 31 != 0),
+        hp_bits: (kind == EntityKind::Npc && flags & 0x04 != 0 && p.data.len() >= 0x2C)
+            .then(|| (p.u8(0x22) & 1 != 0, p.u8(0x22) & 1 == 0 && p.u8(0x2B) & 0x20 != 0)),
+        face: (flags & 1 != 0).then(|| ((p.u32(0x18) >> 17) & 0x7fff) as u16),
+        spawn_fx: (flags & 0x04 != 0 && p.data.len() > 0x28).then(|| p.u8(0x28) & 0x04 != 0),
+        shadowless: (flags & 0x04 != 0 && p.data.len() > 0x27).then(|| p.u8(0x27) & 0x02 != 0),
+        // Counted only with 0x04 (0x1009c739).
+        king: kind == EntityKind::Npc && flags & 0x04 != 0 && p.u32(0x18) >> 16 & 1 != 0,
+        indi: (kind == EntityKind::Player && flags & 0x04 != 0 && p.data.len() > 0x42).then(|| p.u8(0x42)),
+        gate: (flags & 0x04 != 0)
+            .then(|| {
+                if kind == EntityKind::Player {
+                    (p.data.len() > 0x44).then(|| p.u8(0x44) & 0xf)
+                } else {
+                    (p.data.len() > 0x26).then(|| p.u8(0x26) >> 4)
+                }
+            })
+            .flatten(),
+        hitbox: (flags & 0x04 != 0)
+            .then(|| {
+                if kind == EntityKind::Player {
+                    (p.data.len() > 0x43).then(|| p.u8(0x43))
+                } else {
+                    (p.data.len() > 0x25).then(|| p.u8(0x25))
+                }
+            })
+            .flatten()
+            .map(|h| h as f32 * 0.1),
+        ride: (kind == EntityKind::Player && flags & 0x04 != 0 && p.data.len() >= 0x48).then(|| Ride {
+            chocobo: (p.u32(0x20) >> 5 & 7) as u8,
+            mount: (p.u32(0x44) >> 4) as u8,
+            custom: [p.u32(0x34), p.u32(0x38)],
+        }),
+    }
+}
+
+impl EntityUpdate {
+    /// What FUN_1009b550 still takes for a reserved actor (entity +0x138 bit 31, event op 0xac sub 2): the name, and
+    /// with 0x01 the position, heading, speeds and counter, unless +0x13c bit 0 holds the position too (`hold`, op
+    /// 0xac sub 4). No despawn (0x1009b7f0), face target or @0x20 status bits (0x1009bc29), claim (0x1009bcf3),
+    /// general fields or look (0x1009bda9, and 0x1009c8f5's test without 0x04).
+    pub fn reserved(self, hold: bool) -> Self {
+        Self {
+            pos: self.pos.filter(|_| !hold),
+            despawn: false,
+            mask: 0,
+            king: false,
+            costume: None,
+            hpp: None,
+            look: None,
+            npc: None,
+            claim: None,
+            mob: None,
+            marks: None,
+            plate: None,
+            male: None,
+            name_flags: None,
+            no_snap: None,
+            door: None,
+            lift: None,
+            ship: None,
+            hp_bits: None,
+            untargetable: None,
+            target_off: None,
+            listed_only: None,
+            radar: None,
+            mon_prefix: None,
+            mon_form: None,
+            sub_anim: None,
+            sub_flag: None,
+            mon_stat: None,
+            half_fade: None,
+            face: None,
+            spawn_fx: None,
+            shadowless: None,
+            ride: None,
+            hitbox: None,
+            indi: None,
+            gate: None,
+            ..self
+        }
+    }
+
+    /// The name this update gives (FUN_10093430's argument): its own, or for a `listed` one the zone list's by
+    /// UniqueNo (FUN_1008a930), else "NPC" (0x1035cb44); None leaves the name.
+    pub fn name_for<'a>(&'a self, list: &'a std::collections::HashMap<u32, String>) -> Option<&'a str> {
+        match &self.name {
+            Some(n) => Some(n.as_str()),
+            None if self.listed => Some(list.get(&self.id).map_or("NPC", |n| n.as_str())),
+            None => None,
+        }
+    }
+
+    /// FUN_1009ceb0 (0x00E: below 0x400, or 0x700..0x8ff) / FUN_1009aad0 (0x00D: 0x400..0x6ff): the handler drops an
+    /// update for any other index.
+    pub fn in_range(&self) -> bool {
+        match self.kind {
+            EntityKind::Player => (0x400..0x700).contains(&self.index),
+            _ => self.index < 0x400 || (0x700..0x900).contains(&self.index),
+        }
+    }
+
+    /// A full update (actor +0x141): 0x00E needs mask 0x07, 0x17 for kinds 1 / 7 (0x1009a097); 0x00D 0x1f
+    /// (0x100982f6).
+    pub fn complete(&self) -> bool {
+        let need = match self.kind {
+            EntityKind::Player => 0x1f,
+            _ if matches!(self.look_kind, 1 | 7) => 0x17,
+            _ => 0x07,
+        };
+        self.mask & need == need
+    }
+}
+
+pub fn spawn(login: MapLogin, account: String, codec: Codec, gm_window: bool) -> NetHandle {
+    crate::net::search::begin_session();
+    let (events_tx, events) = channel();
+    let (commands, commands_rx) = channel();
+    let me = Arc::new(Mutex::new(SelfState::default()));
+    let shared = me.clone();
+    let stats = Arc::new(NetStats::default());
+    stats.now_ms();
+    // Set before the thread starts: on a LAN server the first zone-in can arrive before the first frame's
+    // poll_network stores it, and the GM list request (c2s 0x1F0) would then be skipped for the whole zone.
+    stats.gm_window.store(gm_window, std::sync::atomic::Ordering::Relaxed);
+    let st = stats.clone();
+    let hooks = Arc::new(AtomicU8::new(0));
+    let hk = hooks.clone();
+    std::thread::Builder::new()
+        .name("zone-net".into())
+        .spawn(move || {
+            if let Err(e) = run(login, &account, &codec, &events_tx, &commands_rx, &shared, &st, &hk) {
+                let _ = events_tx.send(NetEvent::Error(format!("{e:#}")));
+            }
+        })
+        .expect("spawning the network thread");
+    NetHandle { events, commands, me, stats, hooks }
+}
+
+enum Outcome {
+    /// Moved to another zone server, with the key that read this one; it advances by two per zone.
+    Zone(SocketAddr, [u8; 20]),
+    Done,
+}
+
+fn run(
+    mut login: MapLogin,
+    account: &str,
+    codec: &Codec,
+    tx: &Sender<NetEvent>,
+    rx: &Receiver<NetCommand>,
+    me: &Mutex<SelfState>,
+    stats: &NetStats,
+    hooks: &AtomicU8,
+) -> Result<()> {
+    let mut addr = SocketAddr::from((login.map.0, login.map.1));
+    let mut sess = 0u32;
+    loop {
+        sess += 1;
+        match session(addr, &login, account, codec, tx, rx, me, stats, hooks, sess)? {
+            Outcome::Zone(next, key) => {
+                (login.key, login.old_key) = (key, None);
+                let counter = u32::from_le_bytes(login.key[16..20].try_into().unwrap()).wrapping_add(2);
+                login.key[16..20].copy_from_slice(&counter.to_le_bytes());
+                addr = next;
+                tx.send(NetEvent::Zoning)?;
+            }
+            Outcome::Done => return Ok(()),
+        }
+    }
+}
+
+/// One map server session's state, shared by its steps (session()).
+struct Session<'a> {
+    addr: SocketAddr,
+    login: &'a MapLogin,
+    account: &'a str,
+    tx: &'a Sender<NetEvent>,
+    rx: &'a Receiver<NetCommand>,
+    me: &'a Mutex<SelfState>,
+    stats: &'a NetStats,
+    hooks: &'a AtomicU8,
+    sess: u32,
+    map: MapSession,
+    /// The session's bytes each way already counted into the stats.
+    rx_seen: u64,
+    tx_seen: u64,
+    /// FFXiMain sends the plain login again on the send timer until the zone-in (s2c 0x00A) is handled, not just any
+    /// datagram.
+    tries: u32,
+    answered: bool,
+    zoned: bool,
+    queue: Vec<Vec<u8>>,
+    /// FUN_100fc3c0's per-id send times (char data +0x41b4), for the gated ids.
+    gate: SendGate,
+    /// Timer 0 (FUN_100dbfe0(0, +0x417c)): the login datagrams and the game's share it.
+    last_send: Instant,
+    /// Retail's PacketCnt (DAT_104e0f44 +0x44c5c, 400 from the config; s2c 0x005 sets it): the interval the send
+    /// timer settles on. Ours also follows Settings' Send Rate and a mod's send_interval (`wanted`).
+    base: u32,
+    /// The send timer's interval now (+0x417c): 5 x the base at the connect (FUN_100fa000), stepped by
+    /// `step_interval` before each datagram once zoned in.
+    interval: u32,
+    /// `wanted_interval` as last seen: a change becomes the base at once.
+    wanted: u32,
+    /// The server's s2c 0x005 PacketCnt this session, if sent.
+    server_base: Option<u32>,
+    my_index: u16,
+    npc_logged: u32,
+    /// Packets back from the mods' hooks (or injected), decoded before the next receive.
+    hooked_in: Vec<SubPacket>,
+    /// Batches still with the hooks each way (later ones follow them there, so the order holds when the hooks go
+    /// away).
+    away_in: usize,
+    away_out: usize,
+}
+
+fn session(
+    addr: SocketAddr,
+    login: &MapLogin,
+    account: &str,
+    codec: &Codec,
+    tx: &Sender<NetEvent>,
+    rx: &Receiver<NetCommand>,
+    me: &Mutex<SelfState>,
+    stats: &NetStats,
+    hooks: &AtomicU8,
+    sess: u32,
+) -> Result<Outcome> {
+    let mut map = MapSession::connect(addr, &login.key, codec.clone())?.or_key(login.old_key);
+    map.send_login(login.char_id, &login.name, account, 0)?;
+    let now = Instant::now();
+    let wanted = wanted_interval(stats, login.lsb.is_some(), None);
+    let mut s = Session {
+        addr,
+        login,
+        account,
+        tx,
+        rx,
+        me,
+        stats,
+        hooks,
+        sess,
+        map,
+        rx_seen: 0,
+        tx_seen: 0,
+        tries: 1,
+        answered: false,
+        zoned: false,
+        queue: Vec::new(),
+        gate: SendGate::default(),
+        last_send: now,
+        base: wanted,
+        interval: connect_interval(wanted),
+        wanted,
+        server_base: None,
+        my_index: 0,
+        npc_logged: 0,
+        hooked_in: Vec::new(),
+        away_in: 0,
+        away_out: 0,
+    };
+    loop {
+        if let Some(packets) = s.receive()? {
+            for p in packets {
+                if let Some(out) = s.decode(p)? {
+                    return Ok(out);
+                }
+            }
+        }
+        s.retry_login()?;
+        s.commands()?;
+        s.send_due()?;
+    }
+}
+
+impl Session<'_> {
+    /// The next batch to decode: one back from the hooks first, else a datagram's (none while it goes to the hooks).
+    fn receive(&mut self) -> Result<Option<Vec<SubPacket>>> {
+        Ok(if !self.hooked_in.is_empty() {
+            Some(std::mem::take(&mut self.hooked_in))
+        } else {
+            // A batch with the hooks comes back between receives: look for it sooner then.
+            let wait = if self.away_in + self.away_out > 0 { 2 } else { 20 };
+            let got = self.map.recv(Duration::from_millis(wait))?;
+            // Only datagrams that decode count (recv adds them).
+            self.stats.received.fetch_add(self.map.bytes_in - self.rx_seen, Relaxed);
+            self.rx_seen = self.map.bytes_in;
+            match got {
+                Some(packets) => {
+                    self.answered = true;
+                    self.stats.last_rx_ms.store(self.stats.now_ms(), Relaxed);
+                    // A batch holding an id a mod hooks goes to the main thread first and comes back as Decode (and
+                    // every batch after it while one is away, so the order holds).
+                    let hooked = self.hooks.load(Ordering::Relaxed) & HOOK_IN != 0
+                        && packets.iter().any(|p| self.stats.hooked(false, p.id));
+                    if hooked || self.away_in > 0 {
+                        self.away_in += 1;
+                        self.tx.send(NetEvent::RawIn(self.sess, packets))?;
+                        None
+                    } else {
+                        if self.hooks.load(Ordering::Relaxed) & HOOK_LAST != 0 {
+                            for p in &packets {
+                                self.stats.keep_last(false, &p.data);
+                            }
+                        }
+                        Some(packets)
+                    }
+                }
+                None => None,
+            }
+        })
+    }
+
+    /// One s2c sub-packet into its event; a logout or zone change ends the session.
+    fn decode(&mut self, p: SubPacket) -> Result<Option<Outcome>> {
+        match p.id {
+            // A zone-in once in the session is ignored (FUN_100fa5c0: error 0x10 outside state 2).
+            0x00A if self.zoned => log::info!("map: a repeated zone-in ignored"),
+            // s2c 0x005 (FUN_100fadf0): PacketCnt u32 @4 becomes the base and the interval at once, unless a mod or
+            // Send Rate overrides it (`wanted_interval`).
+            S2C_PACKET_CONTROL if p.data.len() >= 8 => {
+                let cnt = p.u32(4);
+                self.server_base = Some(cnt);
+                let wanted = wanted_interval(self.stats, self.login.lsb.is_some(), self.server_base);
+                if wanted == cnt {
+                    (self.wanted, self.base, self.interval) = (cnt, cnt, cnt);
+                }
+                log::info!("map: s2c 0x005 asks for a send interval of {cnt} ms; in force {wanted} ms");
+            }
+            0x00A => {
+                self.map.zoned_in(&p);
+                let pos = [p.f32(12), p.f32(16), p.f32(20)];
+                let (scene, myroom) = scene_of(&p);
+                // EventNum @0x62, EventPara @0x64, EventMode @0x66, EventNo @0x40: the client starts
+                // the login event itself, on the player (FUN_10094ea0).
+                let (event_num, event_para) = (p.u16(0x62), p.u16(0x64));
+                // FUN_10094190 locks control here when the 0x00A carries an event: no 0x015 before the first frame.
+                let locked = event_num != 0;
+                *self.me.lock().unwrap() = SelfState { pos, dir: p.u8(11), locked, ..Default::default() };
+                self.zoned = true;
+                self.my_index = p.u16(8);
+                self.queue.push(build(0x00C, &[0u8; 8]));
+                self.queue.push(build(0x011, &[2, 0, 0, 0]));
+                // Ours: the GM level and command list (c2s 0x1F0), only to a private server and only with GM
+                // Window on (a server without the extension logs an unknown packet).
+                if self.login.lsb.is_some() && self.stats.gm_window.load(Relaxed) {
+                    self.queue.push(build(0x1F0, &super::gm::CATALOG_REQUEST));
+                }
+                let event = (event_num != 0).then(|| EventStart {
+                    target: p.u32(4),
+                    index: p.u16(8),
+                    zone: event_num,
+                    event: event_para,
+                    mode: p.u16(0x66),
+                    zone2: p.u16(0x40),
+                    login: true,
+                    ..Default::default()
+                });
+                self.tx.send(NetEvent::ZoneIn {
+                    zone: p.u32(48) as u16,
+                    pos,
+                    dir: p.u8(11),
+                    char_id: p.u32(4),
+                    index: p.u16(8),
+                    name: text(&p, 132, 16),
+                    look: look_at(&p, 68),
+                    motion: motion_state(&p),
+                    game_time: p.u32(0x3C),
+                    weather: p.u16(0x68),
+                    music: std::array::from_fn(|i| p.u16(0x56 + 2 * i)),
+                    event,
+                    area: area_line(&p),
+                    sub_map: if p.u16(0x60) != scene && myroom.is_none() { p.u16(0x60) } else { 0 },
+                    scene,
+                    myroom,
+                    room_flag: matches!(p.u32(0x80), 1 | 4 | 5),
+                    dead_counter: p.u32(0xA4),
+                    play_time: p.u32(0xA0),
+                    mog_zone: p.u8(0xaf) & 1 != 0,
+                    send_count: p.u16(0xac),
+                    ship: ship_data(&p),
+                    monstrosity: p.u16(0x7E) != 0,
+                    pol_return: pol_return(p.u32(0x80)),
+                    plate: zone_in_plate(&p),
+                })?;
+            }
+            // FUN_100fb730: 4 cancels a logout (nothing sent); otherwise 0x00D goes out with the old key, and 2
+            // (zone change) and 3 (Mog House) reconnect to @8 / @0xC, each kept when 0; the rest end the session.
+            0x00B if p.u8(4) == 4 => log::info!("map: logout cancelled"),
+            0x00B => {
+                let state = p.u8(4);
+                self.map.send_last(&[build(C2S_NETEND, &[0u8; 4])])?;
+                if matches!(state, 2 | 3) {
+                    let ip = match p.u32(8) {
+                        0 => self.addr.ip(),
+                        ip => Ipv4Addr::from(ip.to_le_bytes()).into(),
+                    };
+                    let port = match p.u32(12) as u16 {
+                        0 => self.addr.port(),
+                        port => port,
+                    };
+                    log::info!("map: zone change (0x00B state {state}) to {ip}:{port}");
+                    return Ok(Some(Outcome::Zone(SocketAddr::new(ip, port), self.map.key20())));
+                }
+                self.tx.send(NetEvent::Logout { state: state as u32 })?;
+                return Ok(Some(Outcome::Done));
+            }
+            0x00D => self.tx.send(NetEvent::Entity(entity(&p, EntityKind::Player)))?,
+            0x037 => {
+                let status = p.u8(0x30);
+                // u32 @0x34 >> 3: the pet's ActIndex (MODLOG "Effects filter").
+                // FUN_1009d0f0: icon i = hi << 8 | lo, none when lo 0xff with hi 0.
+                let icons = std::array::from_fn(|i| {
+                    let (lo, hi) = (p.u8(4 + i) as u16, (p.u8(0x4C + i / 4) as u16 >> (2 * (i % 4))) & 3);
+                    if lo == 0xff && hi == 0 { 0xffff } else { hi << 8 | lo }
+                });
+                let speed = ((p.u32(0x2C) & 0xfff).min(255) as u8, (p.u32(0x2C) >> 17) as u8);
+                self.tx.send(NetEvent::SelfStatus {
+                    speed,
+                    status,
+                    hpp: (p.u32(0x28) >> 16) as u8,
+                    dead: (p.u32(0x3C), p.u32(0x40)),
+                    pet: (p.u32(0x34) >> 3) as u16,
+                    flags: p.u32(0x28),
+                    icons,
+                    team: (p.u32(0x34) >> 21) as u8,
+                    fellow: p.u16(0x48),
+                    follow: p.u16(0x46),
+                    plate: self_plate(&p),
+                    ride: ((p.u32(0x28) >> 13 & 7) as u8, if p.data.len() > 0x5b { p.u8(0x5b) } else { 0 }),
+                    indi: if p.data.len() > 0x58 { p.u8(0x58) & 0x7f } else { 0x10 },
+                    fish_timer: if p.data.len() > 0x4b { p.u16(0x4a) } else { 0 },
+                    gate: if p.data.len() > 0x5a { p.u8(0x5a) >> 4 } else { 0 },
+                    costume: if p.data.len() > 0x45 { p.u16(0x44) } else { 0 },
+                })?;
+            }
+            // FUN_10098f90: 5 x {u32 UniqueNo, u16 ActIndex, pad, u64 bits, u8 icons[32]}; icon = (hi << 8 | lo) &
+            // 0x3ff, none when lo 0xff with hi 0.
+            0x076 => {
+                let rows = (0..5)
+                    .map(|k| 4 + k * 48)
+                    .filter(|&o| p.u32(o) != 0)
+                    .map(|o| {
+                        let icons = std::array::from_fn(|i| {
+                            let (lo, hi) = (p.u8(o + 16 + i) as u16, (p.u8(o + 8 + i / 4) as u16 >> (2 * (i % 4))) & 3);
+                            if lo == 0xff && hi == 0 { 0xffff } else { (hi << 8 | lo) & 0x3ff }
+                        });
+                        (p.u32(o), icons)
+                    })
+                    .collect();
+                self.tx.send(NetEvent::PartyEffects(rows))?;
+            }
+            0x075 => self.tx.send(NetEvent::Objective(p.data))?,
+            0x063 if p.u16(4) == 2 => {
+                self.tx.send(NetEvent::Merits { limit: p.u16(8), bits: p.u16(0xa), max: p.u8(0xc) })?
+            }
+            // Type 5: access @8, then per job 0..23 {u16 capacity, u16 current, u16 spent} from @0xc.
+            0x063 if p.u16(4) == 5 => {
+                let jobs = std::array::from_fn(|j| [0, 2, 4].map(|k| p.u16(0xc + 6 * j + k)));
+                self.tx.send(NetEvent::JobPoints(p.u8(8), jobs))?
+            }
+            0x0B6 => {
+                let end = p.data.len().min(0xc + 244);
+                let raw = p.data.get(0xc..end).unwrap_or_default();
+                let text = raw.iter().take_while(|&&c| c != 0).copied().collect();
+                self.tx.send(NetEvent::GmMessage { id: p.u32(4), seq: p.u16(8), last: p.u16(0xa) == 0, text })?
+            }
+            0x08C => {
+                let n = (p.u16(4) as usize).min(p.data.len().saturating_sub(8) / 4);
+                self.tx.send(NetEvent::MeritList(
+                    (0..n).map(|i| (p.u16(8 + 4 * i), p.u8(10 + 4 * i), p.u8(11 + 4 * i))).collect(),
+                ))?
+            }
+            0x08E if p.data.len() >= 0x68 => self.tx.send(NetEvent::AlterEgo(super::aepoints::AeData {
+                points: p.u16(4),
+                upgrades: std::array::from_fn(|i| p.u8(8 + i)),
+                costs: std::array::from_fn(|i| p.u16(0x28 + 2 * i)),
+            }))?,
+            0x08F => {
+                if let Some(d) = super::celestite::CelData::parse(&p.data) {
+                    self.tx.send(NetEvent::Celestites(d))?
+                }
+            }
+            0x08D => {
+                let n = (p.data.len().saturating_sub(4) / 4).min(64);
+                let recs = (0..n)
+                    .map(|i| (p.u16(4 + 4 * i), p.u16(6 + 4 * i)))
+                    .filter(|r| r.0 != 0)
+                    .map(|(id, v)| (id, (v >> 10) as u8, v & 0x3ff))
+                    .collect();
+                self.tx.send(NetEvent::JobPointList(recs))?
+            }
+            0x063 if p.u16(4) == 6 && p.data.len() >= 0x48 => {
+                self.tx.send(NetEvent::PointMasks(p.data[8..0x48].try_into().unwrap()))?
+            }
+            0x063 if p.u16(4) == 7 && p.data.len() >= 0x8c => self.tx.send(NetEvent::UnityTable {
+                week: p.u8(8),
+                d: p.u8(9),
+                data: p.data[0xc..0x8c].try_into().unwrap(),
+            })?,
+            0x063 if matches!(p.u16(4), 3 | 4) => {
+                let n = if p.u16(4) == 3 { 212 } else { 172 };
+                self.tx.send(NetEvent::Monstrosity { kind: p.u16(4), data: (0..n).map(|i| p.u8(8 + i)).collect() })?
+            }
+            0x063 if p.u16(4) == 9 => {
+                self.tx.send(NetEvent::StatusTimers {
+                    ids: std::array::from_fn(|i| p.u16(8 + 2 * i)),
+                    ends: std::array::from_fn(|i| p.u32(0x48 + 4 * i)),
+                })?;
+            }
+            0x05A => self.tx.send(NetEvent::Emote {
+                caster: p.u32(4),
+                target: p.u32(8),
+                emote: p.u16(0x10),
+                param: p.u16(0x12),
+                mode: p.u8(0x16),
+            })?,
+            0x031 | 0x059 | 0x10E => self.tx.send(NetEvent::EventAnswer { id: p.id, data: p.data })?,
+            0x0F4 => self.tx.send(NetEvent::TrackEntry(super::widescan::Entry {
+                index: p.u16(4),
+                level: p.u8(6),
+                kind: p.u8(7) & 7,
+                dx: p.u16(8) as i16,
+                dz: p.u16(0xa) as i16,
+                name: text(&p, 0xc, 16),
+            }))?,
+            0x0F5 => self.tx.send(NetEvent::TrackPos {
+                index: p.u16(0x12),
+                level: p.u8(0x10),
+                pos: [p.f32(4), p.f32(8), p.f32(0xc)],
+                state: p.u32(0x14),
+            })?,
+            0x0F6 => self.tx.send(NetEvent::TrackState(p.u32(4)))?,
+            0x0A0 => self.tx.send(NetEvent::MapGroup {
+                id: p.u32(4),
+                zone: p.u16(8),
+                pos: [p.f32(0xc), p.f32(0x10), p.f32(0x14)],
+            })?,
+            0x0BF => self.tx.send(NetEvent::Registration { index: p.u32(0xC), result: p.u16(6) })?,
+            0x0F9 => self.tx.send(NetEvent::ResOffer { kind: p.u16(0xA) })?,
+            0x110 => self.tx.send(NetEvent::RoeUnity {
+                sparks: p.u32(4) & 0xff_ffff,
+                deeds: p.u16(8),
+                plaudits: p.u16(0xa),
+                rot: std::array::from_fn(|i| p.u8(0xc + i)),
+            })?,
+            0x111 => self.tx.send(NetEvent::RoeActive(std::array::from_fn(|i| p.u32(4 + 4 * i))))?,
+            0x112 => {
+                self.tx.send(NetEvent::RoeLog { offset: p.u16(0x84), data: std::array::from_fn(|i| p.u8(4 + i)) })?
+            }
+            0x056 => self
+                .tx
+                .send(NetEvent::MissionLog { port: p.u16(0x24), data: std::array::from_fn(|i| p.u32(4 + 4 * i)) })?,
+            0x0B4 => self.tx.send(NetEvent::ConfSys(std::array::from_fn(|i| p.u8(4 + i))))?,
+            0x0E1 => self.tx.send(NetEvent::GroupId(p.u32(4)))?,
+            0x108 => {
+                self.tx.send(NetEvent::BazaarShopper { state: p.u32(8), hide: p.u16(0xc), name: text(&p, 0x10, 16) })?
+            }
+            0x10A => self.tx.send(NetEvent::BazaarSale { count: p.u32(4), item: p.u16(8), name: text(&p, 0xa, 16) })?,
+            0x105 => self.tx.send(NetEvent::BazaarItem {
+                price: p.u32(4),
+                count: p.u32(8),
+                tax: p.u16(0xc),
+                item: p.u16(0xe),
+                index: p.u8(0x10),
+                attr: std::array::from_fn(|i| p.u8(0x11 + i)),
+            })?,
+            0x106 => self.tx.send(NetEvent::BazaarBuy { state: p.u32(4), name: text(&p, 8, 16) })?,
+            0x107 => self.tx.send(NetEvent::BazaarClosed { name: text(&p, 4, 16) })?,
+            0x109 => self.tx.send(NetEvent::BazaarSold {
+                count: p.u32(8),
+                owner: p.u16(0xe),
+                name: text(&p, 0x10, 16),
+                index: p.u8(0x20),
+            })?,
+            // Timeless XI: a Timeless server's bar-game bite (magic 0x5855), else retail's arrow game.
+            0x115 => match super::timeless::fishing::parse(&p.data) {
+                Some(b) => self.tx.send(NetEvent::TimelessFish(b))?,
+                None => self.tx.send(NetEvent::Fish(super::fishing::FishParams {
+                    stamina: p.u16(4),
+                    delay: p.u16(6),
+                    regen: p.u16(8),
+                    moves: p.u16(0xa),
+                    damage: p.u16(0xc),
+                    heal: p.u16(0xe),
+                    time: p.u16(0x10),
+                    sense: p.u8(0x12),
+                    special: p.u32(0x14),
+                }))?,
+            },
+            0x116 => self
+                .tx
+                .send(NetEvent::EquipSetValid(std::array::from_fn(|i| std::array::from_fn(|k| p.u8(4 + 4 * i + k)))))?,
+            0x117 => self.tx.send(NetEvent::EquipSetRes {
+                count: p.u8(4),
+                changed: std::array::from_fn(|i| std::array::from_fn(|k| p.u8(8 + 4 * i + k))),
+                equipped: std::array::from_fn(|i| std::array::from_fn(|k| p.u8(0x48 + 4 * i + k))),
+            })?,
+            0x11B => self.tx.send(NetEvent::LockStyleFlag(p.u8(4)))?,
+            0x11C => self
+                .tx
+                .send(NetEvent::LockStyleError((0..p.u8(4).min(16) as usize).map(|i| p.u16(8 + 2 * i)).collect()))?,
+            0x113 | 0x118 => {
+                self.tx.send(NetEvent::Currencies { mode: if p.id == 0x113 { 1 } else { 2 }, data: p.data })?
+            }
+            0x11D => self.tx.send(NetEvent::PartyRequest { status: p.u8(0xb), name: text(&p, 0xc, 16) })?,
+            0x077 if p.u8(4) & 1 != 0 => {
+                self.tx.send(NetEvent::EntityVis((0..32).map(|k| p.u32(8 + 4 * k)).collect()))?
+            }
+            0x078 => self.tx.send(NetEvent::PollStart {
+                name: text(&p, 0xe, 15),
+                kind: p.u8(0x1d),
+                text: text(&p, 0x1e, p.data.len().saturating_sub(0x1e)),
+            })?,
+            0x079 => self.tx.send(NetEvent::PollState {
+                votes: std::array::from_fn(|i| p.u16(8 + 2 * i)),
+                kind: p.u8(0x1a),
+                state: p.u8(0x1b),
+                questions: p.u8(0x1c),
+                name: text(&p, 0x1d, 15),
+                text: text(&p, 0x2c, p.data.len().saturating_sub(0x2c)),
+            })?,
+            0x047 => self.tx.send(NetEvent::Translate {
+                item: p.u16(4),
+                from: p.u8(6),
+                to: p.u8(7),
+                from_text: text(&p, 8, 64),
+                to_text: text(&p, 0x48, 64),
+            })?,
+            0x049 => self.tx.send(NetEvent::ItemSearch { item: p.u16(4), flag: p.u8(6) })?,
+            0x042 => self.tx.send(NetEvent::BlackEdit { id: p.u32(4), name: text(&p, 8, 16), mode: p.u8(0x18) })?,
+            0x041 => self.tx.send(NetEvent::Blacklist {
+                stat: p.u8(0xf4),
+                entries: (0..p.u8(0xf5).min(12) as usize)
+                    .map(|k| (p.u32(4 + 0x14 * k), text(&p, 8 + 0x14 * k, 16)))
+                    .collect(),
+            })?,
+            0x044 => self.tx.send(NetEvent::ExtJob((0..0x9c).map(|i| p.u8(4 + i)).collect()))?,
+            0x0DC => self.tx.send(NetEvent::Invite {
+                anon: p.u8(0xa),
+                kind: p.u8(0xb),
+                name: text(&p, 0xc, 16),
+                race: p.u16(0x1c),
+            })?,
+            0x0AE => self.tx.send(NetEvent::Mounts(p.u32(4) as u64 | (p.u32(8) as u64) << 32))?,
+            0x119
+                if {
+                    let _ = self.tx.send(NetEvent::MountRecast(p.u32(0xfc)));
+                    false
+                } => {}
+            0x068 if p.u8(4) & 0x3f == 4 => self.tx.send(NetEvent::PetSync((p.u16(0xc) != 0).then(|| PetSync {
+                index: p.u16(0xc),
+                hpp: p.u8(0xe),
+                mpp: p.u8(0xf),
+                tp: p.u16(0x10),
+                target: p.u32(0x14),
+            })))?,
+            0x119 => self.tx.send(NetEvent::AbilityRecasts(
+                (0..31)
+                    .map(|i| {
+                        (p.u8(4 + 8 * i + 3) as u16, p.u16(4 + 8 * i), p.u8(4 + 8 * i + 2), p.u16(4 + 8 * i + 4) as i16)
+                    })
+                    .collect(),
+            ))?,
+            0x0AA => self.tx.send(NetEvent::MagicKnown((0..128).map(|i| p.u8(4 + i)).collect()))?,
+            0x0AC => self.tx.send(NetEvent::CommandsKnown((0..224).map(|i| p.u8(4 + i)).collect()))?,
+            0x0AD => self.tx.send(NetEvent::Dungeon((0..0x80).map(|i| p.u8(4 + i)).collect()))?,
+            0x0DF => {
+                if p.u32(4) == self.login.char_id {
+                    self.tx.send(NetEvent::Vitals {
+                        hp: p.u32(8),
+                        mp: p.u32(12),
+                        tp: p.u32(16),
+                        hpp: p.u8(0x16),
+                        mpp: p.u8(0x17),
+                    })?;
+                }
+                let jobs = std::array::from_fn(|i| p.u8(0x20 + i));
+                self.tx.send(NetEvent::PartyAttr(super::party::AttrUpdate {
+                    id: p.u32(4),
+                    index: p.u16(0x14),
+                    hp: p.u32(8),
+                    mp: p.u32(12),
+                    tp: p.u32(16),
+                    hpp: p.u8(0x16),
+                    mpp: p.u8(0x17),
+                    jobs,
+                    mon: p.u16(0x1c),
+                    mon_ids: [p.u8(0x1e), p.u8(0x1f)],
+                }))?;
+            }
+            // Kinds 0 (party) and 5 (alliance) share list 0; LSB sends no others.
+            0x0C8 if matches!(p.u8(4), 0 | 5) => {
+                let entries = (0..20)
+                    .map(|k| (p.u32(8 + 12 * k), p.u16(12 + 12 * k), p.u8(14 + 12 * k), p.u16(16 + 12 * k)))
+                    .collect();
+                self.tx.send(NetEvent::PartyTable(entries))?;
+            }
+            0x0DD | 0x0E2 if matches!(p.u8(0x1C), 0 | 5) => {
+                let jobs = std::array::from_fn(|i| p.u8(0x22 + i));
+                let u = super::party::ListUpdate {
+                    id: p.u32(4),
+                    index: p.u16(0x18),
+                    number: p.u8(0x1A),
+                    name: text(&p, 0x28, 16),
+                    hp: p.u32(8),
+                    mp: p.u32(12),
+                    tp: p.u32(16),
+                    hpp: p.u8(0x1D),
+                    mpp: p.u8(0x1E),
+                    zone: p.u16(0x20),
+                    flags: p.u32(0x14),
+                    jobs,
+                    moghouse: p.u8(0x1B) != 0,
+                };
+                self.tx.send(NetEvent::PartyList(u, p.id == 0x0E2))?;
+            }
+            0x029 => self.tx.send(NetEvent::Battle(battle_message(&p)))?,
+            0x02D => self.tx.send(NetEvent::Battle(battle_message2(&p)))?,
+            0x028 => self.tx.send(NetEvent::Action(crate::net::action::parse(&p.data)))?,
+            0x038 => self.tx.send(NetEvent::Scheduler {
+                actor: p.u32(4),
+                target: p.u32(8),
+                name: p.u32(12).to_le_bytes(),
+            })?,
+            0x069 | 0x073 | 0x074 => self.tx.send(NetEvent::Racing { id: p.id, data: p.data })?,
+            0x02F => self.tx.send(NetEvent::Dig { id: p.u32(4), index: p.u16(8), flags: p.u8(0xa) })?,
+            0x03A => self.tx.send(NetEvent::MagicScheduler {
+                ids: (p.u32(4), p.u32(8)),
+                indices: (p.u16(0xc), p.u16(0xe)),
+                file: p.u16(0x10),
+                kind: p.u8(0x12),
+            })?,
+            0x039 => self.tx.send(NetEvent::MapScheduler {
+                ids: (p.u32(4), p.u32(8)),
+                indices: (p.u16(0x10), p.u16(0x12)),
+                name: p.u32(12).to_le_bytes(),
+            })?,
+            0x051 => self.tx.send(NetEvent::SelfLook(look_at(&p, 4)))?,
+            0x00E => {
+                // The first NPC updates of a session, for comparing servers: index, id, mask, the look @0x30.
+                if self.npc_logged < 400 {
+                    self.npc_logged += 1;
+                    let look = p.data.get(0x30..p.data.len().min(0x44)).unwrap_or_default();
+                    log::info!(
+                        "0x00E index {:#05x} id {:08x} mask {:02x} ({:#x} bytes): pos {:?} look {}",
+                        p.u16(8),
+                        p.u32(4),
+                        p.u8(10),
+                        p.data.len(),
+                        [p.f32(12), p.f32(16), p.f32(20)],
+                        hex::encode(look)
+                    );
+                }
+                self.tx.send(NetEvent::Entity(entity(&p, EntityKind::Npc)))?
+            }
+            0x057 => self.tx.send(NetEvent::Weather(p.u16(8), p.u16(0x0a)))?,
+            // s2c 0x009 (LAB_100fbd40): MesNo @0xa, its parameters as "Para0 %u Para1 %u ..." text in Data @0xd.
+            0x009 => {
+                let data = text(&p, 0xd, p.data.len().saturating_sub(0xd));
+                let d = std_data(&data);
+                self.tx.send(NetEvent::MessageStd { id: p.u16(0xa), cas: d.0, para: d.1, strings: d.2 })?
+            }
+            0x053 => self.tx.send(NetEvent::SystemMessage { id: p.u16(0xc), para: p.u32(4), para2: p.u32(8) })?,
+            0x03E => self.tx.send(NetEvent::ShopOpen { count: p.u16(4) })?,
+            0x03C => {
+                let n = p.data.len().saturating_sub(8) / 12;
+                let entries = (0..n)
+                    .map(|k| {
+                        let o = 8 + 12 * k;
+                        (p.u32(o), p.u16(o + 4), p.u8(o + 6), p.u16(o + 8), p.u16(o + 0xa))
+                    })
+                    .collect();
+                self.tx.send(NetEvent::ShopList { last: p.u8(6) & 1 != 0, entries })?
+            }
+            0x03F => self.tx.send(NetEvent::ShopBuy { index: p.u16(4), count: p.u32(8) })?,
+            0x03D => {
+                self.tx.send(NetEvent::ShopSell { price: p.u32(4), slot: p.u8(8), kind: p.u8(9), count: p.u32(0xc) })?
+            }
+            0x086 => self.tx.send(NetEvent::GuildOpen { stat: p.u8(4), time: p.u32(8) })?,
+            0x01D => self.tx.send(NetEvent::ItemsSettled(p.u8(4), p.u32(8)))?,
+            0x062 => self.tx.send(NetEvent::SkillBase(std::array::from_fn(|i| p.u16(0x80 + 2 * i))))?,
+            0x083 | 0x085 => {
+                let n = (p.u8(0xf4) as usize).min(30);
+                let entries = (0..n)
+                    .map(|k| {
+                        let o = 4 + 8 * k;
+                        (p.u16(o), p.u8(o + 2), p.u8(o + 3), p.u32(o + 4))
+                    })
+                    .collect();
+                self.tx.send(NetEvent::GuildList { sell: p.id == 0x085, stat: p.u8(0xf5), entries })?
+            }
+            0x021 => self.tx.send(NetEvent::TradeRequest { id: p.u32(4), index: p.u16(8) })?,
+            0x022 => self.tx.send(NetEvent::TradeResponse { id: p.u32(4), kind: p.u32(8), index: p.u16(0xc) })?,
+            0x023 => self.tx.send(NetEvent::TradeTheirs {
+                n: p.u32(4),
+                counter: p.u16(8),
+                item: p.u16(0xa),
+                slot: p.u8(0xd),
+                attr: std::array::from_fn(|k| p.u8(0xe + k)),
+            })?,
+            0x025 => {
+                self.tx.send(NetEvent::TradeMine { n: p.u32(4), item: p.u16(8), slot: p.u8(0xa), inv: p.u8(0xb) })?
+            }
+            0x082 | 0x084 => self.tx.send(NetEvent::GuildResult {
+                sell: p.id == 0x084,
+                item: p.u16(4),
+                count: p.u8(6),
+                trade: p.u8(7) as i8,
+            })?,
+            0x0E0 => self.tx.send(NetEvent::LinkshellEquip { num: p.u8(4), index: p.u8(5), bag: p.u8(6) })?,
+            0x0CC => self.tx.send(NetEvent::LinkshellMessage(p.data))?,
+            0x048 => self.tx.send(NetEvent::Concierge(p.data))?,
+            0x05E => self.tx.send(NetEvent::Conquest(p.data))?,
+            0x071 => self.tx.send(NetEvent::Influence(p.data))?,
+            0x0C9 => self.tx.send(NetEvent::InspectEquip(p.data))?,
+            0x008 if p.data.len() >= 4 + 0x30 => {
+                self.tx.send(NetEvent::KnownZones(p.data[4..4 + 0x30].try_into().unwrap()))?
+            }
+            0x0CA => self.tx.send(NetEvent::InspectMessage(p.data))?,
+            0x04D => self.tx.send(NetEvent::Fragments(p.data))?,
+            0x0D2 => self.tx.send(NetEvent::TrophyList(TrophyList {
+                slot: p.u8(0x14),
+                item: p.u16(0x10),
+                qty: p.u32(4),
+                target: p.u32(8),
+                gold: p.u16(0xc),
+                container: p.u8(0x16) != 0,
+                entry: p.u8(0x15),
+                start: p.u32(0x18),
+                own_lot: if p.u16(0x1c) != 0 { p.u16(0x1e) as i16 } else { 0 },
+                loot_id: p.u32(0x20),
+                loot_point: p.u16(0x26),
+                loot_name: text(&p, 0x28, 16),
+            }))?,
+            0x0D3 => self.tx.send(NetEvent::TrophySolution {
+                slot: p.u8(0x14),
+                judge: p.u8(0x15),
+                loot: p.u32(4),
+                loot_point: p.u16(0xe) as i16,
+                entry: p.u32(8),
+                entry_point: p.u16(0x12) as i16,
+                entry_flg: p.u16(0x10) >> 15 != 0,
+                loot_name: text(&p, 0x16, 16),
+                entry_name: text(&p, 0x26, 16),
+            })?,
+            0x058 => self.tx.send(NetEvent::Assist { player: p.u32(4), target: p.u32(8) })?,
+            0x055 if p.data.len() >= 0x86 => self.tx.send(NetEvent::KeyItems {
+                table: p.u16(0x84),
+                bits: std::array::from_fn(|i| p.u32(4 + 4 * i)),
+                seen: std::array::from_fn(|i| p.u32(0x44 + 4 * i)),
+            })?,
+            0x05F => self.tx.send(NetEvent::Music { slot: p.u16(4), id: p.u16(6) })?,
+            0x017 => {
+                let (from, text) = chat_text(&p);
+                self.tx.send(NetEvent::Chat { kind: p.u8(4), attr: p.u8(5), data: p.u16(6), from, text })?
+            }
+            0x032..=0x034 => self.tx.send(NetEvent::Event(event_start(&p)))?,
+            0x05D => self.tx.send(NetEvent::EventStrings((0..4).map(|i| p.str(0x28 + 16 * i, 16)).collect()))?,
+            0x05C => self.tx.send(NetEvent::EventParams(std::array::from_fn(|i| p.u32(4 + 4 * i))))?,
+            0x052 => self.tx.send(NetEvent::EventRelease { mode: p.u8(4), event: (p.u32(4) >> 8) as u16 })?,
+            0x05B | 0x065 => self.tx.send(NetEvent::Wpos {
+                id: p.u32(0x10),
+                pos: [p.f32(4), p.f32(8), p.f32(0xc)],
+                dir: p.u8(0x17),
+                mode: p.u8(0x16),
+            })?,
+            // 0x03B (handler LAB_100a1600): UniqueNo @4, ActIndex @8, MesNum @0xa; shown in the event message
+            // window (mode 0x96), not printed. LSB never sends it.
+            0x03B => self.tx.send(NetEvent::ZoneText(ZoneText {
+                packet: 0x03B,
+                actor: p.u32(4),
+                index: p.u16(8),
+                mes: p.u16(0xa),
+                ..Default::default()
+            }))?,
+            0x036 => self.tx.send(NetEvent::ZoneText(ZoneText {
+                packet: 0x036,
+                actor: p.u32(4),
+                index: p.u16(8),
+                mes: p.u16(0xa),
+                kind: p.u8(0xc),
+                ..Default::default()
+            }))?,
+            0x02A => self.tx.send(NetEvent::ZoneText(ZoneText {
+                packet: 0x02A,
+                actor: p.u32(4),
+                num: std::array::from_fn(|i| if i < 4 { p.u32(8 + 4 * i) as i32 } else { 0 }),
+                index: p.u16(0x18),
+                mes: p.u16(0x1a),
+                kind: p.u8(0x1c),
+                name: text(&p, 0x1e, 32),
+                ..Default::default()
+            }))?,
+            // 0x027 (handler 0x100a1dc0): Num1[4] @0x10 -> num 0..3, Num2[4..7] @0x60 -> num 4..7 (Num2[0..3] unread),
+            // String1 @0x20 -> string 0, String2 @0x40, Flags @0xe.
+            0x027 => {
+                self.tx.send(NetEvent::ZoneText(ZoneText {
+                    packet: 0x027,
+                    actor: p.u32(4),
+                    index: p.u16(8),
+                    mes: p.u16(0xa),
+                    kind: p.u16(0xc).min(255) as u8,
+                    flags: p.u8(0xe),
+                    num: std::array::from_fn(|i| {
+                        if i < 4 { p.u32(0x10 + 4 * i) as i32 } else { p.u32(0x50 + 4 * i) as i32 }
+                    }),
+                    strings: vec![text(&p, 0x20, 32)],
+                    name2: text(&p, 0x40, 16),
+                    ..Default::default()
+                }))?
+            }
+            // 0x043 (handler 0x100a1070): fishing's monster / chest; sName @0x10 -> string 0.
+            0x043 => self.tx.send(NetEvent::ZoneText(ZoneText {
+                packet: 0x043,
+                actor: p.u32(4),
+                index: p.u16(8),
+                mes: p.u16(0xa),
+                kind: p.u8(0xc),
+                strings: vec![text(&p, 0x10, 16)],
+                ..Default::default()
+            }))?,
+            0x067 if p.u8(4) & 0x3f == 3 => {
+                self.tx.send(NetEvent::EntityMaster { index: p.u16(6), id: p.u32(8), master: p.u16(0xc) })?
+            }
+            0x067 if p.u8(4) == 2 => self.tx.send(NetEvent::CharSync {
+                id: p.u32(8),
+                owner: p.u32(0x20),
+                floors: p.u8(0x27) & 1 != 0,
+                open: p.u8(0x24) != 0,
+                level: p.u8(0x25),
+                sync: p.u8(0x10),
+                custom: [p.u32(0x18), p.u32(0x1c)],
+            })?,
+            0x02E => self.tx.send(NetEvent::MogMenu)?,
+            0x11A => self.tx.send(NetEvent::EmoteUnlocks { jobs: p.u32(4), chairs: p.u16(8) })?,
+            0x11E => self.tx.send(NetEvent::Jump(p.u16(4)))?,
+            0x1F0 => self.tx.send(NetEvent::GmCatalog(p.data))?,
+            0x1F1 => self.tx.send(NetEvent::GmResult(p.data))?,
+            0x030 => self.tx.send(NetEvent::SynthEffect {
+                id: p.u32(4),
+                index: p.u16(8),
+                effect: p.u16(0xa) as i16,
+                kind: p.u8(0xc) as i8,
+                status: p.u8(0xd) as i8,
+                timer: p.u16(0xe),
+            })?,
+            0x06F | 0x070 => {
+                let a = super::synth::Answer {
+                    result: p.u8(4),
+                    grade: p.u8(5) as i8,
+                    count: p.u8(6),
+                    item: p.u16(8),
+                    breaks: std::array::from_fn(|i| p.u16(0xa + 2 * i)),
+                    name: if p.id == 0x070 { text(&p, 0x1e, 16) } else { String::new() },
+                    crystal: if p.id == 0x06F { p.u16(0x22) } else { 0 },
+                    materials: std::array::from_fn(|i| if p.id == 0x06F { p.u16(0x24 + 2 * i) } else { 0 }),
+                };
+                self.tx.send(if p.id == 0x06F { NetEvent::SynthResult(a) } else { NetEvent::SynthOthers(a) })?
+            }
+            0x04C => self.tx.send(NetEvent::Auc(super::auction::AucPacket::parse(&p.data)))?,
+            0x04B => self.tx.send(NetEvent::Pbx(super::post::Pbx {
+                cmd: p.u8(4),
+                box_no: p.u8(5) as i8,
+                post: p.u8(6) as i8,
+                result: p.u8(0xc) as i8,
+                res: [p.u8(0xd) as i8, p.u8(0xe) as i8, p.u8(0xf) as i8],
+                slot: super::post::Slot {
+                    stat: p.u32(0x10),
+                    name: text(&p, 0x14, 16),
+                    work_no: p.u32(0x2c),
+                    item: p.u16(0x30),
+                    stack: p.u32(0x38),
+                    ext: std::array::from_fn(|i| p.u8(0x3c + i)),
+                },
+            }))?,
+            0x01B => self.tx.send(NetEvent::JobInfo(super::moogle::JobInfo {
+                main: p.u8(8),
+                sub: p.u8(0xb),
+                flags: p.u32(0xc),
+                levels: std::array::from_fn(|n| if n < 16 { p.u8(0x10 + n) } else { p.u8(0x48 + n) }),
+                sub_ok: p.u8(0x44) != 0,
+                encumbrance: p.u32(0x60),
+                thumbs: p.u8(0x64),
+                mentor: p.u8(0x65),
+                mastery: p.u8(0x66),
+                ml_jobs: p.u32(0x68),
+                ml_levels: std::array::from_fn(|n| p.u8(0x6c + n)),
+            }))?,
+            0x01C => self.tx.send(NetEvent::ItemMax(
+                std::array::from_fn(|i| p.u8(4 + i)),
+                std::array::from_fn(|i| p.u16(0x24 + 2 * i)),
+            ))?,
+            0x01E => self.tx.send(NetEvent::ItemNum { container: p.u8(8), index: p.u8(9), count: p.u32(4) })?,
+            0x01F => self.tx.send(NetEvent::Item {
+                container: p.u8(0xa),
+                index: p.u8(0xb),
+                id: p.u16(8),
+                count: p.u32(4),
+                ext: None,
+                lock: p.u8(0xc),
+                price: None,
+            })?,
+            0x020 => {
+                let ext = std::array::from_fn(|k| p.u8(0x11 + k));
+                self.tx.send(NetEvent::Item {
+                    container: p.u8(0xe),
+                    index: p.u8(0xf),
+                    id: p.u16(0xc),
+                    count: p.u32(4),
+                    ext: Some(ext),
+                    lock: p.u8(0x10),
+                    price: Some(p.u32(8)),
+                })?
+            }
+            // GP_SERV_COMMAND_ITEM_SUBCONTAINER (LAB_100ec730): a mannequin's look, bytes 4..0x1b kept whole.
+            0x026 => self.tx.send(NetEvent::MannequinLook { rec: std::array::from_fn(|k| p.u8(4 + k)) })?,
+            0x04F => self.tx.send(NetEvent::EquipClear)?,
+            0x050 => self.tx.send(NetEvent::Equip { index: p.u8(4), slot: p.u8(5), container: p.u8(6) })?,
+            // CLISTATUS: hpmax @4, mpmax @8, jobs @0xc..0xf, bp_base @0x14, bp_adj @0x22, atk @0x30,
+            // def @0x32, def_elem @0x34, su_lv @0x52, ilvl @0x55.
+            0x061 => self.tx.send(NetEvent::CharStats(super::items::CharStats {
+                hp_max: p.u32(4),
+                mp_max: p.u32(8),
+                main: (p.u8(0xc), p.u8(0xd)),
+                sub: (p.u8(0xe), p.u8(0xf)),
+                base: std::array::from_fn(|i| p.u16(0x14 + 2 * i) as i32),
+                adj: std::array::from_fn(|i| p.u16(0x22 + 2 * i) as i16 as i32),
+                atk: p.u16(0x30) as i16 as i32,
+                def: p.u16(0x32) as i16 as i32,
+                elem: std::array::from_fn(|i| p.u16(0x34 + 2 * i) as i16 as i32),
+                su: p.u8(0x52),
+                ilvl: p.u8(0x55),
+                unity: p.u32(0x58),
+                unity_flag: p.u32(0x60),
+                unity_eval: p.u32(0x5c),
+                exp: (p.u16(0x10), p.u16(0x12)),
+                title: p.u16(0x44),
+                rank: p.u16(0x46),
+                rank_points: p.u16(0x48),
+                home: p.u16(0x4a),
+                nation: p.u8(0x50),
+                ml: (p.u8(0x65), p.u8(0x66)),
+                ml_exp: (p.u32(0x68), p.u32(0x6c)),
+            }))?,
+            _ => {}
+        }
+        Ok(None)
+    }
+
+    /// The plain login again each time the send timer runs out until the zone-in: every 2000 ms with retail's base
+    /// (the interval is 5 x the base until the game's sends step it down). Retail has no limit; ours gives up after
+    /// a minute.
+    fn retry_login(&mut self) -> Result<()> {
+        if !self.zoned && self.last_send.elapsed() >= Duration::from_millis(self.interval as u64) {
+            self.tries += 1;
+            if self.tries as u64 * self.interval.max(1) as u64 > 60_000 {
+                anyhow::bail!("the zone server did not answer the login");
+            }
+            self.map.send_login(
+                self.login.char_id,
+                &self.login.name,
+                self.account,
+                if self.answered { 3 } else { 2 },
+            )?;
+            self.last_send = Instant::now();
+        }
+        Ok(())
+    }
+
+    /// The main thread's commands into the send queue, through the send gate.
+    fn commands(&mut self) -> Result<()> {
+        self.gate.release(&mut self.queue, self.map.pending(), Instant::now());
+        while let Ok(cmd) = self.rx.try_recv() {
+            let before = self.queue.len();
+            match cmd {
+                NetCommand::Decode(g, packets) => {
+                    if g == self.sess {
+                        self.away_in = self.away_in.saturating_sub(1);
+                    }
+                    if g == 0 || g == self.sess {
+                        self.hooked_in.extend(packets);
+                    }
+                }
+                NetCommand::SendBatch(g, packets) => {
+                    if g == self.sess {
+                        self.away_out = self.away_out.saturating_sub(1);
+                    }
+                    if (g == 0 || g == self.sess) && !packets.is_empty() {
+                        self.map.send(&packets)?;
+                        self.stats.sent.fetch_add(self.map.bytes_out - self.tx_seen, Relaxed);
+                        self.tx_seen = self.map.bytes_out;
+                    }
+                }
+                // c2s 0x0B5 / 0x0B6 (FUN_100e3400 / the tell sender): the text in Shift-JIS, auto-translate blocks
+                // kept, 150 bytes at most; 0x0B6 @4 = 3 as retail sends it.
+                NetCommand::Chat { kind, text } => {
+                    let mut body = vec![kind, 0];
+                    body.extend_from_slice(&chat_bytes(&text));
+                    body.push(0);
+                    self.queue.push(build(C2S_CHAT, &body));
+                }
+                NetCommand::Tell { name, text } => self.queue.push(tell_packet(&name, &text)),
+                NetCommand::Heal(mode) => self.queue.push(build(0x0E8, &mode.to_le_bytes())),
+                NetCommand::Logout { mode, kind } => {
+                    let mut b = mode.to_le_bytes().to_vec();
+                    b.extend_from_slice(&kind.to_le_bytes());
+                    self.queue.push(build(0x0E7, &b));
+                }
+                NetCommand::HomePoint(status) => {
+                    let mut body = vec![0u8; 24];
+                    body[0..4].copy_from_slice(&self.login.char_id.to_le_bytes());
+                    body[4..6].copy_from_slice(&self.my_index.to_le_bytes());
+                    body[6] = 0x0B;
+                    body[8..12].copy_from_slice(&status.to_le_bytes());
+                    self.queue.push(build(0x01A, &body));
+                }
+                NetCommand::Act { target, index, action } => {
+                    self.queue.push(build(0x01A, &action_body(target, index, action)))
+                }
+                NetCommand::Packet { id, body } => self.queue.push(build(id, &body)),
+                NetCommand::PacketHeld { id, body } => {
+                    // hold asks the gate itself: not again in admit.
+                    self.gate.hold(&mut self.queue, build(id, &body), self.map.pending(), Instant::now());
+                    continue;
+                }
+                NetCommand::GroupListReq => self.queue.push(build(0x076, &[0u8; 4])),
+                NetCommand::CancelStatus(id) => self.queue.push(build(0x0F1, &[id as u8, (id >> 8) as u8, 0, 0])),
+                NetCommand::Check { target, index, kind } => {
+                    let mut body = vec![0u8; 12];
+                    body[0..4].copy_from_slice(&target.to_le_bytes());
+                    body[4..8].copy_from_slice(&(index as u32).to_le_bytes());
+                    body[8] = kind;
+                    self.queue.push(build(0x0DD, &body));
+                }
+                NetCommand::ZoneLine { tag, pos } => {
+                    let mut body = Vec::with_capacity(20);
+                    body.extend_from_slice(&tag.to_le_bytes());
+                    for v in pos {
+                        body.extend_from_slice(&v.to_le_bytes());
+                    }
+                    body.extend_from_slice(&self.my_index.to_le_bytes());
+                    body.extend_from_slice(&[0, 0]);
+                    self.queue.push(build(0x05E, &body));
+                }
+                NetCommand::EventEnd { target, index, option, zone, event, mode } => {
+                    self.queue.push(build(0x05B, &event_end_body(target, index, option, zone, event, mode)))
+                }
+                NetCommand::EventPos { pos, dir, target, index, option, zone, event } => {
+                    let mut b = Vec::with_capacity(28);
+                    for v in pos {
+                        b.extend_from_slice(&v.to_le_bytes());
+                    }
+                    b.extend_from_slice(&target.to_le_bytes());
+                    b.extend_from_slice(&option.to_le_bytes());
+                    b.extend_from_slice(&zone.to_le_bytes());
+                    b.extend_from_slice(&event.to_le_bytes());
+                    b.extend_from_slice(&index.to_le_bytes());
+                    b.extend_from_slice(&[1, dir]);
+                    self.queue.push(build(0x05C, &b));
+                }
+                NetCommand::Equip { index, slot, container } => {
+                    self.queue.push(build(0x050, &[index, slot, container, 0]))
+                }
+                NetCommand::StatusRequest(kind) => self.queue.push(build(0x061, &[kind, 0, 0, 0])),
+                NetCommand::CharReq(index) => self.queue.push(build(0x016, &charreq_body(index))),
+                NetCommand::MyRoomExit { bit, mode } => {
+                    let mut body = super::myroom::ZMRQ.to_le_bytes().to_vec();
+                    body.extend_from_slice(&[0; 14]);
+                    body.extend_from_slice(&[bit, mode]);
+                    self.queue.push(build(0x05E, &body));
+                }
+                NetCommand::SubMap { state, id } => {
+                    let mut b = state.to_le_bytes().to_vec();
+                    b.extend_from_slice(&id.to_le_bytes());
+                    self.queue.push(build(0x0F2, &b));
+                }
+            }
+            self.gate.admit(&mut self.queue, before, self.map.pending(), Instant::now());
+        }
+        self.publish_waiting();
+        Ok(())
+    }
+
+    /// The slots taken for the main thread's `call_gate`: sent and unacknowledged, queued, and the position's.
+    fn publish_waiting(&self) {
+        self.stats.waiting.store((self.map.pending() + self.queue.len() + 1) as u32, Relaxed);
+    }
+
+    /// The queued packets out once a send interval has passed, with a fresh position (c2s 0x015).
+    fn send_due(&mut self) -> Result<()> {
+        // Retail sends one datagram each time timer 0 passes the interval (+0x417c), each with a fresh 0x015. The
+        // interval settles on the base (config +0xd0 = 400); a changed setting becomes the base and the interval at
+        // once, as s2c 0x005 does.
+        let wanted = wanted_interval(self.stats, self.login.lsb.is_some(), self.server_base);
+        if wanted != self.wanted {
+            // Before the zone-in the login's retry keeps the connect pace: a fast Send Rate here resent 0x00A every
+            // 50 ms, and LSB's session stalled on a retry that beat its first answer.
+            let interval = if self.zoned { wanted } else { connect_interval(wanted) };
+            (self.wanted, self.base, self.interval) = (wanted, wanted, interval);
+        }
+        if self.zoned && self.last_send.elapsed() >= Duration::from_millis(self.interval as u64) {
+            let stepped = step_interval(self.interval, self.base, self.map.lag());
+            if stepped != self.interval {
+                log::debug!(
+                    "map: send interval {} -> {stepped} ms (lag {}, base {})",
+                    self.interval,
+                    self.map.lag(),
+                    self.base
+                );
+                self.interval = stepped;
+            }
+            let s = *self.me.lock().unwrap();
+            let mut body = [0u8; 28];
+            for (i, v) in s.pos.iter().enumerate() {
+                body[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
+            }
+            body[14..16].copy_from_slice(&s.move_time.to_le_bytes());
+            body[16] = s.dir;
+            body[17] = (s.ground_mode as u8) << 2;
+            // FUN_10096c00: @0x16 the current target's ActIndex (FUN_10152f20).
+            body[18..20].copy_from_slice(&s.target.to_le_bytes());
+            if sends_position(&s) {
+                add_position(&mut self.queue, build(0x015, &body), s.moving);
+            }
+            // A batch holding an id a mod hooks goes to the main thread and comes back as SendBatch.
+            let hooked = self.hooks.load(Ordering::Relaxed) & HOOK_OUT != 0
+                && self.queue.iter().any(|p| self.stats.hooked(true, sub_id(p)));
+            if hooked || self.away_out > 0 {
+                self.away_out += 1;
+                self.tx.send(NetEvent::RawOut(self.sess, std::mem::take(&mut self.queue)))?;
+            } else {
+                if self.hooks.load(Ordering::Relaxed) & HOOK_LAST != 0 {
+                    for p in &self.queue {
+                        self.stats.keep_last(true, p);
+                    }
+                }
+                self.map.send(&self.queue)?;
+                self.stats.sent.fetch_add(self.map.bytes_out - self.tx_seen, Relaxed);
+                self.tx_seen = self.map.bytes_out;
+            }
+            self.queue.clear();
+            self.last_send = Instant::now();
+            self.publish_waiting();
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// LoginState by the 0x00A handler's jump table (0x100fb790): only 3, 4 and 5 are returns from PlayOnline.
+    #[test]
+    fn pol_return_states() {
+        let got: Vec<u32> = (0..=7).filter(|&s| pol_return(s)).collect();
+        assert_eq!(got, [3, 4, 5]);
+    }
+
+    /// The hooked ids each way: only those (a sub-packet's first 9 bits) send a batch through the mods.
+    #[test]
+    fn hooked_ids() {
+        let s = NetStats::default();
+        let mut ids = [0u64; 8];
+        for id in [0x032usize, 0x1ff] {
+            ids[id / 64] |= 1 << (id % 64);
+        }
+        s.set_hooked(false, &ids);
+        assert!(s.hooked(false, 0x032) && s.hooked(false, 0x1ff) && !s.hooked(false, 0x033));
+        assert!(!s.hooked(true, 0x032));
+        assert_eq!(sub_id(&[0x32, 0x2e, 9]), 0x032);
+        assert_eq!(sub_id(&[0x15, 0x01]), 0x115);
+    }
+
+    /// 0x0B6 is 4 × ceil((len + 0x15) / 4) bytes as retail's: 150 bytes of text give 172, and a NUL ends the text
+    /// when the packet has room for it.
+    #[test]
+    fn tell_size() {
+        let size = |p: &[u8]| (p[1] >> 1) as usize * 4;
+        for len in [0usize, 1, 2, 3, 4, 120, 150, 200] {
+            let p = tell_packet("Name", &"a".repeat(len));
+            let len = len.min(150);
+            assert_eq!((p.len(), size(&p)), ((len + 0x15).div_ceil(4) * 4, p.len()), "len {len}");
+            assert_eq!(&p[6..10], b"Name");
+            assert_eq!(p[4], 3);
+            if p.len() > 0x15 + len {
+                assert_eq!(p[0x15 + len], 0);
+            }
+        }
+    }
+
+    /// A control byte in the sender's name drops the text with it (retail cuts the formatted line), but not for the
+    /// kinds whose line never holds the name: 6 / 7, the NS kinds, and 0x19 with no name at all.
+    #[test]
+    fn chat_cut_in_the_name() {
+        let packet = |kind: u8, name: &[u8]| {
+            let mut data = vec![0u8; 0x100];
+            data[4] = kind;
+            data[8..8 + name.len()].copy_from_slice(name);
+            data[23..23 + 10].copy_from_slice(b"Restarting");
+            SubPacket { id: 0x017, sync: 0, data }
+        };
+        assert_eq!(chat_text(&packet(0, b"GM\x1eX")), ("GM".into(), String::new()));
+        assert_eq!(chat_text(&packet(6, b"GM\x1eX")).1, "Restarting");
+        assert_eq!(chat_text(&packet(0xd, b"GM\x1eX")).1, "Restarting");
+        assert_eq!(chat_text(&packet(0x19, b"")).1, "Restarting");
+        assert_eq!(chat_text(&packet(0x19, b"GM\x1eX")).1, String::new());
+        // Retail picks 0x19's format from the name the packet sent, so a name that is only a control byte still
+        // formats with it and the cut takes the text.
+        assert_eq!(chat_text(&packet(0x19, b"\x1eX")).1, String::new());
+        assert_eq!(chat_text(&packet(0x22, b"GM\x1eX")), ("GM".into(), "Restarting".into()));
+        assert_eq!(chat_text(&packet(0, b"GM")), ("GM".into(), "Restarting".into()));
+    }
+
+    /// A gated id goes once a second (a dropped id's repeat is lost, a retried one's waits); others go through; GATED
+    /// stays sorted for the search.
+    #[test]
+    fn send_gate() {
+        assert!(GATED.windows(2).all(|p| p[0] < p[1]));
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let ids = |q: &[Vec<u8>]| q.iter().map(|p| packet_id(p)).collect::<Vec<_>>();
+        let mut g = SendGate::default();
+        let mut q = vec![
+            build(0x0DD, &[0; 12]),
+            build(0x015, &[0; 28]),
+            build(0x0DD, &[0; 12]),
+            build(0x05B, &[1; 4]),
+            build(0x05B, &[2; 4]),
+        ];
+        g.admit(&mut q, 0, 0, t0);
+        assert_eq!(ids(&q), [0x0DD, 0x015, 0x05B]);
+        g.release(&mut q, 0, ms(1000));
+        assert_eq!(ids(&q), [0x0DD, 0x015, 0x05B]);
+        q.clear();
+        q.push(build(0x0DD, &[0; 12]));
+        g.admit(&mut q, 0, 0, ms(1000));
+        assert!(q.is_empty());
+        // Past 1 s the held 0x05B goes (the second one, body 2), and a new /check is let through.
+        g.release(&mut q, 0, ms(1001));
+        assert_eq!((ids(&q), q[0][4]), (vec![0x05B], 2));
+        q.push(build(0x0DD, &[0; 12]));
+        g.admit(&mut q, 1, 0, ms(1001));
+        assert_eq!(ids(&q), [0x05B, 0x0DD]);
+        assert!(g.held.is_empty());
+        // Chat and tells are gated where they are typed, not here.
+        let mut q = vec![build(0x0B5, &[0; 4]), build(0x0B5, &[0; 4]), build(0x0B6, &[0; 20]), build(0x0B6, &[0; 20])];
+        g.admit(&mut q, 0, 0, ms(1001));
+        assert_eq!(q.len(), 4);
+    }
+
+    /// A held packet (PacketHeld) waits for its id's gate where a plain one would be dropped, and goes in order: two
+    /// moves within the second both go, a second apart, and nothing of the id overtakes them.
+    #[test]
+    fn send_gate_hold() {
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let mut g = SendGate::default();
+        let mut q = Vec::new();
+        g.hold(&mut q, build(0x029, &[1; 8]), 0, t0);
+        assert_eq!(q.len(), 1);
+        q.clear();
+        g.hold(&mut q, build(0x029, &[2; 8]), 0, ms(10));
+        g.hold(&mut q, build(0x029, &[3; 8]), 0, ms(20));
+        q.push(build(0x029, &[4; 8]));
+        g.admit(&mut q, 0, 0, ms(20));
+        assert!(q.is_empty());
+        assert_eq!(g.held.len(), 2);
+        g.release(&mut q, 0, ms(1000));
+        assert!(q.is_empty());
+        g.release(&mut q, 0, ms(1001));
+        assert_eq!(q.iter().map(|p| p[4]).collect::<Vec<_>>(), [2]);
+        g.release(&mut q, 0, ms(2001));
+        assert_eq!(q.len(), 1);
+        g.release(&mut q, 0, ms(2002));
+        assert_eq!(q.iter().map(|p| p[4]).collect::<Vec<_>>(), [2, 3]);
+        assert!(g.held.is_empty());
+        // A sort of a container already waiting is not held again; another container's is.
+        g.hold(&mut q, build(0x03A, &[1, 0, 0, 0]), 0, ms(2002));
+        q.clear();
+        for c in [8u8, 8, 10] {
+            g.hold(&mut q, build(0x03A, &[c, 0, 0, 0]), 0, ms(2102));
+        }
+        assert!(q.is_empty());
+        assert_eq!(g.held.iter().map(|p| p[4]).collect::<Vec<_>>(), [8, 10]);
+        g.held.clear();
+        // An id outside the gate is never held.
+        let mut q = Vec::new();
+        g.hold(&mut q, build(0x015, &[0; 28]), 0, ms(2002));
+        g.hold(&mut q, build(0x015, &[0; 28]), 0, ms(2002));
+        assert_eq!(q.len(), 2);
+        // Held for a full queue, the id has used its second as in admit: not released before it passes.
+        let mut g = SendGate::default();
+        let mut q = Vec::new();
+        g.hold(&mut q, build(0x05B, &[0; 4]), 21, t0);
+        assert!(q.is_empty() && g.last.contains_key(&0x05B));
+        g.release(&mut q, 0, ms(500));
+        assert!(q.is_empty());
+        g.release(&mut q, 0, ms(1001));
+        assert_eq!(q.len(), 1);
+    }
+
+    /// FUN_100fc3c0 at the call site: once a second per id, each id separately, and only with a queue slot free; a
+    /// full queue still uses the second.
+    #[test]
+    fn call_gate_once_a_second() {
+        let t0 = Instant::now();
+        let s = NetStats::default();
+        let mut m = std::collections::HashMap::new();
+        assert!(call_gate(&mut m, C2S_CHAT, &s, t0));
+        assert!(!call_gate(&mut m, C2S_CHAT, &s, t0 + Duration::from_millis(1000)));
+        assert!(call_gate(&mut m, C2S_TELL, &s, t0 + Duration::from_millis(1000)));
+        assert!(call_gate(&mut m, C2S_CHAT, &s, t0 + Duration::from_millis(1001)));
+        s.waiting.store(21, Relaxed);
+        assert!(!call_gate(&mut m, C2S_FISHING, &s, t0));
+        s.waiting.store(3, Relaxed);
+        assert!(!call_gate(&mut m, C2S_FISHING, &s, t0 + Duration::from_millis(500)));
+        assert!(call_gate(&mut m, C2S_FISHING, &s, t0 + Duration::from_millis(1001)));
+    }
+
+    /// One rule for the interval: a mod's, then a Send Rate faster than retail's (private servers only), then the
+    /// server's s2c 0x005, then 400. The connect's 5 x stops at retail's 2000.
+    #[test]
+    fn interval_precedence() {
+        let s = NetStats::default();
+        assert_eq!(wanted_interval(&s, true, None), 400);
+        assert_eq!(wanted_interval(&s, true, Some(800)), 800);
+        s.rate_ms.store(400, Relaxed);
+        assert_eq!(wanted_interval(&s, true, Some(800)), 800);
+        s.rate_ms.store(100, Relaxed);
+        assert_eq!(wanted_interval(&s, true, Some(800)), 100);
+        assert_eq!(wanted_interval(&s, false, Some(800)), 800);
+        assert_eq!(wanted_interval(&s, false, None), 400);
+        s.send_ms.store(1000, Relaxed);
+        assert_eq!(wanted_interval(&s, true, Some(800)), 1000);
+        assert_eq!((connect_interval(400), connect_interval(100), connect_interval(1000)), (2000, 500, 2000));
+    }
+
+    /// FUN_100fab40's step: 50 ms slower per send while the server's ack trails, capped at the base + 3000; in step
+    /// again it comes down by the base per send, and so does the connect's 5 x base.
+    #[test]
+    fn interval_steps() {
+        // The connect's 2000 ms comes down over the first sends after the zone-in.
+        let mut v = 2000;
+        let mut seen = Vec::new();
+        for _ in 0..6 {
+            v = step_interval(v, 400, 1);
+            seen.push(v);
+        }
+        assert_eq!(seen, [1600, 1200, 800, 400, 400, 400]);
+        // In step is a difference of -1..=1 between the next sequence and the ack.
+        for lag in [-1, 0, 1] {
+            assert_eq!(step_interval(400, 400, lag), 400);
+        }
+        for lag in [-2, 2, 40, 65534] {
+            assert_eq!(step_interval(400, 400, lag), 450);
+        }
+        assert_eq!(step_interval(3350, 400, 2), 3400);
+        assert_eq!(step_interval(3400, 400, 2), 3400);
+        // Down by the base, not below it: 450 goes straight back, 3400 takes eight sends.
+        assert_eq!(step_interval(450, 400, 1), 400);
+        assert_eq!(step_interval(900, 400, 1), 500);
+        assert_eq!(step_interval(500, 400, 1), 400);
+        let mut v = 3400;
+        let mut n = 0;
+        while v > 400 {
+            v = step_interval(v, 400, 1);
+            n += 1;
+        }
+        assert_eq!(n, 8);
+        // An interval under the base (s2c 0x005 raised the base) is left alone until the server lags.
+        assert_eq!(step_interval(400, 1000, 0), 400);
+    }
+
+    /// FUN_100dda60's room: the 21st packet waiting still gets a slot, the 22nd does not; 0x00C and 0x0F2 go on to
+    /// 29. A refused gated id has used its second all the same, and a retried one is held.
+    #[test]
+    fn send_queue_room() {
+        assert!(queue_room(0x0DD, 20));
+        assert!(!queue_room(0x0DD, 21));
+        assert!(queue_room(0x00C, 28) && queue_room(0x0F2, 28));
+        assert!(!queue_room(0x00C, 29));
+        let t0 = Instant::now();
+        let mut g = SendGate::default();
+        // 19 sent and unacknowledged and the position's slot: one more goes, the next two do not.
+        let mut q = vec![build(0x0DD, &[0; 12]), build(0x01A, &[0; 12]), build(0x05B, &[0; 4]), build(0x0F2, &[0; 4])];
+        g.admit(&mut q, 0, 19, t0);
+        assert_eq!(q.iter().map(|p| packet_id(p)).collect::<Vec<_>>(), [0x0DD, 0x0F2]);
+        assert_eq!(g.held.len(), 1);
+        assert!(!gate_open(g.last[&0x05B], t0 + Duration::from_millis(500)));
+        // Held until the queue has room again; each retry the gate lets through uses the second, as retail's.
+        let mut q = Vec::new();
+        g.release(&mut q, 21, t0 + Duration::from_millis(1001));
+        assert!(q.is_empty());
+        g.release(&mut q, 3, t0 + Duration::from_millis(1001));
+        assert!(q.is_empty());
+        g.release(&mut q, 3, t0 + Duration::from_millis(2002));
+        assert_eq!(q.len(), 1);
+    }
+
+    /// Standing still, a cast or a ranged attack goes after the position, sent twice; moving, or with only other
+    /// packets, the position goes last as retail's.
+    #[test]
+    fn position_before_interruptible_actions() {
+        let pos = build(0x015, &[0u8; 28]);
+        let ids = |q: &[Vec<u8>]| q.iter().map(|p| u16::from_le_bytes([p[0], p[1]]) & 0x1ff).collect::<Vec<_>>();
+        let cast = build(0x01A, &action_body(1, 2, 0x03));
+        let mut q = vec![cast.clone()];
+        add_position(&mut q, pos.clone(), false);
+        assert_eq!(ids(&q), [0x015, 0x015, 0x01A]);
+        let mut q = vec![build(0x01A, &action_body(1, 2, 0x10))];
+        add_position(&mut q, pos.clone(), false);
+        assert_eq!(ids(&q), [0x015, 0x015, 0x01A]);
+        let mut q = vec![cast];
+        add_position(&mut q, pos.clone(), true);
+        assert_eq!(ids(&q), [0x01A, 0x015]);
+        let mut q = vec![build(0x01A, &action_body(1, 2, 0x02))];
+        add_position(&mut q, pos, false);
+        assert_eq!(ids(&q), [0x01A, 0x015]);
+    }
+
+    /// s2c 0x009 Data: LSB's /random ("string2 Lnxtest string3 523") and its Para keys.
+    #[test]
+    fn std_data_keys() {
+        assert_eq!(std_data("string2 Lnxtest string3 523"), (0, [0; 4], ["Lnxtest".into(), "523".into()]));
+        assert_eq!(std_data("CasUniqueNo 77 Para0 5 Para1 -3"), (77, [5, -3, 0, 0], [String::new(), String::new()]));
+        assert_eq!(std_data("CasUniqueNo 1 TarUniqueNo 9"), (9, [0; 4], [String::new(), String::new()]));
+    }
+
+    fn sub(id: u16, len: usize, fill: &[(usize, &[u8])]) -> SubPacket {
+        let mut data = vec![0u8; len];
+        data[0] = id as u8;
+        data[1] = ((len / 4) as u8) << 1 | (id >> 8) as u8;
+        for (at, b) in fill {
+            data[*at..*at + b.len()].copy_from_slice(b);
+        }
+        SubPacket { id, sync: 0, data }
+    }
+
+    /// FUN_100faf90 / FUN_10094190: the zone-in's own flags are 0x00D's words in the 0x00A, and only the ones the
+    /// zone-in writes.
+    #[test]
+    fn zone_in_flags() {
+        // Flags1: anonymous (12), linkshell (17), HackMove (27), invisible (29); GM level 3 in @0x23; Flags0
+        // GroundFlag (15); the linkshell colour; Flags3 bit 23 (New Adventurer) is not a zone-in flag.
+        let f1 = (1u32 << 12 | 1 << 17 | 1 << 29 | 3 << 24).to_le_bytes();
+        let p = sub(0x00A, 0x104, &[(0x20, &f1), (0x24, &[1, 2, 3, 0]), (0x28, &(1u32 << 23).to_le_bytes())]);
+        let z = zone_in_plate(&p);
+        assert!(z.marks.anon && z.marks.ls && z.invisible && !z.no_snap);
+        assert_eq!((z.marks.gm, z.marks.ls_colour), (3, [1, 2, 3]));
+        assert!(!z.marks.new_char && !z.marks.lfg && !z.marks.bazaar && !z.frozen && !z.charmed);
+        let ground = sub(0x00A, 0x104, &[(0x18, &(1u32 << 15).to_le_bytes())]);
+        let hack = sub(0x00A, 0x104, &[(0x20, &(1u32 << 27).to_le_bytes())]);
+        assert!(zone_in_plate(&ground).no_snap && zone_in_plate(&hack).no_snap);
+        assert!(!zone_in_plate(&ground).hack && zone_in_plate(&hack).hack);
+        // LSB's 0x00A (size and gender in Flags1 bits 8..15, 0x100 in Flags3) sets none of them.
+        let lsb = sub(0x00A, 0x104, &[(0x20, &0x8100u32.to_le_bytes()), (0x28, &0x100u32.to_le_bytes())]);
+        assert_eq!(zone_in_plate(&lsb), SelfPlate::default());
+    }
+
+    /// 0x00E's name rules (asm 0x1009b666..0x1009b7b5) and FUN_100dde40's length.
+    #[test]
+    fn npc_name_rules() {
+        let up = |index: u16, mask: u8, sub_kind: u8, len: usize, fill: &[(usize, &[u8])]| {
+            let mut f = vec![(8, index.to_le_bytes().to_vec()), (10, vec![mask]), (0x30, vec![sub_kind])];
+            f.extend(fill.iter().map(|(at, b)| (*at, b.to_vec())));
+            let f: Vec<(usize, &[u8])> = f.iter().map(|(at, b)| (*at, b.as_slice())).collect();
+            let e = entity(&sub(0x00E, len, &f), EntityKind::Npc);
+            (e.name, e.listed)
+        };
+        let long: &[(usize, &[u8])] = &[(0x34, b"Abcdefghijklmnopqrst")];
+        // Rule 1: 0x08 at a dynamic index, 15 characters, fewer in a short packet (size - 0x38).
+        assert_eq!(up(0x700, 0x0f, 0, 0x48, long), (Some("Abcdefghijklmno".into()), false));
+        assert_eq!(up(0x700, 0x0f, 5, 0x40, &[(0x34, b"Abcdefghijkl")]), (Some("Abcdefgh".into()), false));
+        assert_eq!(up(0x700, 0x08, 6, 0x48, &[]), (Some(String::new()), false));
+        // Doors, lifts and ships there keep their name; without 0x08 nothing changes either.
+        assert_eq!(up(0x700, 0x0f, 2, 0x48, long), (None, false));
+        assert_eq!(up(0x8ff, 0x07, 0, 0x48, long), (None, false));
+        // Below 0x700 the same bytes are not a name: the zone list or "NPC".
+        assert_eq!(up(0x3ff, 0x0f, 0, 0x48, long), (None, true));
+        assert_eq!(up(0x80, 0x0f, 2, 0x48, long), (None, true));
+        // Rule 2: SubKind 1 with 0x40 reads @0x44; a static index only with a first byte above a space.
+        let far: &[(usize, &[u8])] = &[(0x34, b"Near"), (0x44, b"Farther away name")];
+        assert_eq!(up(0x700, 0x57, 1, 0x58, far), (Some("Farther away na".into()), false));
+        assert_eq!(up(0x700, 0x4f, 1, 0x58, far), (Some("Near".into()), false));
+        assert_eq!(up(0x10, 0x57, 1, 0x58, far), (Some("Farther away na".into()), false));
+        assert_eq!(up(0x10, 0x57, 1, 0x58, &[(0x44, b" x")]), (None, true));
+        assert_eq!(up(0x10, 0x57, 0, 0x58, far), (None, true));
+        // Rule 3: a static index's own name, marked 1 @0x34, read from @0x35 with no size test (24 bytes).
+        let own: &[(usize, &[u8])] = &[(0x34, b"\x01A name of twenty-four chars!")];
+        assert_eq!(up(0x10, 0x0f, 0, 0x54, own), (Some("A name of twenty-four ch".into()), false));
+        assert_eq!(up(0x10, 0x07, 0, 0x54, own), (None, true));
+        assert_eq!(up(0x10, 0x0f, 0, 0x54, &[(0x34, b"\x01 x")]), (None, true));
+        assert_eq!(up(0x700, 0x0f, 2, 0x54, own), (None, false));
+        // The length: unsigned, so a packet that ends before the limit still asks for 15.
+        let lens = [0x48, 0x3c, 0x38, 0x34].map(|size| name_len(size, 0x38));
+        assert_eq!(lens, [15, 4, 0, 15]);
+        // 0x00D: @0x5A, size - 0x5c, and never on a despawn.
+        let pc = |mask: u8, len: usize, name: &[u8]| {
+            let p = sub(0x00D, len, &[(8, &0x400u16.to_le_bytes()), (10, &[mask]), (0x5a, name)]);
+            entity(&p, EntityKind::Player).name
+        };
+        assert_eq!(pc(0x1f, 0x6c, b"Abcdefghijklmnop"), Some("Abcdefghijklmno".into()));
+        assert_eq!(pc(0x1f, 0x60, b"Abcdef"), Some("Abcd".into()));
+        assert_eq!(pc(0x28, 0x6c, b"Abcdef"), None);
+        // The list's name by id, "NPC" without one.
+        let list = std::collections::HashMap::from([(0x0100_1001u32, "Listed".to_string())]);
+        let mut e = entity(&sub(0x00E, 0x48, &[(8, &0x10u16.to_le_bytes()), (10, &[0x07])]), EntityKind::Npc);
+        assert_eq!(e.name_for(&list), Some("NPC"));
+        e.id = 0x0100_1001;
+        assert_eq!(e.name_for(&list), Some("Listed"));
+        e.name = Some("Own".into());
+        assert_eq!(e.name_for(&list), Some("Own"));
+        (e.name, e.listed) = (None, false);
+        assert_eq!(e.name_for(&list), None);
+    }
+
+    /// The handlers' index ranges (FUN_1009ceb0 / FUN_1009aad0), and what a reserved actor's 0x00E keeps.
+    #[test]
+    fn index_ranges_and_reserved_view() {
+        let at = |id: u16, index: u16, kind| entity(&sub(id, 0x48, &[(8, &index.to_le_bytes())]), kind).in_range();
+        let npc = |i| at(0x00E, i, EntityKind::Npc);
+        let pc = |i| at(0x00D, i, EntityKind::Player);
+        assert!(npc(0) && npc(0x3ff) && !npc(0x400) && !npc(0x6ff) && npc(0x700) && npc(0x8ff) && !npc(0x900));
+        assert!(!pc(0x3ff) && pc(0x400) && pc(0x6ff) && !pc(0x700));
+        let p = sub(
+            0x00E,
+            0x48,
+            &[
+                (8, &0x10u16.to_le_bytes()),
+                (10, &[0x2f]),
+                (12, &1.5f32.to_le_bytes()),
+                (0x18, &(0x1234u32 | 0x20 << 17 | 1 << 16).to_le_bytes()),
+                (0x1e, &[50]),
+                (0x2c, &7u32.to_le_bytes()),
+                (0x32, &0x52u16.to_le_bytes()),
+            ],
+        );
+        let full = entity(&p, EntityKind::Npc);
+        assert!(full.despawn && full.king && full.claim == Some(7) && full.hpp == Some(50) && full.face == Some(0x20));
+        let r = full.clone().reserved(false);
+        assert_eq!((r.pos, r.counter, r.listed), (Some([1.5, 0.0, 0.0]), 0x1234, true));
+        assert!(!r.despawn && !r.king && r.mask == 0);
+        assert!(r.claim.is_none() && r.hpp.is_none() && r.face.is_none() && r.npc.is_none() && r.mob.is_none());
+        assert!(full.reserved(true).pos.is_none());
+    }
+
+    /// A 0x00E trimmed after its name (0x3c bytes) still gives its model; a trimmed lift (kind 3) its lift data.
+    #[test]
+    fn trimmed_npc_update() {
+        let p = sub(
+            0x00E,
+            0x3c,
+            &[
+                (4, &0x010f_3080u32.to_le_bytes()),
+                (8, &0x80u16.to_le_bytes()),
+                (10, &[0x0f]),
+                (0x32, &0x52u16.to_le_bytes()),
+                (0x34, b"Moogle"),
+            ],
+        );
+        assert!(matches!(entity(&p, EntityKind::Npc).npc, Some(crate::dat::npc::NpcLook::Model(0x52))));
+        let p = sub(
+            0x00E,
+            0x40,
+            &[(10, &[0x07]), (0x30, &[3]), (0x34, &7u32.to_le_bytes()), (0x38, &100u32.to_le_bytes())],
+        );
+        assert_eq!(entity(&p, EntityKind::Npc).lift, Some((7, 100, 100)));
+    }
+
+    /// 0x00A's voyage fields: start, start + length, flags3 bit 26 reverse, flags4 bits 19..20 the route;
+    /// no start, no voyage; LSB's flags4 0x0100 is route 0.
+    #[test]
+    fn ship_data_parse() {
+        let p = sub(
+            0x00A,
+            0x118,
+            &[
+                (0x78, &1_000_000u32.to_le_bytes()),
+                (0x7c, &944u16.to_le_bytes()),
+                (0x24, &0x0400_0000u32.to_le_bytes()),
+                (0x28, &((2u32 << 19) | 0x100).to_le_bytes()),
+            ],
+        );
+        assert_eq!(ship_data(&p), Some(ShipData { start: 1_000_000, end: 1_000_944, reverse: true, route: 2 }));
+        let p = sub(
+            0x00A,
+            0x118,
+            &[(0x78, &1_000_000u32.to_le_bytes()), (0x7c, &944u16.to_le_bytes()), (0x28, &0x100u32.to_le_bytes())],
+        );
+        assert_eq!(ship_data(&p), Some(ShipData { start: 1_000_000, end: 1_000_944, reverse: false, route: 0 }));
+        let p = sub(0x00A, 0x118, &[(0x7c, &944u16.to_le_bytes())]);
+        assert_eq!(ship_data(&p), None);
+    }
+
+    /// GP_SERV_COMMAND_EVENT / EVENTNUM / EVENTSTR as LSB lays them out.
+    #[test]
+    fn event_starts() {
+        let p = sub(
+            0x032,
+            0x14,
+            &[
+                (4, &0x010e_607eu32.to_le_bytes()),
+                (8, &0x7eu16.to_le_bytes()),
+                (0xa, &230u16.to_le_bytes()),
+                (0xc, &615u16.to_le_bytes()),
+                (0xe, &8u16.to_le_bytes()),
+                (0x10, &230u16.to_le_bytes()),
+            ],
+        );
+        let s = event_start(&p);
+        assert_eq!((s.target, s.index, s.zone, s.event, s.mode, s.zone2), (0x010e_607e, 0x7e, 230, 615, 0x2008, 230));
+        let p = sub(
+            0x034,
+            0x34,
+            &[
+                (4, &0x010e_601bu32.to_le_bytes()),
+                (8, &1u32.to_le_bytes()),
+                (0x24, &7u32.to_le_bytes()),
+                (0x28, &0x1bu16.to_le_bytes()),
+                (0x2a, &230u16.to_le_bytes()),
+                (0x2c, &0x24au16.to_le_bytes()),
+                (0x2e, &8u16.to_le_bytes()),
+                (0x30, &230u16.to_le_bytes()),
+            ],
+        );
+        let s = event_start(&p);
+        assert_eq!((s.index, s.event, s.params[0], s.params[7]), (0x1b, 0x24a, 1, 7));
+        let p = sub(
+            0x033,
+            0x70,
+            &[(0xc, &5u16.to_le_bytes()), (0xe, &8u16.to_le_bytes()), (0x10, b"Bastok"), (0x50, &3u32.to_le_bytes())],
+        );
+        let s = event_start(&p);
+        assert_eq!((s.event, s.strings[0].as_str(), s.params[0]), (5, "Bastok", 3));
+    }
+
+    /// c2s 0x015 goes out unless we ride or the control lock is on (FUN_100983f0).
+    #[test]
+    fn position_gate() {
+        assert!(sends_position(&SelfState::default()));
+        assert!(!sends_position(&SelfState { locked: true, ..Default::default() }));
+        assert!(!sends_position(&SelfState { silent: true, ..Default::default() }));
+    }
+
+    /// GP_CLI_COMMAND_EVENTEND: UniqueNo, EndPara, ActIndex, Mode, EventNum, EventPara.
+    #[test]
+    fn event_end_layout() {
+        let b = event_end_body(0x010e_607e, 0x7e, 0x4000_0000, 230, 615, 0);
+        assert_eq!(b.len(), 16);
+        assert_eq!(&b[4..8], &0x4000_0000u32.to_le_bytes());
+        assert_eq!(&b[8..10], &0x7eu16.to_le_bytes());
+        assert_eq!(&b[12..16], &[230, 0, 0x67, 2]);
+    }
+}
