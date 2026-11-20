@@ -181,6 +181,9 @@ pub struct SelfPlate {
     pub hitbox: f32,
     /// GroundFlag (flags0 bit 2) or HackMove (flags1 bit 12): no event ground snap, no ground tilt (batch 6 item 14).
     pub no_snap: bool,
+    /// Timeless XI: HackMove alone (0x037 flags1 bit 12, zone-in Flags1 bit 27; LSB's GM !wallhack): our own moves go
+    /// through walls and floors with no gravity (client/mod.rs).
+    pub hack: bool,
 }
 
 /// Our own flags at zone-in. s2c 0x00A carries them in 0x00D's layout (Flags0 u32 @0x18, Flags1 @0x20, Flags2 @0x24,
@@ -212,6 +215,7 @@ fn zone_in_plate(p: &SubPacket) -> SelfPlate {
         },
         invisible: bit(f1, 29),
         no_snap: bit(f0, 15) || bit(f1, 27),
+        hack: bit(f1, 27),
         ..SelfPlate::default()
     }
 }
@@ -256,6 +260,7 @@ fn self_plate(p: &SubPacket) -> SelfPlate {
         zone_pool: bit(f0, 9),
         hitbox: p.u8(0x59) as f32 * 0.1,
         no_snap: bit(f0, 2) || bit(f1, 12),
+        hack: bit(f1, 12),
     }
 }
 
@@ -3325,6 +3330,7 @@ mod tests {
         let ground = sub(0x00A, 0x104, &[(0x18, &(1u32 << 15).to_le_bytes())]);
         let hack = sub(0x00A, 0x104, &[(0x20, &(1u32 << 27).to_le_bytes())]);
         assert!(zone_in_plate(&ground).no_snap && zone_in_plate(&hack).no_snap);
+        assert!(!zone_in_plate(&ground).hack && zone_in_plate(&hack).hack);
         // LSB's 0x00A (size and gender in Flags1 bits 8..15, 0x100 in Flags3) sets none of them.
         let lsb = sub(0x00A, 0x104, &[(0x20, &0x8100u32.to_le_bytes()), (0x28, &0x100u32.to_le_bytes())]);
         assert_eq!(zone_in_plate(&lsb), SelfPlate::default());

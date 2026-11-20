@@ -14540,7 +14540,15 @@ impl App {
         } else {
             0
         };
-        let falls = !in_event && !world.unsettled && world.in_scene();
+        // Timeless XI: the server's HackMove (LSB GM !wallhack): no walls, no floors, no gravity; running while the
+        // camera looks well up or down climbs or sinks with it.
+        let hack = world.my_plate.hack;
+        let falls = !in_event && !world.unsettled && world.in_scene() && !hack;
+        let hack_climb = {
+            let d = world.cam.look - world.cam.eye;
+            let k = if d.length() > 1e-3 { d.y / d.length() } else { 0.0 };
+            if k.abs() > 0.3 { k } else { 0.0 }
+        };
         let shafts = world.lifts.shafts();
         let ride = |a: Vec3, b: Vec3| lifts::ride_in(&shafts, a, b);
         let mut steps = 0;
@@ -14586,11 +14594,19 @@ impl App {
             }
             // FUN_100a8770 at the end of the move input (also with no input): a character in the way holds the step
             // (the run motion and facing stay).
-            if !in_event && pull.is_none() && bump::blocks(world, from, next - from, ground::STEP_TICKS) {
+            if !in_event && !hack && pull.is_none() && bump::blocks(world, from, next - from, ground::STEP_TICKS) {
                 next = from;
             }
             let g = world.ground.as_ref().filter(|g| !g.is_empty());
-            if next != from {
+            if hack && !in_event {
+                // Straight to the step, no collision; forward with the camera pitched climbs (Y is down).
+                let along = (next - from).length();
+                let fwd = Vec3::new(world.cam.look.x - world.cam.eye.x, 0.0, world.cam.look.z - world.cam.eye.z)
+                    .normalize_or_zero()
+                    .dot((next - from).normalize_or_zero())
+                    .max(0.0);
+                world.pos = next + Vec3::new(0.0, hack_climb * along * fwd, 0.0);
+            } else if next != from {
                 world.pos = g.map_or(next, |g| g.walk_player(from, next, ground::STEP_TICKS, Some(&ride)));
             } else if falls && let Some(g) = g {
                 // A fall goes on without input.
