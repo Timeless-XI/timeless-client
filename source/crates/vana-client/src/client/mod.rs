@@ -1081,8 +1081,12 @@ fn login_window(
     sounds: &mut Vec<crate::audio::Ui>,
     modern: Option<&mut Option<LoginView>>,
     monitor_scale: f32,
+    tl: bool,
 ) -> Option<LoginChoice> {
     const CHOICES: [LoginChoice; 3] = [LoginChoice::LogIn, LoginChoice::Create, LoginChoice::Exit];
+    // Timeless XI: the Timeless title (layout C): the fields in a glass card under the logo's line, the actions on the
+    // character menu's row of buttons, so logging in only changes the buttons. No Update there for now.
+    let update = update && !tl;
     let n = fields.len();
     let check = n;
     let first = n + 1;
@@ -1111,6 +1115,22 @@ fn login_window(
     // The modern layer's form is half again as large (its text sized to the fields), times the monitor's scale, up to
     // what fits.
     let f = if modern.is_some() { (1.5 * monitor_scale).min(0.4 * sh / base_h).max(1.5) } else { 1.0 };
+    // Timeless: the row the character menu's buttons sit on, and the room between the logo's tagline and that row.
+    let tl_row = tl.then(|| {
+        let place = timeless::title::LogoPlace::default();
+        let logo = place.rect([sw, sh]);
+        let slots = timeless::title::button_rects([sw, sh], &place);
+        let top = logo[1] + logo[3] * 1.13 + sh * 0.02;
+        let bottom = slots[0][1] - sh * 0.03;
+        (slots, top, bottom)
+    });
+    // The card holds the fields and the box row only (its actions are on the row): its height without them, and
+    // smaller if the room is.
+    let card_h = |f: f32| (52.0 + n as f32 * pitch - 8.0) * f;
+    let f = match tl_row {
+        Some((_, top, bottom)) => f.min((bottom - top) / card_h(1.0)).max(1.0),
+        None => f,
+    };
     const CAPTION: &str = "Remember password";
     const TRUST: &str = "Trust this computer";
     const STAY: &str = "Stay logged in";
@@ -1132,6 +1152,10 @@ fn login_window(
     // Centred between the title logo's foot (about half the height) and the copyright line (about 0.8); a larger
     // form stays below the logo's "ONLINE" line.
     let (wx, wy) = (((sw - ww) / 2.0).round(), (sh * 0.65 - wh / 2.0).max(sh * 0.52).round());
+    let (wy, wh) = match tl_row {
+        Some((_, top, bottom)) => ((top + (bottom - top - card_h(f)) / 2.0).round(), card_h(f)),
+        None => (wy, wh),
+    };
     let row = |i: usize| wy + 14.0 * f + i as f32 * pitch * f;
     let field_rect = |i: usize| {
         let w = if trusting && i == n - 1 { code_w * f } else { ww - 164.0 * f };
@@ -1144,6 +1168,8 @@ fn login_window(
     let ay = row(n + 1) + 6.0 * f;
     // Config-page buttons (88 px, wider for a longer caption), centred 24 px apart.
     const ACTIONS: [&str; 3] = ["Log in", "Create account", "Exit"];
+    const TL_ACTIONS: [&str; 3] = ["Log in", "Create account", "Exit Game"];
+    let actions = if tl { TL_ACTIONS } else { ACTIONS };
     let widths = ACTIONS.map(|a| ((lu.label_width(a) + 14.0).max(88.0) * f).round());
     let mut bx = (wx + (ww - widths.iter().sum::<f32>() - 48.0 * f) / 2.0).round();
     let arects = [0, 1, 2].map(|k| {
@@ -1151,6 +1177,11 @@ fn login_window(
         bx += widths[k] + 24.0 * f;
         r
     });
+    // Timeless: the middle three of the row's five places.
+    let arects = match tl_row {
+        Some((slots, ..)) => [slots[1], slots[2], slots[3]],
+        None => arects,
+    };
     // Log in and Create account need every field but the one-time code; PlayOnline accounts are made on Square Enix's
     // site.
     let filled = fields[..n - 1].iter().all(|x| !x.text.trim().is_empty());
@@ -1492,7 +1523,7 @@ fn login_window(
             check: (check_rect, CAPTION, *remember),
             trust: trust.as_deref().map(|t| (trust_rect, TRUST, *t)),
             stay: (stay_rect, STAY, *stay),
-            buttons: (0..3).map(|k| (arects[k], ACTIONS[k], enabled[k])).collect(),
+            buttons: (0..3).map(|k| (arects[k], actions[k], enabled[k])).collect(),
             twofa: tf_rect.map(|r| (r, TF, filled)),
             update: upd_rect.map(|r| (r, UPD)),
             focus: *focus,
@@ -15847,6 +15878,8 @@ impl App {
                     let help_over = update_help.as_deref().or_else(|| self.twofa.as_ref().map(|t| t.help()));
                     // Not retail: Update while something is out of date.
                     let update = self.updates.as_ref().is_some_and(|s| s.lock().unwrap().any());
+                    // Timeless XI: the character menu's buttons fade in when the login hands over to them.
+                    self.tl_title.menu_in = 0.0;
                     let chosen = login_window(
                         lu,
                         shown,
@@ -15866,6 +15899,7 @@ impl App {
                         &mut sounds,
                         modern_ui.then_some(&mut view),
                         ctx.native_pixels_per_point().unwrap_or(1.0),
+                        self.cfg.modern_ui && self.cfg.timeless_ui,
                     );
                     drop(fields);
                     // Timeless XI: Stay logged in is saved at once.
@@ -16364,6 +16398,10 @@ impl App {
                                     .iter()
                                     .map(|&(m, r)| (r, items[m].0, m == *menu && !window_over, enabled[m]))
                                     .collect();
+                                // Timeless XI: the menu's buttons fade in over the login's actions (a quarter second).
+                                let dt = ctx.input(|i| i.stable_dt).min(0.1);
+                                self.tl_title.menu_in = (self.tl_title.menu_in + dt * 4.0).min(1.0);
+                                let menu_in = self.tl_title.menu_in;
                                 let mo = self.modern.get_or_insert_with(|| modern::Modern::new(ctx));
                                 if tl_title {
                                     mo.title_buttons_tl(
@@ -16372,6 +16410,7 @@ impl App {
                                         self.cfg.modern_scale,
                                         self.ui_k,
                                         &buttons,
+                                        menu_in * menu_in * (3.0 - 2.0 * menu_in),
                                     );
                                 } else {
                                     mo.title_buttons(
