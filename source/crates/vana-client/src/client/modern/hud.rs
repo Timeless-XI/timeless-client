@@ -621,13 +621,19 @@ pub fn party_panel(
             // Timeless XI: Timeless View's job plaque (main and sub job codes) in place of the pictograms.
             let code =
                 |id: &Option<String>| id.as_deref().and_then(|j| j.strip_prefix("jobs/")).map(str::to_ascii_uppercase);
+            // Centred on the player's name and jobs (tl_party_row: the name on name_y, the jobs line under it), or on
+            // the row when only the name and zone show.
+            let info_cy = match row.here {
+                Some(_) => r.min.y + if full { 13.0 } else { 15.0 } + 7.0,
+                None => r.center().y,
+            };
             let tl_plaque = match (m.theme.timeless(), code(&row.icon)) {
                 (true, Some(main)) => Some(tl_job_plaque(
                     painter,
                     m,
                     // Clear of the party cursor's hourglass at the row's edge.
                     x + 4.0,
-                    r.center().y,
+                    info_cy,
                     &main,
                     code(&row.sub_icon).as_deref(),
                     row.level,
@@ -662,7 +668,7 @@ pub fn party_panel(
                 if row.marks & bit != 0 {
                     // Timeless XI: beside the plaque's sub job box, clear of it (top left, then bottom left).
                     let at = if tl_plaque.is_some() {
-                        pos2(x + 3.0, if k == 0 { r.center().y + 9.0 } else { r.center().y - 13.0 })
+                        pos2(x + 3.0, if k == 0 { info_cy + 11.0 } else { info_cy - 11.0 })
                     } else {
                         pos2(x + 1.0 + 11.0 * k as f32, r.max.y - 9.0)
                     };
@@ -817,9 +823,9 @@ fn tl_job_plaque(
     let (w, h) = (S * 1.2, S * 0.64);
     let (sw, sh) = (S * 0.74, S * 0.46 * 0.82);
     let (bar, tuck) = (S * 0.14, S * 0.07);
-    let lift = S * 0.08;
-    let total = lift + h - 1.0 + if sub.is_some() { sh + S * 0.1 } else { 0.0 };
-    let top = cy - total / 2.0 + lift;
+    // Centred on `cy` as seen, bars included (each shows `tuck` past its box): the plaque alone, or the plaque and the
+    // sub job's box under it.
+    let top = cy - if sub.is_some() { h - 1.0 + sh } else { h } / 2.0;
     let fade = |c: Color32| if here { c } else { c.gamma_multiply(0.45) };
     let colour = |code: &str| {
         let c = m.theme.color(&format!("job_{}", code.to_ascii_lowercase()));
@@ -867,6 +873,9 @@ fn tl_job_plaque(
         tablet(b, m.theme.color("bronze"));
         // Cormorant runs 1.2 large (theme.rs): these sizes draw it at the canvas's 7.5 and 9.9 px.
         code(sub, S * 0.25 / 1.2, 0.6, fade(Color32::from_rgb(0xb9, 0xc3, 0xd4)), b);
+    }
+    if sub.is_none() {
+        strip(x + w * 0.16, x + w * 0.84, plate.max.y + tuck - bar, colour(main));
     }
     tablet(plate, super::borders::lighter(m.theme.color("bronze"), 0.25));
     code(main, S * 0.33 / 1.2, 1.5, fade(m.theme.color("text")), plate);
