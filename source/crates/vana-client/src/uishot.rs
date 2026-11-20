@@ -149,6 +149,7 @@ pub fn title_shot(out: &Path, width: u32, height: u32) -> Result<()> {
         wardrobes: 0b1100,
         press,
         modern: false,
+        hide_art: false,
     };
     let (batch, text) = title_screen(&lobby, style, width as f32, height as f32, &st);
     for t in &text {

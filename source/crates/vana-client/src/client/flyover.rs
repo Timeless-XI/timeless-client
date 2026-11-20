@@ -29,9 +29,46 @@ pub struct FlyoverData {
     /// The zone's effect libraries: op 0x7b loads the whole scene (FUN_1018b3a0), so its auto-start generators run,
     /// their sounds too (birds, water, crowds).
     fx: Option<super::select::FxLibs>,
+    /// Timeless XI: our reel's shot (client/timeless/title.rs), with the filter it plays under.
+    pub tl: Option<super::timeless::title::Playing>,
+    tl_grade: Option<crate::render::nostalgia::Grade>,
 }
 
 impl FlyoverData {
+    /// Timeless XI: the next shot of our title reel (`queue` holds "tl:" names; empty starts a new pass).
+    pub fn load_reel(index: &Arc<DatIndex>, keys: &Arc<zone::Keys>, queue: Vec<String>) -> Result<Self> {
+        use super::timeless::title::{PREFIX, Playing, Reel, filter_preset};
+        let reel = Reel::load();
+        let mut q: Vec<String> = queue.into_iter().filter(|n| n.starts_with(PREFIX)).collect();
+        if q.is_empty() {
+            q = reel.playlist();
+        }
+        anyhow::ensure!(!q.is_empty(), "the title reel has no shots");
+        let name = q.remove(0);
+        let shot = reel.shot(&name[PREFIX.len()..]).with_context(|| format!("no shot {name}"))?;
+        let (title, ops) = shot.movie();
+        let zone = shot.zone;
+        let zone_file = index.read(crate::dat::zone::file_id(zone))?;
+        let scene = zone::load_scene(keys, &zone_file)?;
+        let ground = super::ground::Ground::build(&scene);
+        let weather = ZoneWeather::parse(&zone_file).ok();
+        let fx = super::select::FxLibs::load_zone(index, keys, zone, &zone_file);
+        log::info!("title reel {name}: zone {zone}, {:.0} s", shot.seconds());
+        Ok(Self {
+            title,
+            ops,
+            scene,
+            ground,
+            weather,
+            envs: Vec::new(),
+            rest: q,
+            zone,
+            fx,
+            tl: Some(Playing::of(shot, reel.logo)),
+            tl_grade: filter_preset(&reel.filter),
+        })
+    }
+
     /// The next movie of "loop": `queue`'s first, or a new pass's (`enabled`: the content bits op 0xaf tests).
     pub fn load_next(index: &Arc<DatIndex>, keys: &Arc<zone::Keys>, queue: Vec<String>, enabled: u32) -> Result<Self> {
         let mut q = queue;
@@ -75,7 +112,7 @@ impl FlyoverData {
         let weather = ZoneWeather::parse(&zone_file).ok();
         let fx = super::select::FxLibs::load_zone(index, keys, zone, &zone_file);
         log::info!("flyover {file_id} {movie}: zone {zone}, {} ops", ops.len());
-        Ok(Self { title, ops, scene, ground, weather, envs, rest: Vec::new(), zone, fx })
+        Ok(Self { title, ops, scene, ground, weather, envs, rest: Vec::new(), zone, fx, tl: None, tl_grade: None })
     }
 }
 
@@ -117,6 +154,9 @@ pub struct Flyover {
     /// Settings' Draw Distance (100 Retail, 0 Unlimited): past Retail the camera list holds within retail's reach.
     pub draw_distance: u32,
     pub done: bool,
+    /// Timeless XI: the nostalgia pass and the match cut's light (uv x, uv y, amount) the title sets each frame.
+    nostalgia: Option<crate::render::nostalgia::Nostalgia>,
+    pub tl_flare: [f32; 3],
 }
 
 impl Flyover {
@@ -146,6 +186,8 @@ impl Flyover {
             clip_x: 1.0,
             draw_distance: 0,
             done: false,
+            nostalgia: None,
+            tl_flare: [0.0; 3],
         }
     }
 
@@ -159,6 +201,11 @@ impl Flyover {
     pub fn unfaded(mut self) -> Self {
         self.fade = ([1.0; 3], [1.0; 3], 0.0, 0.0);
         self
+    }
+
+    /// Timeless XI: our reel's shot, if this is one, and the seconds since it started.
+    pub fn playing(&self) -> Option<(&super::timeless::title::Playing, f32)> {
+        self.data.tl.as_ref().map(|p| (p, self.tick / 60.0))
     }
 
     /// Runs the ops due by now (each op waits its `wait` ticks before the next one starts).
@@ -365,6 +412,11 @@ impl Flyover {
             batch.push_rect(0.0, 0.0, size[0] as f32, size[1] as f32, [0.0, 0.0, 0.0, dim]);
         }
         ui.render(gpu, encoder, view, size, size, None, &batch);
+        // Timeless XI: the nostalgia filter over the finished frame (crossfade and fade included).
+        if let (Some(g), Some(t)) = (self.data.tl_grade.as_ref(), tex) {
+            let n = self.nostalgia.get_or_insert_with(|| crate::render::nostalgia::Nostalgia::new(gpu, format));
+            n.draw(gpu, encoder, view, t, size, g, self.tl_flare);
+        }
         true
     }
 }

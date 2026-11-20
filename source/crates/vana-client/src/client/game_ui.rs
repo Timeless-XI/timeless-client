@@ -310,6 +310,8 @@ fn icon_size(k: usize) -> (f32, f32) {
 }
 
 pub struct GameUi {
+    /// Timeless XI: the Timeless title draws its own logo (render/screens.rs TitleState::hide_art).
+    pub hide_title_art: bool,
     data: GameUiData,
     renderer: Option<UiRenderer>,
     /// The scene depth name plates are tested against this frame (taken by render).
@@ -456,6 +458,7 @@ impl GameUi {
     pub fn new(data: GameUiData) -> Self {
         crate::render::ui::set_caption_words(caption_words(&data));
         Self {
+            hide_title_art: false,
             data,
             renderer: None,
             scene_depth: None,
@@ -728,6 +731,7 @@ impl GameUi {
             wardrobes,
             press,
             modern,
+            hide_art: self.hide_title_art,
         };
         let (b, text) = screens::title_screen(&self.data.lobby, &self.data.style, w, h, &st);
         self.batch = b;

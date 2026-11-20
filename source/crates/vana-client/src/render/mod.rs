@@ -19,6 +19,8 @@ pub mod portrait;
 pub mod postfx;
 pub mod scale;
 pub mod screenfx;
+// Timeless XI: the title screen's nostalgia filter.
+pub mod nostalgia;
 pub mod screens;
 pub mod shadow;
 pub mod smaa;

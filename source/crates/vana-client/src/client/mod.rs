@@ -165,6 +165,8 @@ mod textcmd;
 mod tilt;
 /// Timeless XI: the Timeless interface's own features (the hotbars).
 mod timeless;
+// Timeless XI: the title reel, for main.rs's reel-shot (tlreel.rs).
+pub(crate) use timeless::title as tl_title;
 mod timers;
 mod trade;
 mod treasure;
@@ -7966,6 +7968,8 @@ struct World {
     tl_fish: timeless::fishing::TlFish,
     /// Timeless XI: Timeless Angler, the fishing HUD and school banner (timeless/angler.rs).
     angler: timeless::angler::Angler,
+    /// Timeless XI: /titlecam, recording the Timeless title's shots (timeless/title.rs).
+    tl_cam: timeless::title::CamState,
     /// Config `modern_condense` (with `modern`): an action's battle lines merge (combat::condense).
     condense: bool,
     /// The lines later records of their action merge into, and the last action's serial.
@@ -9059,6 +9063,8 @@ pub struct App {
     flyover_state: LoadState,
     /// The rest of the title's "loop" pass (op 0x3d / 0xaf picks), played in turn.
     flyover_next: Vec<String>,
+    /// Timeless XI: the Timeless title's logo and match-cut state (client/timeless/title.rs).
+    tl_title: timeless::title::TitleLook,
     /// The character select scene, its loading state and the character list it was built for.
     select: Option<select::SelectScene>,
     select_state: LoadState,
@@ -9361,6 +9367,7 @@ impl App {
             flyover: None,
             flyover_state: LoadState::Idle,
             flyover_next: Vec::new(),
+            tl_title: Default::default(),
             select: None,
             select_state: LoadState::Idle,
             select_key: String::new(),
@@ -10632,6 +10639,7 @@ impl App {
                             tl_bar: Default::default(),
                             tl_fish: Default::default(),
                             angler: Default::default(),
+                            tl_cam: Default::default(),
                             condense: self.cfg.modern_condense,
                             condensed: Vec::new(),
                             condensed_targets: Vec::new(),
@@ -15600,6 +15608,17 @@ impl App {
             m.set_opacity(self.cfg.modern_opacity);
             m.theme.set_timeless(self.cfg.modern_ui && self.cfg.timeless_ui);
         }
+        let tl = self.timeless_title();
+        if let Some(gu) = self.game_ui.as_mut() {
+            gu.hide_title_art = tl;
+        }
+        // Timeless XI: the hero logo over the Timeless title's reel.
+        if self.timeless_title() && self.title_backdrop() {
+            let place = self.flyover.as_ref().and_then(|f| f.playing()).map(|p| p.0.place).unwrap_or_default();
+            let look = &self.tl_title;
+            let mo = self.modern.get_or_insert_with(|| modern::Modern::new(ctx));
+            mo.title_logo(ctx, &place, look.logo, look.glow, look.flare);
+        }
         // The stacked-window pointer follow, only with the drawn (software) cursor.
         let ptr_dy = match &self.phase {
             Phase::World(w) if self.cfg.tool("0021") == 0 => w.ptr_dy,
@@ -17880,8 +17899,15 @@ impl App {
             Phase::Characters { expansions, .. } => *expansions & self.installed,
             _ => self.installed,
         };
+        // Timeless XI: the Timeless interface plays our title reel.
+        let reel = self.timeless_title();
         std::thread::spawn(move || {
-            let _ = tx.send(Task::Flyover(flyover::FlyoverData::load_next(&index, &keys, queue, enabled)));
+            let data = if reel {
+                flyover::FlyoverData::load_reel(&index, &keys, queue)
+            } else {
+                flyover::FlyoverData::load_next(&index, &keys, queue, enabled)
+            };
+            let _ = tx.send(Task::Flyover(data));
         });
     }
 
@@ -18112,6 +18138,11 @@ impl App {
         }
     }
 
+    /// Timeless XI: the title is ours (Interface = Timeless): the reel, the hero logo, the filter.
+    fn timeless_title(&self) -> bool {
+        self.cfg.modern_ui && self.cfg.timeless_ui
+    }
+
     fn title_backdrop(&self) -> bool {
         matches!(
             self.phase,
@@ -18132,6 +18163,8 @@ impl App {
         } else if matches!(self.phase, Phase::World(_)) {
             let old = self.flyover.take();
             self.stop_fly(old);
+            // Timeless XI: the next title opens with its intro again.
+            self.tl_title = Default::default();
         }
         let in_select =
             matches!(&self.phase, Phase::Characters { screen: LobbyScreen::Select | LobbyScreen::Delete, .. });
@@ -19025,6 +19058,12 @@ impl App {
             && let Some(fly) = &mut self.flyover
         {
             fly.advance(dt);
+            // Timeless XI: the logo's fade and the match cut's light at the logo crystal.
+            let playing = fly.playing();
+            let place = playing.map(|p| p.0.place).unwrap_or_default();
+            self.tl_title.advance(&place, playing, dt);
+            let uv = place.crystal_uv([bg[0] as f32, bg[1] as f32]);
+            fly.tl_flare = [uv[0], uv[1], self.tl_title.flare];
             let alive = self.audio.as_ref().map(|a| a.alive());
             fly.draw_distance = self.cfg.draw_distance;
             g.drew_world = fly.render(
