@@ -11,12 +11,16 @@
       "logo": "intro",
       "fade_in": 4.0,
       "fade_out": 3.0,
-      "note": "Lufaise Meadows at dusk: out of the trees toward the arch the logo shows, the logo coming in above it.",
+      "note": "Lufaise Meadows at dusk: past the trees, toward the arch the logo shows, the logo coming in above it.",
       "moves": [
-        { "seconds": 48, "keys": [
-          { "eye": [172.0, -42.0, 325.0], "target": [60.0, -62.0, 700.0] },
-          { "eye": [158.0, -41.0, 352.0], "target": [61.0, -60.0, 700.0] },
-          { "eye": [142.0, -40.0, 388.0], "target": [62.0, -57.0, 700.0] } ] }
+        {
+          "seconds": 44,
+          "keys": [
+            { "eye": [148.0, -41.0, 378.0], "target": [61.0, -124.0, 700.0] },
+            { "eye": [135.0, -40.0, 400.0], "target": [62.0, -121.0, 700.0] },
+            { "eye": [120.0, -39.0, 428.0], "target": [62.0, -117.0, 700.0] }
+          ]
+        }
       ]
     },
     {
@@ -29,23 +33,42 @@
       "fade_out": 3.0,
       "note": "Hall of the Gods, walked slowly: up the entry steps, over the bridge, around the robed statues, then into the crystal Altana holds, which lands on the logo's crystal.",
       "moves": [
-        { "seconds": 36, "keys": [
-          { "eye": [0.0, -2.4, -168.0], "target": [0.0, -6.0, -130.0] },
-          { "eye": [0.0, -6.4, -132.0], "target": [0.0, -10.5, -95.0] },
-          { "eye": [0.0, -10.4, -96.0], "target": [0.0, -13.0, -60.0] } ] },
-        { "seconds": 38, "cross": 3.0, "keys": [
-          { "eye": [0.0, -14.0, -75.0], "target": [0.0, -18.0, -30.0] },
-          { "eye": [0.0, -14.5, -45.0], "target": [0.0, -22.0, 0.0] },
-          { "eye": [2.0, -15.0, -22.0], "target": [0.0, -24.0, 20.0] } ] },
-        { "seconds": 54, "cross": 3.0, "keys": [
-          { "eye": [-7.1, -19.5, 8.4], "target": [15.6, -23.0, -18.5] },
-          { "eye": [-10.6, -19.5, 2.8], "target": [23.4, -23.0, -6.3] },
-          { "eye": [-10.3, -19.5, -3.8], "target": [22.7, -23.0, 8.3] },
-          { "eye": [-6.3, -19.5, -9.0], "target": [13.9, -23.0, 19.8] } ] },
-        { "seconds": 40, "cross": 3.0, "keys": [
-          { "eye": [0.0, -22.0, 6.0], "target": [0.0, -30.0, 40.0] },
-          { "eye": [0.0, -29.0, 26.0], "target": [0.0, -31.0, 48.0] },
-          { "eye": [0.0, -34.17, 44.52], "target": [0.0, -30.86, 54.52] } ] }
+        {
+          "seconds": 26,
+          "keys": [
+            { "eye": [0.0, -6.6, -142.0], "target": [0.0, -9.5, -105.0] },
+            { "eye": [0.0, -8.8, -125.0], "target": [0.0, -11.0, -90.0] },
+            { "eye": [0.0, -11.0, -96.0], "target": [0.0, -13.5, -60.0] }
+          ]
+        },
+        {
+          "seconds": 38,
+          "cross": 3.0,
+          "keys": [
+            { "eye": [0.0, -14.0, -75.0], "target": [0.0, -18.0, -30.0] },
+            { "eye": [0.0, -14.5, -45.0], "target": [0.0, -22.0, 0.0] },
+            { "eye": [2.0, -15.0, -22.0], "target": [0.0, -24.0, 20.0] }
+          ]
+        },
+        {
+          "seconds": 54,
+          "cross": 3.0,
+          "keys": [
+            { "eye": [-7.1, -19.5, 8.4], "target": [15.6, -23.0, -18.5] },
+            { "eye": [-10.6, -19.5, 2.8], "target": [23.4, -23.0, -6.3] },
+            { "eye": [-10.3, -19.5, -3.8], "target": [22.7, -23.0, 8.3] },
+            { "eye": [-6.3, -19.5, -9.0], "target": [13.9, -23.0, 19.8] }
+          ]
+        },
+        {
+          "seconds": 40,
+          "cross": 3.0,
+          "keys": [
+            { "eye": [0.0, -22.0, 6.0], "target": [0.0, -30.0, 40.0] },
+            { "eye": [0.0, -29.0, 26.0], "target": [0.0, -31.0, 48.0] },
+            { "eye": [0.0, -34.17, 44.52], "target": [0.0, -30.86, 54.52] }
+          ]
+        }
       ]
     }
   ]

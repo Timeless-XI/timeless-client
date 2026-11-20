@@ -74,6 +74,69 @@ impl Modern {
         }
     }
 
+    /// Timeless XI: the Timeless title's buttons, one row of large tiles under the logo (`buttons` as `title_buttons`,
+    /// with a Pewter icon each): the glass tile, the icon over the label in the title serif, a steel-blue edge and
+    /// glow on the lit one.
+    pub fn title_buttons_tl(
+        &mut self,
+        ctx: &Context,
+        window: [u32; 2],
+        scale: u32,
+        ui_k: (f32, f32),
+        buttons: &[([f32; 4], &str, bool, bool)],
+        icons: &[&str],
+    ) {
+        self.zoom_to(ctx, window, scale);
+        let k = ctx.pixels_per_point();
+        let p =
+            ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("timeless title buttons")));
+        let hover = ctx.input(|i| i.pointer.hover_pos());
+        let focus = self.theme.color("focus");
+        for (i, (r, label, lit, on)) in buttons.iter().enumerate() {
+            let rect = egui::Rect::from_min_size(
+                pos2(r[0] / (k * ui_k.0), r[1] / (k * ui_k.1)),
+                vec2(r[2] / (k * ui_k.0), r[3] / (k * ui_k.1)),
+            );
+            let hot = *on && hover.is_some_and(|h| rect.contains(h));
+            let face = if *lit || hot { "window_focused" } else { "window_normal" };
+            p.add(super::borders::window(self, face, rect));
+            if *lit {
+                for j in 1..=4 {
+                    let g = j as f32 * 2.0;
+                    p.rect_stroke(
+                        rect.expand(g),
+                        3.0 + g,
+                        egui::Stroke::new(1.5, focus.gamma_multiply(0.22 / j as f32)),
+                        egui::StrokeKind::Outside,
+                    );
+                }
+                p.rect_stroke(rect, 3.0, egui::Stroke::new(1.0, focus), egui::StrokeKind::Inside);
+            }
+            let c = if !on {
+                self.theme.color("muted")
+            } else if *lit {
+                self.theme.color("gold")
+            } else {
+                self.theme.color("text")
+            };
+            let icon_h = rect.height() * 0.34;
+            if let Some(s) = icons.get(i).and_then(|n| self.art.sprite(n)) {
+                let w = icon_h * s.size.x / s.size.y.max(1.0);
+                let at = pos2(rect.center().x - w / 2.0, rect.min.y + rect.height() * 0.17);
+                let tint = if *on { Color32::WHITE } else { Color32::from_white_alpha(110) };
+                p.add(paint::image(&s, at, w, tint));
+            }
+            let size = (rect.height() * 0.17).clamp(self.theme.small, 26.0);
+            p.text(
+                pos2(rect.center().x, rect.min.y + rect.height() * 0.76),
+                Align2::CENTER_CENTER,
+                *label,
+                FontId::new(size * 1.15, FontFamily::Name(super::theme::SERIF.into())),
+                c,
+            );
+        }
+    }
+
     /// The login form on the rects login_window placed (UI pixels): the frame, the labelled fields in the input art (the
     /// focused one lit, its caret), Remember password's box, the buttons; their mouse stays the form's.
     pub fn login_form(
@@ -507,6 +570,17 @@ impl Modern {
             FontId::proportional(size),
             self.theme.color("text"),
         );
+        // Timeless XI: the game's notice the retail title art carried, bottom right beside the version.
+        if super::timeless_now() {
+            p.text(
+                // A line above the version, so they never meet.
+                pos2(screen.max.x - 16.0, r.min.y - 3.0 - size * 1.4),
+                Align2::RIGHT_BOTTOM,
+                "FINAL FANTASY XI \u{a9} SQUARE ENIX CO., LTD.",
+                FontId::proportional((size * 0.85).max(11.0)),
+                self.theme.color("muted"),
+            );
+        }
     }
 
     /// A lobby popup on retail's rect (UI pixels): the pack's frame, the text in Fira Sans above the form's size, centred

@@ -9910,6 +9910,10 @@ impl App {
         if scene != self.music_scene {
             match scene {
                 MusicScene::Opening => a.play_music_now(opening::MUSIC),
+                // Timeless XI: the Timeless title plays the Hall of the Gods' music (data/zones/hall_of_the_gods: 213).
+                MusicScene::Title if self.cfg.modern_ui && self.cfg.timeless_ui => {
+                    a.change_music(timeless::title::MUSIC, 0x7f, 0x7f, 0, 0, false)
+                }
                 MusicScene::Title => a.title_music(self.cfg.game.global.get(0xaf), self.installed),
                 // LAB_1022fedb: reaching the nation step plays 0x78 through the fade task; back on the dancer steps
                 // the race BGM returns when the performance wraps (FUN_10036a90).
@@ -16236,6 +16240,12 @@ impl App {
                             matches!(u.lock().unwrap().client, updater::Client::Available(_))
                         });
                         let mut items = ITEMS;
+                        // Timeless XI: the Timeless title's names; its last button closes the game.
+                        let tl_title = self.cfg.modern_ui && self.cfg.timeless_ui;
+                        if tl_title {
+                            items[3] = ("Settings", "Change settings.");
+                            items[4] = ("Exit Game", "Close the game.");
+                        }
                         if client_update {
                             items[0] = ("Update", "A newer Timeless XI client is out: update it to play.");
                         }
@@ -16278,6 +16288,13 @@ impl App {
                                 if i.key_pressed(egui::Key::ArrowUp) {
                                     *menu = order[(at + order.len() - 1) % order.len()];
                                 }
+                                // Timeless XI: the Timeless title's buttons are a row.
+                                if tl_title && i.key_pressed(egui::Key::ArrowRight) {
+                                    *menu = order[(at + 1) % order.len()];
+                                }
+                                if tl_title && i.key_pressed(egui::Key::ArrowLeft) {
+                                    *menu = order[(at + order.len() - 1) % order.len()];
+                                }
                             });
                         }
                         let mut chosen =
@@ -16296,12 +16313,16 @@ impl App {
                             const CHILD: [usize; 5] = [0, 1, 2, 4, 3];
                             // Logos need both the server's bit and the install's (FUN_10235810, simplified).
                             let logos = *expansions & self.installed;
-                            let rects: Vec<(usize, [f32; 4])> = lu
-                                .button_rects(sw, sh, logos)
-                                .into_iter()
-                                .enumerate()
-                                .map(|(i, r)| (CHILD[i], r))
-                                .collect();
+                            let rects: Vec<(usize, [f32; 4])> = if tl_title {
+                                // Timeless XI: one row of large buttons under the logo, in menu order.
+                                let place = self.flyover.as_ref().and_then(|f| f.playing()).map(|p| p.0.place);
+                                timeless::title::button_rects([sw, sh], &place.unwrap_or_default())
+                                    .into_iter()
+                                    .enumerate()
+                                    .collect()
+                            } else {
+                                lu.button_rects(sw, sh, logos).into_iter().enumerate().map(|(i, r)| (CHILD[i], r)).collect()
+                            };
                             for (m, r) in &rects {
                                 if !config_open && input.pointer.is_some_and(|p| inside(r, p)) {
                                     lu.hover.set(true);
@@ -16339,13 +16360,31 @@ impl App {
                                     .map(|&(m, r)| (r, items[m].0, m == *menu && !window_over, enabled[m]))
                                     .collect();
                                 let mo = self.modern.get_or_insert_with(|| modern::Modern::new(ctx));
-                                mo.title_buttons(
-                                    ctx,
-                                    [screen_size[0], screen_size[1]],
-                                    self.cfg.modern_scale,
-                                    self.ui_k,
-                                    &buttons,
-                                );
+                                if tl_title {
+                                    let icons: [&str; 5] = [
+                                        if client_update { "icons/refresh" } else { "icons/party" },
+                                        "icons/job",
+                                        "icons/cancel",
+                                        "icons/settings",
+                                        "icons/back",
+                                    ];
+                                    mo.title_buttons_tl(
+                                        ctx,
+                                        [screen_size[0], screen_size[1]],
+                                        self.cfg.modern_scale,
+                                        self.ui_k,
+                                        &buttons,
+                                        &icons,
+                                    );
+                                } else {
+                                    mo.title_buttons(
+                                        ctx,
+                                        [screen_size[0], screen_size[1]],
+                                        self.cfg.modern_scale,
+                                        self.ui_k,
+                                        &buttons,
+                                    );
+                                }
                             }
                             let help = match (&self.lobby_settings, &self.lobby_cfg) {
                                 _ if self.notes_ui.is_some() => {
@@ -16698,6 +16737,8 @@ impl App {
                                 self.lobby_values = self.cfg.game.for_character(None);
                                 self.lobby_cfg = Some(configui::ConfigUi::open("lobycwin"));
                             }
+                            // Timeless XI: the Timeless title's Exit Game closes the game.
+                            Some(4) if tl_title => self.exit_requested = true,
                             Some(4) => {
                                 action = Some(Box::new(|app: &mut App| app.phase = Phase::login(&app.cfg)));
                                 fade_action = true;
@@ -17652,7 +17693,9 @@ impl App {
                 }
             }
         }
+        // Timeless XI: not under the Timeless title, which keeps its own music.
         if lobby_apply.music
+            && !(self.cfg.modern_ui && self.cfg.timeless_ui)
             && let (Some(a), Phase::Characters { .. }) = (self.audio.as_mut(), &self.phase)
         {
             // FUN_1023ae50: a new title music choice starts at once.

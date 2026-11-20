@@ -2598,7 +2598,9 @@ impl GameUi {
             r.replace_image(gpu, mtext::TEXTURE, side, side, &rgba);
         }
         mtext::set_scale(size[1] as f32 / layout[1].max(1) as f32);
-        let c = LOBBY_CLEAR.map(|v| v as f64 / 255.0 * scene.clamp(0.0, 1.0) as f64);
+        // Timeless XI: the Timeless title clears to black between its reel's shots (retail's grey flashed white there).
+        let base = if self.hide_title_art { [0; 3] } else { LOBBY_CLEAR };
+        let c = base.map(|v| v as f64 / 255.0 * scene.clamp(0.0, 1.0) as f64);
         let clear = (!over).then_some(wgpu::Color { r: c[0], g: c[1], b: c[2], a: 1.0 });
         r.fade = fade;
         r.set_scene_depth(gpu, self.scene_depth.take().as_ref());

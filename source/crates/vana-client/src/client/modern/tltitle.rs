@@ -8,23 +8,41 @@ use egui::{
     Align2, Color32, Context, FontFamily, FontId, Id, LayerId, Order, Rect, Shape, Stroke, TextureHandle, pos2, vec2,
 };
 
-const LOGO_PNG: &[u8] = include_bytes!("../../../assets/timeless/title_logo.png");
+// The logo without its hourglass, and the hourglass as 64 frames over 7 s (8 a row): the star crystal turning, the sand
+// falling, the wisps. Both from the v4 logo artwork (tools: claude/title_screen.md).
+const BASE_PNG: &[u8] = include_bytes!("../../../assets/timeless/title_logo_base.png");
+const SAND_PNG: &[u8] = include_bytes!("../../../assets/timeless/title_logo_sand.png");
+const FRAMES: usize = 64;
+/// The line under the logo (the website's).
+const TAGLINE: &str = "A LEVEL 75 FINAL FANTASY XI PRIVATE SERVER";
+const COLS: usize = 8;
+const LOOP_SECS: f32 = 7.0;
+/// Where the hourglass frames sit in the logo, as fractions of it: x0, y0, x1, y1.
+const SAND_RECT: [f32; 4] = [0.3616, 0.1206, 0.6429, 0.6832];
 
-fn logo_texture(ctx: &Context) -> Option<TextureHandle> {
-    let id = Id::unique("timeless title logo");
+fn texture(ctx: &Context, key: &str, png_bytes: &[u8]) -> Option<TextureHandle> {
+    let id = Id::unique(key);
     if let Some(t) = ctx.data(|d| d.get_temp::<TextureHandle>(id)) {
         return Some(t);
     }
-    let mut d = png::Decoder::new(std::io::Cursor::new(LOGO_PNG));
+    let mut d = png::Decoder::new(std::io::Cursor::new(png_bytes));
     d.set_transformations(png::Transformations::normalize_to_color8() | png::Transformations::ALPHA);
     let mut r = d.read_info().ok()?;
     let mut buf = vec![0u8; r.output_buffer_size()?];
     let info = r.next_frame(&mut buf).ok()?;
     buf.truncate(info.buffer_size());
     let img = egui::ColorImage::from_rgba_unmultiplied([info.width as usize, info.height as usize], &buf);
-    let t = ctx.load_texture("timeless/title_logo", img, egui::TextureOptions::LINEAR);
+    let t = ctx.load_texture(key, img, egui::TextureOptions::LINEAR);
     ctx.data_mut(|d| d.insert_temp(id, t.clone()));
     Some(t)
+}
+
+/// The UV rect of hourglass frame `i` in the sheet.
+fn frame_uv(i: usize) -> Rect {
+    let rows = FRAMES.div_ceil(COLS);
+    let (c, r) = ((i % FRAMES) % COLS, (i % FRAMES) / COLS);
+    let (w, h) = (1.0 / COLS as f32, 1.0 / rows as f32);
+    Rect::from_min_size(pos2(c as f32 * w, r as f32 * h), vec2(w, h))
 }
 
 impl Modern {
@@ -33,23 +51,46 @@ impl Modern {
     pub fn title_logo(&self, ctx: &Context, place: &LogoPlace, alpha: f32, glow: f32, flare: f32) {
         let screen = ctx.content_rect();
         let p = ctx.layer_painter(LayerId::new(Order::Background, Id::unique("timeless title logo")));
-        let muted = self.theme.color("muted");
-        // The game's notice, which the retail title art carried (top left: the help bar holds the bottom).
-        p.text(
-            pos2(screen.min.x + 14.0, screen.min.y + 10.0),
-            Align2::LEFT_TOP,
-            "FINAL FANTASY XI \u{a9} SQUARE ENIX CO., LTD.",
-            FontId::new(11.0, FontFamily::Proportional),
-            muted.gamma_multiply(0.7),
-        );
         if alpha <= 0.002 {
             return;
         }
-        let Some(tex) = logo_texture(ctx) else { return };
+        let (Some(base), Some(sand)) =
+            (texture(ctx, "timeless/title_logo_base", BASE_PNG), texture(ctx, "timeless/title_logo_sand", SAND_PNG))
+        else {
+            return;
+        };
         let r = place.rect([screen.width(), screen.height()]);
         let rect = Rect::from_min_size(pos2(screen.min.x + r[0], screen.min.y + r[1]), vec2(r[2], r[3]));
         let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
-        p.image(tex.id(), rect, uv, Color32::from_white_alpha((alpha.clamp(0.0, 1.0) * 255.0) as u8));
+        let a = alpha.clamp(0.0, 1.0);
+        p.image(base.id(), rect, uv, Color32::from_white_alpha((a * 255.0) as u8));
+        // The line under the logo, as on the website (spaced capitals in the focus blue).
+        let size = (rect.height() * 0.035).clamp(12.0, 24.0);
+        let spacing = size * 0.3;
+        let mut job = egui::text::LayoutJob::default();
+        let colour = self.theme.color("focus").gamma_multiply(a * 0.9);
+        job.append(
+            TAGLINE,
+            0.0,
+            egui::TextFormat {
+                font_id: FontId::new(size, FontFamily::Proportional),
+                color: colour,
+                extra_letter_spacing: spacing,
+                ..Default::default()
+            },
+        );
+        let g = p.layout_job(job);
+        let top = rect.max.y + rect.height() * 0.02;
+        p.galley(pos2(rect.center().x - g.size().x / 2.0 + spacing / 2.0, top), g, colour);
+        // The hourglass, playing (about 9 frames a second; the crystal's own turn has 36 a loop).
+        let at = |f: f32| rect.min + vec2(f * rect.width(), 0.0);
+        let glass = Rect::from_min_max(
+            pos2(at(SAND_RECT[0]).x, rect.min.y + SAND_RECT[1] * rect.height()),
+            pos2(at(SAND_RECT[2]).x, rect.min.y + SAND_RECT[3] * rect.height()),
+        );
+        let t = ctx.input(|i| i.time) as f32 % LOOP_SECS / LOOP_SECS * FRAMES as f32;
+        p.image(sand.id(), glass, frame_uv(t as usize), Color32::from_white_alpha((a * 255.0) as u8));
+        ctx.request_repaint();
         // The crystal's light: soft rings of the focus colour, strongest at the cut, fading after it.
         let light = (glow + flare * 0.6).min(1.2) * alpha.max(flare);
         if light > 0.01 {

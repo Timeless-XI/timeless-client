@@ -13,6 +13,9 @@ use serde::{Deserialize, Serialize};
 
 const BUILT_IN: &str = include_str!("../../../assets/timeless/title_reel.json");
 
+/// The title's music: the Hall of the Gods' (timeless-server data/zones/hall_of_the_gods/zone.yaml).
+pub const MUSIC: u32 = 213;
+
 /// The queue names of our shots (FlyoverData's queue holds retail's scheduler names otherwise).
 pub const PREFIX: &str = "tl:";
 
@@ -78,6 +81,20 @@ impl LogoPlace {
         let r = self.rect(size);
         [(r[0] + LOGO_CRYSTAL[0] * r[2]) / size[0].max(1.0), (r[1] + LOGO_CRYSTAL[1] * r[3]) / size[1].max(1.0)]
     }
+}
+
+/// The Timeless title's five buttons (Select, Create, Delete, Settings, Exit Game) as one row of large tiles a little
+/// below the logo, across about two thirds of the screen: x, y, w, h in the screen's units.
+pub fn button_rects(size: [f32; 2], place: &LogoPlace) -> [[f32; 4]; 5] {
+    let [sw, sh] = size;
+    let logo = place.rect(size);
+    let total = (sw * 0.66).min(sh * 1.25);
+    let gap = (total * 0.018).max(6.0);
+    let w = (total - gap * 4.0) / 5.0;
+    let h = (w * 0.56).min(sh * 0.13);
+    let y = (logo[1] + logo[3] + sh * 0.05).min(sh * 0.86 - h);
+    let x0 = (sw - total) / 2.0;
+    std::array::from_fn(|i| [(x0 + i as f32 * (w + gap)).round(), y.round(), w.round(), h.round()])
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -300,7 +317,11 @@ impl TitleLook {
                     // leaves its glow in the logo's crystal.
                     let lead = (p.fade_out + 2.5).min(p.seconds);
                     let t = ((at - (p.seconds - lead)) / lead).clamp(0.0, 1.0);
-                    flare = (t * 1.15).min(1.0).powf(1.6) * (1.0 - ((t - 0.85) / 0.15).clamp(0.0, 1.0) * 0.6);
+                    // Up to full by 87 % of the way, then out by the end, so nothing is left on the black between
+                    // shots; the logo's afterglow carries it from there.
+                    let up = (t / 0.87).min(1.0).powf(1.6);
+                    let out = 1.0 - ((t - 0.87) / 0.13).clamp(0.0, 1.0);
+                    flare = up * out * out;
                     if t > 0.8 {
                         self.glow = self.glow.max((t - 0.8) / 0.2);
                     }
@@ -591,6 +612,18 @@ mod tests {
             assert!((wait as f32 / 60.0 - s.seconds()).abs() < 0.1, "{}", s.id);
         }
         assert!(r.shots.iter().any(|s| s.logo.as_deref() == Some("match")));
+    }
+
+    #[test]
+    fn buttons_under_the_logo() {
+        let p = LogoPlace::default();
+        for size in [[1920.0, 1080.0], [1280.0, 1024.0], [800.0, 600.0]] {
+            let r = button_rects(size, &p);
+            let logo = p.rect(size);
+            assert!(r[0][1] > logo[1] + logo[3], "{size:?}");
+            assert!(r[4][0] + r[4][2] < size[0] && r[0][0] > 0.0);
+            assert!(r[0][1] + r[0][3] < size[1] * 0.88);
+        }
     }
 
     #[test]

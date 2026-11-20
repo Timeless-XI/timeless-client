@@ -174,7 +174,7 @@ pub fn title_screen(lobby: &UiFile, style: &SpriteLib, w: f32, h: f32, st: &Titl
     for (_, &logo) in TITLE_LOGOS.iter().enumerate().filter(|(i, _)| st.owned & (1 << i) != 0 && !st.hide_art) {
         b.push_sprite(lobby, lib, logo as usize, 0.0, 0.0, sx, sy, 0xff80_8080, 0);
     }
-    if st.buttons {
+    if st.buttons && !st.hide_art {
         for i in 0..6 {
             let on = st.wardrobes >> (i + 2) & 1 != 0;
             let (x, y) = (((74 + 21 * i) as f32 * w / 640.0).trunc(), (360.0 * h / 480.0).trunc());
