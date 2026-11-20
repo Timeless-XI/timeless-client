@@ -449,6 +449,9 @@ pub struct ZoneRenderer {
     /// Settings' Light Shading (ours): false Retail (the scenery's point lights per vertex, hard cut at the range),
     /// true Smooth (per pixel, soft edge; not retail).
     pub smooth_lights: bool,
+    /// Timeless XI (`/look` "Light both sides"): characters' back faces lit by their flipped normal (zone.wgsl
+    /// `actor_normal`); retail lights them by the front normal only (the inside of a mane goes near black).
+    pub two_sided_actors: bool,
     /// Windowed mode's light boost (light_boost; zero = off).
     pub light_boost: [f32; 4],
     /// The zone's scenery culled on the GPU (render/cull.rs) when the device draws indirectly, and its passes.
@@ -2614,6 +2617,7 @@ impl ZoneRenderer {
             bump_groups,
             bump_mode: true,
             smooth_lights: false,
+            two_sided_actors: false,
             light_boost: [0.0; 4],
             scenery_bump: p.scenery_bump,
             scenery: p.scenery,
@@ -3841,7 +3845,7 @@ impl ZoneRenderer {
             area_info: [0.0; 4],
             voyage: self.voyage.to_cols_array_2d(),
             two: [[0.0; 4]; 4],
-            modes: [self.bump_mode as u32 as f32, self.smooth_lights as u32 as f32, 0.0, 0.0],
+            modes: [self.bump_mode as u32 as f32, self.smooth_lights as u32 as f32, self.two_sided_actors as u32 as f32, 0.0],
             boost: self.light_boost,
         };
         let mut clear = self.fog_color;

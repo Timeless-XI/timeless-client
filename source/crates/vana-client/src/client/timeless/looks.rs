@@ -319,6 +319,22 @@ pub struct Looks {
     pub shown: Option<(u8, u16)>,
     /// The free camera (orbits our character; the drag and wheel steer it).
     pub cam: FreeCam,
+    /// Characters' back faces lit by their flipped normal (the inside of manes and hair not near black; render
+    /// `two_sided_actors`). On unless turned off (`timeless-light.json`), for every character on this PC.
+    pub light_both_sides: bool,
+    light_loaded: bool,
+    /// The window's "Hold to see retail lighting" is held (both sides off while held).
+    pub hold_retail: bool,
+}
+
+fn light_path() -> std::path::PathBuf {
+    crate::config::config_path().with_file_name("timeless-light.json")
+}
+
+/// "Light both sides" changed (the window): kept for every character on this PC.
+pub fn set_light_both_sides(l: &mut Looks, on: bool) {
+    l.light_both_sides = on;
+    let _ = std::fs::write(light_path(), if on { "{\"both_sides\": true}" } else { "{\"both_sides\": false}" });
 }
 
 /// The free camera: around our character's head, `yaw` from its front, `pitch` up, `dist` away, `height` (0 feet .. 1
@@ -723,13 +739,22 @@ impl Looks {
     }
 }
 
-/// `/look` (also `/appearance`): opens or closes the window; `/look on|off`, `/look reset`.
+/// `/look` (also `/appearance`): opens or closes the window; `/look on|off`, `/look reset`, `/look light [on|off]`.
 pub fn command(w: &mut World, args: &[&str]) {
     match args.first().map(|a| a.to_ascii_lowercase()) {
         Some(a) if a == "on" || a == "off" => {
             let before = w.looks.settings.clone();
             w.looks.settings.on = a == "on";
             w.looks.changed(&before);
+        }
+        // `/look light on|off`: "Light both sides" (lighting compare without the window).
+        Some(a) if a == "light" => {
+            let on = match args.get(1).map(|x| x.to_ascii_lowercase()) {
+                Some(x) if x == "on" => true,
+                Some(x) if x == "off" => false,
+                _ => !w.looks.light_both_sides,
+            };
+            set_light_both_sides(&mut w.looks, on);
         }
         Some(a) if a == "reset" => {
             let before = w.looks.settings.clone();
@@ -835,6 +860,10 @@ pub fn apply(gpu: &crate::render::Gpu, w: &mut World, r: &crate::render::ZoneRen
     {
         l.dirty_save = None;
         l.save();
+    }
+    if !l.light_loaded {
+        l.light_loaded = true;
+        l.light_both_sides = !std::fs::read_to_string(light_path()).is_ok_and(|t| t.contains("false"));
     }
     l.face = w.look_base.get(&w.my_id).map(|lk| (lk.race, lk.face));
     l.shown = l.preview.or(l.face).map(|(r, f)| (r, if l.settings.on || l.preview.is_some() { model_face(r, f) } else { f }));

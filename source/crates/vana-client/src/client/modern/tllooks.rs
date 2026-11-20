@@ -132,6 +132,10 @@ impl super::Modern {
                         .id_salt("tl looks cam")
                         .default_open(false)
                         .show(ui, |ui| camera_ui(ui, w));
+                    egui::CollapsingHeader::new(RichText::new("Lighting").strong().color(gold()))
+                        .id_salt("tl looks light")
+                        .default_open(false)
+                        .show(ui, |ui| light_ui(ui, w));
                     ui.separator();
                     let has = shown.map_or(looks::Has { iris: true, lips: true, nose: true }, |(r, f)| looks::layers_of(r, f));
                     ui.add_enabled_ui(s.on, |ui| body(ui, &mut s, has));
@@ -276,6 +280,24 @@ fn preview_ui(ui: &mut egui::Ui, w: &World, out: &mut Option<Option<(u8, u16)>>)
                 }
             }
         });
+    }
+}
+
+/// "Light both sides" and its compare button (hold: the retail lighting while held).
+fn light_ui(ui: &mut egui::Ui, w: &mut World) {
+    let mut on = w.looks.light_both_sides;
+    if ui.checkbox(&mut on, RichText::new("Light both sides of hair and clothes").color(text())).changed() {
+        looks::set_light_both_sides(&mut w.looks, on);
+    }
+    ui.label(
+        RichText::new("The inside of hair, manes and capes is lit like the outside instead of going dark. Every character on your screen, saved for this PC.")
+            .small()
+            .color(muted()),
+    );
+    let hold = ui.add_enabled(on, egui::Button::new(RichText::new("Hold to see retail lighting").color(text())));
+    w.looks.hold_retail = on && hold.is_pointer_button_down_on();
+    if w.looks.hold_retail {
+        ui.label(RichText::new("Retail lighting (release to compare)").small().color(gold()));
     }
 }
 

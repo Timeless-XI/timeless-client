@@ -580,11 +580,19 @@ fn fs_opaque(in: VertexOut) -> @location(0) vec4<f32> {
 
 // Characters carry no baked lighting: shade by the normal. Placeholder until the D3D8 light setup is known.
 @fragment
-fn fs_actor(in: VertexOut) -> @location(0) vec4<f32> {
-    return actor_colour(in);
+fn fs_actor(in: VertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4<f32> {
+    return actor_colour(in, ff);
 }
 
-fn actor_colour(in: VertexOut) -> vec4<f32> {
+// Timeless XI (modes.z = 1, `/look` "Light both sides"): the back of a character's triangle is lit as if it faced us
+// (its normal flipped), so the inside of hair, manes and capes isn't left at the ambient level (near black at night).
+// Retail lights it by the front normal only.
+fn actor_normal(in: VertexOut, ff: bool) -> vec3<f32> {
+    let n = normalize(in.normal);
+    return select(n, -n, u.modes.z > 0.5 && !ff);
+}
+
+fn actor_colour(in: VertexOut, ff: bool) -> vec4<f32> {
     let texel = textureSample(tex, samp, in.uv);
     if (texel.a < 0.3) {
         discard;
@@ -592,9 +600,9 @@ fn actor_colour(in: VertexOut) -> vec4<f32> {
     // Vertex alpha carries the model colour alpha (0x80 = 1.0).
     let alpha = clamp(in.color.a * 2.0, 0.0, 1.0);
     if (u.sun.w > 0.5) {
-        return vec4<f32>(lit_actor(in, texel).rgb, alpha);
+        return vec4<f32>(lit_actor(in, texel, ff).rgb, alpha);
     }
-    let diffuse = max(dot(normalize(in.normal), normalize(-u.light.xyz)), 0.0);
+    let diffuse = max(dot(actor_normal(in, ff), normalize(-u.light.xyz)), 0.0);
     let lit = texel.rgb * (u.light.w + (1.0 - u.light.w) * diffuse) * in.tint;
     return vec4<f32>(shade(in, vec4<f32>(lit, 1.0)).rgb, alpha);
 }
@@ -602,8 +610,8 @@ fn actor_colour(in: VertexOut) -> vec4<f32> {
 // A faded actor's offscreen pass (FUN_1002b6e0 with FUN_1001d240 on): drawn opaque, alpha test only (ALPHAREF 0x45,
 // TFACTOR alpha fixed 0x80), into a target cleared to 0; render_faded then blends it as one quad.
 @fragment
-fn fs_actor_solid(in: VertexOut) -> @location(0) vec4<f32> {
-    let c = actor_colour(in);
+fn fs_actor_solid(in: VertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4<f32> {
+    let c = actor_colour(in, ff);
     return vec4<f32>(c.rgb, 1.0);
 }
 
@@ -763,7 +771,7 @@ fn fs_bump(in: VertexOut) -> @location(0) vec4<f32> {
 // Actors: no vertex colour; material diffuse 0.5, ambient 0x80 / 128 = 1 (DAT_10346380, FUN_1002a8c0). Lit by the
 // zone, or by the area they stand in (the actor update FUN_1018b9a0 and draw FUN_1018b9e0 / FUN_1018ba20 with vtable
 // +0x188's area).
-fn lit_actor(in: VertexOut, t: vec4<f32>) -> vec4<f32> {
+fn lit_actor(in: VertexOut, t: vec4<f32>, ff: bool) -> vec4<f32> {
     // Area 0x10000: model +0xa8 set (event op 0x59 7 / 8), the scenery's lights (FUN_1018b9a0 mode 0).
     let bg = (in.area & 0x10000u) != 0u;
     let slot = in.area & 0xffffu;
@@ -781,7 +789,7 @@ fn lit_actor(in: VertexOut, t: vec4<f32>) -> vec4<f32> {
         fog = a.fog.xy;
     }
     color = boost(color);
-    let ndl = max(dot(normalize(in.normal), -sun), 0.0);
+    let ndl = max(dot(actor_normal(in, ff), -sun), 0.0);
     // D3DRS_AMBIENT (ambient_rs); the target flash mixes those bytes toward 220 and scales the fog colour
     // (FUN_100c94a0).
     let amb = floor(mix(ambient_rs(ambient), vec3<f32>(220.0), in.flash.x)) / 255.0;
