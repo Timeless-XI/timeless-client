@@ -377,6 +377,8 @@ fn typing_elsewhere(w: &World) -> bool {
         // Timeless XI: a hotbar slot's command line being edited in its menu.
         || w.tl_bar.menu_edit.is_some()
         || w.tl_bar.import_text.is_some()
+        // Timeless XI: a macro being written in the Actions window's Macros book.
+        || (w.tl_bar.macro_edit.is_some() && w.tl_bar.book.is_some_and(|b| b.book == 5))
 }
 
 /// A window that has the focus or blocks targeting (FUN_101585f0's T+0x74 bit 0 / T+0x6a; ours the open windows).

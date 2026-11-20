@@ -63,6 +63,55 @@ pub enum Slot {
     Misc { key: String },
     /// A gear set saved from what we wore: (equipment slot 0..15, item id) per piece, put on as /equip would.
     Gear { name: String, pieces: Vec<(u8, u16)> },
+    /// Timeless XI: a macro the player wrote (the Actions window's Macros book): up to six lines run one after another
+    /// as the game's macros run (/wait n, <wait n>, // notes), with a painted icon of their choice.
+    Macro {
+        name: String,
+        lines: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        icon: Option<String>,
+    },
+}
+
+/// Timeless XI: a macro kept in the character's macro list (the Macros book), from which it goes onto slots.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MacroDef {
+    pub name: String,
+    pub lines: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+}
+
+/// A macro's limits, as the game's own: a name of 16 characters, six lines of 60.
+pub const MACRO_NAME: usize = 16;
+pub const MACRO_LINES: usize = 6;
+pub const MACRO_LINE: usize = 60;
+/// The icon a macro gets until one is picked.
+pub const MACRO_ICON: &str = "misc_quests";
+
+impl MacroDef {
+    pub fn slot(&self) -> Slot {
+        Slot::Macro { name: self.name.clone(), lines: self.lines.clone(), icon: self.icon.clone() }
+    }
+
+    /// Trimmed to the limits: name and lines cut, empty lines after the last one dropped.
+    pub fn tidy(mut self) -> Self {
+        self.name = self.name.trim().chars().take(MACRO_NAME).collect();
+        self.lines =
+            self.lines.iter().take(MACRO_LINES).map(|l| l.trim_end().chars().take(MACRO_LINE).collect()).collect();
+        while self.lines.last().is_some_and(|l: &String| l.trim().is_empty()) {
+            self.lines.pop();
+        }
+        self
+    }
+}
+
+/// The macro being written or changed in the Macros book: the name it had (none: a new one) and its text so far.
+#[derive(Clone, Debug, Default)]
+pub struct MacroEdit {
+    pub was: Option<String>,
+    pub def: MacroDef,
+    pub note: Option<String>,
 }
 
 /// Each bar's pages (Shift + 1..3 for bar 1, Shift + the wheel over any bar).
@@ -175,6 +224,9 @@ struct SaveFile {
     cross: bool,
     #[serde(default = "yes")]
     mouseover: bool,
+    /// Timeless XI: the macros the player wrote (the Macros book).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    macros: Vec<MacroDef>,
 }
 
 fn yes() -> bool {
@@ -282,6 +334,9 @@ pub struct Hotbar {
     pub menu_sub: u8,
     /// What the menu's line is: 0 a command, 1 a new gear set's name, 2 a set's new name.
     pub menu_mode: u8,
+    /// Timeless XI: the macros the player wrote, and the one open in the Macros book's editor.
+    pub macros: Vec<MacroDef>,
+    pub macro_edit: Option<MacroEdit>,
 }
 
 /// A character's name as it goes in file names.
@@ -421,6 +476,7 @@ impl Hotbar {
         self.scale = f.scale.clamp(0.75, 1.5);
         self.opacity = f.opacity.clamp(0.3, 1.0);
         self.fade = f.fade;
+        self.macros = f.macros;
         let version = f.version;
         if f.version < 2 {
             self.shared_on = [true; BARS];
@@ -448,7 +504,47 @@ impl Hotbar {
             shared_on: self.shared_on.to_vec(),
             bars: to_rows(&self.shared),
             jobs: self.jobs.iter().map(|(j, b)| (j.to_string(), to_rows(b))).collect(),
+            macros: self.macros.clone(),
         }
+    }
+
+    /// Timeless XI: keeps a macro written in the Macros book (replacing the one called `was`, or one of the same name)
+    /// and updates every slot holding it, on every job's bars and page. Refused (with why): no name, no lines, or the
+    /// name of another macro (a new one may not take an old one's name).
+    pub fn save_macro(&mut self, was: Option<&str>, def: MacroDef) -> Result<(), &'static str> {
+        let def = def.tidy();
+        if def.name.is_empty() {
+            return Err("Give the macro a name.");
+        }
+        if def.lines.iter().all(|l| l.trim().is_empty()) {
+            return Err("Write at least one line.");
+        }
+        if was != Some(def.name.as_str()) && self.macros.iter().any(|m| m.name == def.name) {
+            return Err("Another macro has that name.");
+        }
+        let old = was.unwrap_or(&def.name).to_string();
+        match self.macros.iter().position(|m| m.name == old) {
+            Some(i) => self.macros[i] = def.clone(),
+            None => self.macros.push(def.clone()),
+        }
+        let new = def.slot();
+        let rows = self.shared.iter_mut().chain(self.jobs.values_mut().flat_map(|r| r.iter_mut()));
+        for row in rows {
+            for s in row.iter_mut() {
+                if matches!(s, Some(Slot::Macro { name, .. }) if *name == old) {
+                    *s = Some(new.clone());
+                }
+            }
+        }
+        self.refresh();
+        self.save();
+        Ok(())
+    }
+
+    /// Timeless XI: drops a macro from the list (slots holding it keep their copy).
+    pub fn delete_macro(&mut self, name: &str) {
+        self.macros.retain(|m| m.name != name);
+        self.save();
     }
 
     /// A copy of the bars as saved now, kept beside the save file (the newest few).
@@ -461,7 +557,8 @@ impl Hotbar {
         while backups(&self.owner).iter().any(|b| b.1 == at) {
             at += 1;
         }
-        let p = crate::config::config_path().with_file_name(format!("timeless-hotbar-{}.bak-{at}.json", safe(&self.owner)));
+        let p =
+            crate::config::config_path().with_file_name(format!("timeless-hotbar-{}.bak-{at}.json", safe(&self.owner)));
         match serde_json::to_string_pretty(&self.file()) {
             Ok(text) => {
                 if let Err(e) = std::fs::write(&p, text) {
@@ -477,7 +574,9 @@ impl Hotbar {
 
     /// The bars from a backup (what they are now backed up first). False when it can't be read.
     pub fn restore(&mut self, from: &std::path::Path) -> bool {
-        let Ok(f) = std::fs::read_to_string(from).map_err(|_| ()).and_then(|t| serde_json::from_str::<SaveFile>(&t).map_err(|_| ()))
+        let Ok(f) = std::fs::read_to_string(from)
+            .map_err(|_| ())
+            .and_then(|t| serde_json::from_str::<SaveFile>(&t).map_err(|_| ()))
         else {
             return false;
         };
@@ -855,17 +954,25 @@ pub fn key(w: &mut World, key: egui::Key, m: egui::Modifiers, numpad: bool) -> b
 fn escape(w: &mut World) -> bool {
     let h = &w.tl_bar;
     let game = super::super::modern::focus_panel(w).is_some() || w.map.is_some();
-    let ours = [(h.picking.is_some(), h.picker_at, 0u8), (h.book.is_some(), h.book_at, 1), (h.menu.is_some(), h.menu_at, 2), (h.layout, h.layout_at, 3)]
-        .into_iter()
-        .filter(|(open, _, _)| *open)
-        .max_by_key(|(_, at, _)| *at);
+    let ours = [
+        (h.picking.is_some(), h.picker_at, 0u8),
+        (h.book.is_some(), h.book_at, 1),
+        (h.menu.is_some(), h.menu_at, 2),
+        (h.layout, h.layout_at, 3),
+    ]
+    .into_iter()
+    .filter(|(open, _, _)| *open)
+    .max_by_key(|(_, at, _)| *at);
     let Some((_, at, which)) = ours else { return false };
     if game && h.game_at.is_some_and(|g| at.is_none_or(|a| g > a)) {
         return false;
     }
     match which {
         0 => w.tl_bar.picking = None,
-        1 => w.tl_bar.book = None,
+        1 => {
+            w.tl_bar.book = None;
+            w.tl_bar.macro_edit = None;
+        }
         2 => {
             w.tl_bar.menu = None;
             w.tl_bar.menu_edit = None;
@@ -1100,6 +1207,12 @@ pub fn run_to(w: &mut World, s: &Slot, over: Option<String>) {
             let list = pieces.iter().map(|&(slot, id)| (slot as usize, Piece::Item(id))).collect();
             apply(w, None, Action::Equip(list));
         }
+        // Timeless XI: the game's macro runner takes the lines (one a frame, its waits), replacing a running macro.
+        Slot::Macro { lines, .. } => {
+            if let Some(m) = w.macros.as_mut() {
+                m.start_lines(lines);
+            }
+        }
     }
 }
 
@@ -1138,6 +1251,7 @@ pub fn name(w: &World, s: &Slot) -> String {
         Slot::Attack => "Attack".into(),
         Slot::Misc { key } => super::book::misc_names().get(key.as_str()).copied().unwrap_or("Action").to_string(),
         Slot::Gear { name, .. } => name.clone(),
+        Slot::Macro { name, .. } => name.clone(),
     }
 }
 
@@ -1170,7 +1284,12 @@ pub fn recast(w: &World, s: &Slot) -> (f32, f32) {
                 .unwrap_or(left);
             (left, total.max(left))
         }
-        Slot::Item { .. } | Slot::Command { .. } | Slot::Attack | Slot::Misc { .. } | Slot::Gear { .. } => (0.0, 0.0),
+        Slot::Item { .. }
+        | Slot::Command { .. }
+        | Slot::Attack
+        | Slot::Misc { .. }
+        | Slot::Gear { .. }
+        | Slot::Macro { .. } => (0.0, 0.0),
     }
 }
 
@@ -1351,6 +1470,7 @@ pub fn why(w: &World, s: &Slot) -> Option<Why> {
             reach(w, s, 1, None)
         }
         Slot::Attack if !engaged(w) && w.target.is_none() => Some(Why::Target),
+        Slot::Macro { .. } if w.macros.is_none() => Some(Why::Act),
         Slot::Gear { pieces, .. } => {
             if halted(w) {
                 Some(Why::Act)
@@ -1409,8 +1529,13 @@ pub fn gear_missing(w: &World, pieces: &[(u8, u16)]) -> Vec<u16> {
     }
     let mut out = Vec::new();
     for (&id, &n) in &need {
-        let have: u32 =
-            w.inv.slots.iter().filter(|((bag, _), (item, _))| *item == id && WEAR.contains(bag)).map(|(_, (_, c))| *c).sum();
+        let have: u32 = w
+            .inv
+            .slots
+            .iter()
+            .filter(|((bag, _), (item, _))| *item == id && WEAR.contains(bag))
+            .map(|(_, (_, c))| *c)
+            .sum();
         for _ in have..n {
             out.push(id);
         }
@@ -1420,8 +1545,8 @@ pub fn gear_missing(w: &World, pieces: &[(u8, u16)]) -> Vec<u16> {
 
 /// The equipment slots' names, by slot (0 Main .. 15 Back).
 pub const GEAR_SLOTS: [&str; 16] = [
-    "Main", "Sub", "Range", "Ammo", "Head", "Body", "Hands", "Legs", "Feet", "Neck", "Waist", "Ear 1", "Ear 2", "Ring 1",
-    "Ring 2", "Back",
+    "Main", "Sub", "Range", "Ammo", "Head", "Body", "Hands", "Legs", "Feet", "Neck", "Waist", "Ear 1", "Ear 2",
+    "Ring 1", "Ring 2", "Back",
 ];
 
 /// The pet bar's jobs: Beastmaster, Summoner, Puppetmaster (Dragoon's wyvern has no bar).
@@ -1617,6 +1742,7 @@ impl Slot {
             Slot::Attack => "attack".into(),
             Slot::Misc { key } => format!("m{key}"),
             Slot::Gear { name, .. } => format!("g{name}"),
+            Slot::Macro { name, .. } => format!("x{name}"),
         }
     }
 }
@@ -1624,6 +1750,46 @@ impl Slot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn macros_save_update_their_slots_and_round_trip() {
+        let mut h = Hotbar::default();
+        let def = MacroDef {
+            name: "Heal".into(),
+            lines: vec!["/ma \"Cure\" <stpc>".into(), "/wait 3".into(), "".into()],
+            icon: None,
+        };
+        assert_eq!(h.save_macro(None, MacroDef { name: " ".into(), ..def.clone() }), Err("Give the macro a name."));
+        assert_eq!(
+            h.save_macro(None, MacroDef { lines: vec!["".into()], ..def.clone() }),
+            Err("Write at least one line.")
+        );
+        h.save_macro(None, def.clone()).unwrap();
+        assert_eq!(h.macros[0].lines.len(), 2, "trailing empty lines go");
+        h.set(0, 3, Some(h.macros[0].slot()));
+        // Renamed and changed: the list entry and the slot follow.
+        let new = MacroDef {
+            name: "Big Heal".into(),
+            lines: vec!["/ma \"Cure III\" <stpc>".into()],
+            icon: Some("sp_cure3".into()),
+        };
+        h.save_macro(Some("Heal"), new.clone()).unwrap();
+        assert_eq!(h.macros, vec![new.clone()]);
+        assert_eq!(h.bars[0][3], Some(new.slot()));
+        assert_eq!(
+            h.save_macro(None, MacroDef { name: "Big Heal".into(), ..def }),
+            Err("Another macro has that name.")
+        );
+        // The save file keeps the list and the slot.
+        let text = serde_json::to_string(&h.file()).unwrap();
+        let mut back = Hotbar::default();
+        back.load(serde_json::from_str(&text).unwrap());
+        assert_eq!(back.macros, vec![new.clone()]);
+        assert_eq!(back.bars[0][3], Some(new.slot()));
+        back.delete_macro("Big Heal");
+        assert!(back.macros.is_empty());
+        assert_eq!(back.bars[0][3], Some(new.slot()), "a slot keeps its copy");
+    }
 
     #[test]
     fn keys_and_modifiers() {
@@ -1800,7 +1966,10 @@ mod tests {
         let text = serde_json::to_string(&h.file()).unwrap();
         let mut back = Hotbar { job: 3, ..Default::default() };
         back.load(serde_json::from_str(&text).unwrap());
-        assert_eq!(back.bars[1][0], Some(Slot::Gear { name: "Nuke".into(), pieces: vec![(4, 12345), (13, 1), (14, 1)] }));
+        assert_eq!(
+            back.bars[1][0],
+            Some(Slot::Gear { name: "Nuke".into(), pieces: vec![(4, 12345), (13, 1), (14, 1)] })
+        );
         assert_eq!(key_text(1, 2), "Ctrl+3");
         h.locked = true;
         assert_eq!(h.add_next(Slot::Attack), None);

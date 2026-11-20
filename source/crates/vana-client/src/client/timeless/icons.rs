@@ -26,6 +26,26 @@ fn files() -> &'static HashMap<&'static str, &'static [u8]> {
     FILES.get_or_init(|| files::FILES.iter().copied().collect())
 }
 
+/// Every embedded icon's name.
+pub fn names() -> impl Iterator<Item = &'static str> {
+    files::FILES.iter().map(|(n, _)| *n)
+}
+
+/// The icons a macro's writer can pick from: the Misc Book, gathering, weapon types, job emblems and the elements.
+pub fn macro_choices() -> Vec<&'static str> {
+    let mut v: Vec<&'static str> = names()
+        .filter(|n| {
+            n.starts_with("misc_")
+                || n.starts_with("helm_")
+                || n.starts_with("ws_")
+                || n.starts_with("ja_job_")
+                || n.ends_with('1') && n.starts_with("sp_")
+        })
+        .collect();
+    v.sort();
+    v
+}
+
 /// A spell's icon name.
 pub fn spell(id: u16) -> Option<&'static str> {
     map().get(&format!("s{id}")).copied()

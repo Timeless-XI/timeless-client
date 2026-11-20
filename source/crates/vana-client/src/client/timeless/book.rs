@@ -14,7 +14,7 @@ pub const JOBS: [&str; 23] = [
 ];
 
 /// The window's books (tabs) and the Ability Book's pages.
-pub const BOOKS: [&str; 5] = ["Ability Book", "Spell Book", "Item Book", "Misc Book", "Commands"];
+pub const BOOKS: [&str; 6] = ["Ability Book", "Spell Book", "Item Book", "Misc Book", "Commands", "Macros"];
 pub const ABILITY_PAGES: [&str; 3] = ["Job Abilities", "Weapon Skills", "Blood Pacts"];
 
 /// The Blood Pact lists (ability record types under Pet Commands): Rage, Ward.
@@ -411,6 +411,8 @@ pub struct BookState {
     pub magic: usize,
     /// The Blood Pacts page's list (PACTS index).
     pub pact: usize,
+    /// Timeless XI: the Macros book's list: 0 the player's macros, 1 the game's macro set now.
+    pub macros: usize,
 }
 
 /// The Ability Book's pages by job: the job's abilities in level order.

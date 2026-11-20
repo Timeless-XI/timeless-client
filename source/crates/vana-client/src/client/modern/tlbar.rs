@@ -972,7 +972,25 @@ pub(super) fn icon(p: &Panels, w: &World, s: &Slot) -> Option<(egui::TextureId, 
             let s = p.m.art.sprite(&format!("icons/{}", m.icon))?;
             Some((s.tex, s.uv))
         }
+        // Timeless XI: a macro shows the painted icon its writer picked.
+        Slot::Macro { icon, .. } => p.m.timeless_icon(p.ctx, icon.as_deref().unwrap_or(hotbar::MACRO_ICON)),
     }
+}
+
+/// Timeless XI: opens the Actions window on the Macros book with `def` in its editor (none: a new macro).
+pub(super) fn open_macro_editor(w: &mut World, def: Option<hotbar::MacroDef>) {
+    let mut st =
+        w.tl_bar.book.unwrap_or(super::super::timeless::book::BookState { job: w.tl_bar.job, ..Default::default() });
+    st.book = 5;
+    st.macros = 0;
+    w.tl_bar.book = Some(st);
+    w.tl_bar.book_at = Some(std::time::Instant::now());
+    w.tl_bar.macro_edit = Some(hotbar::MacroEdit {
+        was: def.as_ref().map(|d| d.name.clone()),
+        def: def.unwrap_or_else(|| hotbar::MacroDef { lines: vec![String::new()], ..Default::default() }),
+        note: None,
+    });
+    w.sounds.push(crate::audio::Ui::Select as u32);
 }
 
 /// Timeless XI: a Misc Book key's painted Timeless View icon.
@@ -1130,7 +1148,7 @@ fn slot(
     if show_key {
         outlined(painter, r.min + vec2(4.0, 2.0), Align2::LEFT_TOP, key, 11.0, m.theme.color("text"));
     }
-    if let Some(Slot::Gear { name, .. }) = &v.slot {
+    if let Some(Slot::Gear { name, .. } | Slot::Macro { name, .. }) = &v.slot {
         let short: String = name.chars().take(7).collect();
         outlined(painter, pos2(r.center().x, r.max.y - 2.0), Align2::CENTER_BOTTOM, &short, 9.5, m.theme.color("text"));
     }
@@ -1338,6 +1356,8 @@ pub(super) fn outlined(painter: &egui::Painter, at: Pos2, align: Align2, text: &
 enum MenuAct {
     Change,
     EditStart,
+    /// Timeless XI: open the slot's macro in the Macros book's editor.
+    MacroEdit,
     /// Name a new gear set from what we wear (1) or rename this one (2).
     GearStart(u8),
     GearUpdate,
@@ -1430,6 +1450,8 @@ fn menu(p: &mut Panels, w: &mut World, opened: bool) {
                         ui.separator();
                     } else if matches!(slot, Some(Slot::Command { .. })) && row(ui, "Edit Command...") {
                         act = Some(MenuAct::EditStart);
+                    } else if matches!(slot, Some(Slot::Macro { .. })) && row(ui, "Edit Macro...") {
+                        act = Some(MenuAct::MacroEdit);
                     }
                     if edit.is_none() {
                         if let Some(Slot::Gear { .. }) = &slot {
@@ -1527,6 +1549,13 @@ fn menu(p: &mut Panels, w: &mut World, opened: bool) {
             w.tl_bar.picking = Some((b, k));
             w.tl_bar.picker_at = Some(Instant::now());
             w.sounds.push(crate::audio::Ui::Select as u32);
+        }
+        MenuAct::MacroEdit => {
+            if let Some(Slot::Macro { name, lines, icon }) = &slot {
+                let def = hotbar::MacroDef { name: name.clone(), lines: lines.clone(), icon: icon.clone() };
+                open_macro_editor(w, Some(def));
+            }
+            w.tl_bar.menu = None;
         }
         MenuAct::EditStart => {
             if let Some(Slot::Command { line }) = &slot {

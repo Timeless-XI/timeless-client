@@ -537,6 +537,16 @@ impl Macros {
         self.run = self.recs.get(n).map(|m| Running { m: m.clone(), line: 0, wait: None, by_mod: false });
     }
 
+    /// Timeless XI: runs lines that aren't in a set (a Timeless hotbar macro) from the first, as `start` runs one of the
+    /// set's: up to six lines of 60 bytes, replacing a running macro.
+    pub fn start_lines(&mut self, lines: &[String]) {
+        let mut m = Macro::default();
+        for (k, l) in lines.iter().take(6).enumerate() {
+            m.set_line(k, &crate::dat::font::encode_sjis(l));
+        }
+        self.run = Some(Running { m, line: 0, wait: None, by_mod: false });
+    }
+
     /// As start, for a mod (actions.macro).
     pub fn start_for_mod(&mut self, n: usize) {
         self.start(n);

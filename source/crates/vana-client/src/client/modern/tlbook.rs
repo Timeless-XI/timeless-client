@@ -43,6 +43,12 @@ struct Mouse {
     hover: Option<(usize, Pos2)>,
     items: bool,
     close: bool,
+    /// Timeless XI, the Macros book: a tile right-clicked (edit it), New Macro, and the editor's buttons.
+    edit: Option<usize>,
+    new_macro: bool,
+    save_macro: bool,
+    delete_macro: bool,
+    cancel_macro: bool,
 }
 
 pub fn draw(p: &mut Panels, w: &mut World) {
@@ -65,6 +71,13 @@ pub fn draw(p: &mut Panels, w: &mut World) {
         _ => String::new(),
     };
     let mut mouse = Mouse::default();
+    // Timeless XI: the macro editor's text is changed in place while the window draws.
+    let mut edit = w.tl_bar.macro_edit.take();
+    let choices: Vec<(&'static str, Option<(egui::TextureId, Rect)>)> = if st.book == 5 && edit.is_some() {
+        super::super::timeless::icons::macro_choices().into_iter().map(|n| (n, m.timeless_icon(&ctx, n))).collect()
+    } else {
+        Vec::new()
+    };
     p.panel(
         "tl_actions",
         Some(Title {
@@ -111,6 +124,7 @@ pub fn draw(p: &mut Panels, w: &mut World) {
             }
             match st.book {
                 2 => item_book(ui, m, &mut mouse),
+                5 => macro_book(ui, m, &st, &tiles, &mut edit, &choices, &mut mouse),
                 _ => {
                     egui::ScrollArea::vertical()
                         .id_salt(("tl book", st.book, st.page, st.job, st.weapon, st.magic))
@@ -173,6 +187,7 @@ pub fn draw(p: &mut Panels, w: &mut World) {
             (0, 2) => st.pact = k,
             (0, _) => st.weapon = k,
             (1, _) => st.magic = k,
+            (5, _) => st.macros = k,
             _ => {}
         }
         w.sounds.push(crate::audio::Ui::Cursor as u32);
@@ -196,6 +211,48 @@ pub fn draw(p: &mut Panels, w: &mut World) {
     if mouse.items {
         book::run_misc(w, "items");
     }
+    // Timeless XI: the Macros book's editor.
+    if mouse.new_macro {
+        edit = Some(hotbar::MacroEdit {
+            def: hotbar::MacroDef { lines: vec![String::new()], ..Default::default() },
+            ..Default::default()
+        });
+        w.sounds.push(crate::audio::Ui::Select as u32);
+    }
+    if let Some(k) = mouse.edit
+        && let Some(Slot::Macro { name, lines, icon }) = tiles.get(k).map(|t| &t.slot)
+    {
+        // The player's own: changed in place; one from the game's set: a new macro of the player's from it.
+        let def = hotbar::MacroDef { name: name.clone(), lines: lines.clone(), icon: icon.clone() };
+        let was = (st.macros == 0).then(|| name.clone());
+        edit = Some(hotbar::MacroEdit { was, def, note: None });
+        w.sounds.push(crate::audio::Ui::Select as u32);
+    }
+    if mouse.cancel_macro {
+        edit = None;
+        w.sounds.push(crate::audio::Ui::Cancel as u32);
+    }
+    if mouse.delete_macro
+        && let Some(e) = edit.take()
+    {
+        if let Some(was) = &e.was {
+            w.tl_bar.delete_macro(was);
+        }
+        w.sounds.push(crate::audio::Ui::Cancel as u32);
+    }
+    if mouse.save_macro
+        && let Some(mut e) = edit.take()
+    {
+        match w.tl_bar.save_macro(e.was.as_deref(), e.def.clone()) {
+            Ok(()) => w.sounds.push(crate::audio::Ui::Select as u32),
+            Err(why) => {
+                e.note = Some(why.to_string());
+                edit = Some(e);
+                w.sounds.push(crate::audio::Ui::Error as u32);
+            }
+        }
+    }
+    w.tl_bar.macro_edit = edit;
     w.tl_bar.book = if mouse.close { None } else { Some(st) };
     if mouse.close {
         w.sounds.push(crate::audio::Ui::Cancel as u32);
@@ -282,8 +339,10 @@ fn page(p: &Panels, w: &World, st: &BookState, main: u8, sub: u8, jobs: &[u8]) -
                     continue;
                 }
                 let recast = crate::dat::recasts::ability(a.id).map(recast_text).unwrap_or_default();
-                let body =
-                    format!("{}{recast}\nClick to add, or drag onto a slot.", book::levels_text(&book::ability_levels(a.id)));
+                let body = format!(
+                    "{}{recast}\nClick to add, or drag onto a slot.",
+                    book::levels_text(&book::ability_levels(a.id))
+                );
                 tiles.push(Tile {
                     icon: icon(p, w, &s),
                     caption: format!("Lv. {}", a.level),
@@ -420,9 +479,182 @@ fn page(p: &Panels, w: &World, st: &BookState, main: u8, sub: u8, jobs: &[u8]) -
                 });
             }
         }
+        (5, _) => {
+            // Timeless XI: the player's macros, or the game's macro set now (to put on a bar or copy into a new one).
+            let set = w.macros.as_ref().map(|m| format!("Game Set: {} · {}", m.book_title(m.book), m.set + 1));
+            chips.push(Chip { label: "My Macros".into(), on: st.macros == 0, mark: false });
+            chips.push(Chip { label: set.unwrap_or_else(|| "Game Set".into()), on: st.macros == 1, mark: false });
+            let defs: Vec<hotbar::MacroDef> = if st.macros == 0 {
+                w.tl_bar.macros.clone()
+            } else {
+                w.macros
+                    .as_ref()
+                    .map(|m| {
+                        m.recs
+                            .iter()
+                            .filter(|r| !r.is_empty())
+                            .map(|r| hotbar::MacroDef {
+                                name: r.title(),
+                                lines: (0..6)
+                                    .map(|k| crate::dat::font::decode_sjis(r.line(k)))
+                                    .take_while(|l| !l.is_empty())
+                                    .collect(),
+                                icon: None,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            for d in defs {
+                let s = d.slot();
+                let lines = d.lines.join("\n");
+                tiles.push(Tile {
+                    icon: icon(p, w, &s),
+                    caption: d.name.clone(),
+                    have: true,
+                    title: d.name.clone(),
+                    body: format!(
+                        "{lines}\nClick to add, drag onto a slot, right-click to {}.",
+                        if st.macros == 0 { "edit" } else { "copy into a macro of yours" }
+                    ),
+                    slot: s,
+                });
+            }
+        }
         _ => {}
     }
     (chips, tiles)
+}
+
+/// Timeless XI: the Macros book. Tiles of the player's macros (or the game's set now) as the other books', a New
+/// Macro button, and the editor: a name, six lines (the game's macro syntax: /wait n, <wait n>, // notes), an icon.
+fn macro_book(
+    ui: &mut egui::Ui,
+    m: &super::Modern,
+    st: &BookState,
+    tiles: &[Tile],
+    edit: &mut Option<hotbar::MacroEdit>,
+    choices: &[(&'static str, Option<(egui::TextureId, Rect)>)],
+    mouse: &mut Mouse,
+) {
+    ui.horizontal(|ui| {
+        if ui.button("New Macro").clicked() {
+            mouse.new_macro = true;
+        }
+        ui.label(
+            RichText::new(if st.macros == 0 {
+                "Right-click a macro to change it."
+            } else {
+                "The game's macros (Macro palette). Right-click one to make it a macro of yours."
+            })
+            .size(m.theme.small)
+            .color(m.theme.color("muted")),
+        );
+    });
+    ui.add_space(4.0);
+    egui::ScrollArea::vertical()
+        .id_salt(("tl macros", st.macros))
+        .max_height(CELL.y * if edit.is_some() { 2.0 } else { 5.0 })
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            if tiles.is_empty() {
+                let empty =
+                    if st.macros == 0 { "No macros yet: press New Macro to write one." } else { "This set is empty." };
+                ui.label(RichText::new(empty).color(m.theme.color("muted")));
+            }
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(2.0, 4.0);
+                for (k, t) in tiles.iter().enumerate() {
+                    let (r, resp) = ui.allocate_exact_size(CELL, Sense::click_and_drag());
+                    tile(ui.painter(), m, r, t, resp.hovered());
+                    if resp.drag_started() {
+                        mouse.drag = Some(k);
+                    }
+                    if resp.clicked() {
+                        mouse.add = Some(k);
+                    }
+                    if resp.secondary_clicked() {
+                        mouse.edit = Some(k);
+                    }
+                    if resp.hovered() {
+                        mouse.hover = Some((k, r.center_top()));
+                    }
+                }
+            });
+        });
+    let Some(e) = edit.as_mut() else { return };
+    ui.separator();
+    let title = if e.was.is_some() { "Change Macro" } else { "New Macro" };
+    ui.label(RichText::new(title).size(m.theme.ui).color(m.theme.color("gold")));
+    egui::Grid::new("tl macro edit").num_columns(2).spacing(vec2(8.0, 4.0)).show(ui, |ui| {
+        ui.label(RichText::new("Name").size(m.theme.small));
+        ui.add(egui::TextEdit::singleline(&mut e.def.name).char_limit(hotbar::MACRO_NAME).desired_width(160.0));
+        ui.end_row();
+        while e.def.lines.len() < hotbar::MACRO_LINES {
+            e.def.lines.push(String::new());
+        }
+        for (k, l) in e.def.lines.iter_mut().enumerate().take(hotbar::MACRO_LINES) {
+            ui.label(RichText::new(format!("Line {}", k + 1)).size(m.theme.small));
+            ui.add(
+                egui::TextEdit::singleline(l)
+                    .char_limit(hotbar::MACRO_LINE)
+                    .hint_text(if k == 0 {
+                        "/ma \"Cure\" <stpc>"
+                    } else if k == 1 {
+                        "/wait 3"
+                    } else {
+                        ""
+                    })
+                    .desired_width(CELL.x * 10.0 - 90.0),
+            );
+            ui.end_row();
+        }
+    });
+    ui.label(
+        RichText::new("Lines run one after another, as the game's macros: /wait n pauses, <wait n> at a line's end waits after it, // is a note.")
+            .size(m.theme.small)
+            .color(m.theme.color("muted")),
+    );
+    ui.add_space(4.0);
+    ui.label(RichText::new("Icon").size(m.theme.small));
+    egui::ScrollArea::vertical().id_salt("tl macro icons").max_height(70.0).show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(3.0, 3.0);
+            let cur = e.def.icon.clone().unwrap_or_else(|| hotbar::MACRO_ICON.to_string());
+            for (name, tex) in choices {
+                let (r, resp) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::click());
+                if let Some((t, uv)) = tex {
+                    ui.painter().image(*t, r.shrink(1.0), *uv, Color32::WHITE);
+                }
+                let edge = if *name == cur.as_str() {
+                    Stroke::new(2.0, m.theme.color("tp"))
+                } else if resp.hovered() {
+                    Stroke::new(1.4, m.theme.color("focus"))
+                } else {
+                    Stroke::new(1.0, m.theme.color("bronze"))
+                };
+                ui.painter().rect_stroke(r, CornerRadius::same(4), edge, egui::StrokeKind::Inside);
+                if resp.clicked() {
+                    e.def.icon = Some(name.to_string());
+                }
+            }
+        });
+    });
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        if ui.button("Save").clicked() {
+            mouse.save_macro = true;
+        }
+        if e.was.is_some() && ui.button("Delete").clicked() {
+            mouse.delete_macro = true;
+        }
+        if ui.button("Cancel").clicked() {
+            mouse.cancel_macro = true;
+        }
+        if let Some(n) = &e.note {
+            ui.label(RichText::new(n).size(m.theme.small).color(m.theme.color("hp")));
+        }
+    });
 }
 
 fn recast_text(secs: u32) -> String {
