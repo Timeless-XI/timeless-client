@@ -696,6 +696,29 @@ pub(super) fn run_unfiltered(w: &mut World, line: &str, mode: Mode) {
         super::timeless::angler::command(w, &args);
         return;
     }
+    // Timeless XI: /titlecam records camera keys for the Timeless title's reel (timeless/title.rs).
+    if first.eq_ignore_ascii_case("/titlecam") {
+        let args: Vec<&str> = line.split_whitespace().skip(1).collect();
+        let cam = super::App::camera(w);
+        let hour =
+            w.clock.map_or(20.0, |(gt, at)| crate::dat::weather::vana_minute(gt, at.elapsed().as_secs_f32()) / 60.0);
+        let here = w.zone.map(|z| {
+            let k = super::timeless::title::KeyJson {
+                eye: cam.eye.to_array(),
+                target: cam.target.to_array(),
+                focal: crate::dat::title::focal_of(cam.fov_y),
+                roll: 0.0,
+            };
+            (z as u32, (hour * 10.0).round() / 10.0, k)
+        });
+        let st = &mut w.tl_cam;
+        let reel = st.reel.get_or_insert_with(super::timeless::title::Reel::load);
+        let lines = super::timeless::title::cam::run(reel, &mut st.current, &args, here, &mut st.guide);
+        for l in lines {
+            super::timeless::angler::chat_note(w, &l);
+        }
+        return;
+    }
     if first.eq_ignore_ascii_case("/tfish") {
         let args: Vec<&str> = line.split_whitespace().skip(1).collect();
         if args.first().is_some_and(|a| a.eq_ignore_ascii_case("practice")) {

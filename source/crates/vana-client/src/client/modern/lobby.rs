@@ -74,6 +74,60 @@ impl Modern {
         }
     }
 
+    /// Timeless XI: the Timeless title's buttons, one row of text buttons low on the screen (`buttons` as
+    /// `title_buttons`): the glass, the label in the title serif, a steel-blue edge and soft glow on the lit one.
+    pub fn title_buttons_tl(
+        &mut self,
+        ctx: &Context,
+        window: [u32; 2],
+        scale: u32,
+        ui_k: (f32, f32),
+        buttons: &[([f32; 4], &str, bool, bool)],
+    ) {
+        self.zoom_to(ctx, window, scale);
+        let k = ctx.pixels_per_point();
+        let p =
+            ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("timeless title buttons")));
+        let hover = ctx.input(|i| i.pointer.hover_pos());
+        let focus = self.theme.color("focus");
+        for (r, label, lit, on) in buttons {
+            let rect = egui::Rect::from_min_size(
+                pos2(r[0] / (k * ui_k.0), r[1] / (k * ui_k.1)),
+                vec2(r[2] / (k * ui_k.0), r[3] / (k * ui_k.1)),
+            );
+            let hot = *on && hover.is_some_and(|h| rect.contains(h));
+            let face = if *lit || hot { "window_focused" } else { "window_normal" };
+            p.add(super::borders::window(self, face, rect));
+            if *lit {
+                for j in 1..=3 {
+                    let g = j as f32 * 2.0;
+                    p.rect_stroke(
+                        rect.expand(g),
+                        3.0 + g,
+                        egui::Stroke::new(1.5, focus.gamma_multiply(0.2 / j as f32)),
+                        egui::StrokeKind::Outside,
+                    );
+                }
+                p.rect_stroke(rect, 3.0, egui::Stroke::new(1.0, focus), egui::StrokeKind::Inside);
+            }
+            let c = if !on {
+                self.theme.color("muted")
+            } else if *lit {
+                self.theme.color("gold")
+            } else {
+                self.theme.color("text")
+            };
+            let size = (rect.height() * 0.42).clamp(self.theme.small, 24.0);
+            p.text(
+                rect.center() + vec2(0.0, 1.0),
+                Align2::CENTER_CENTER,
+                *label,
+                FontId::new(size, FontFamily::Name(super::theme::SERIF.into())),
+                c,
+            );
+        }
+    }
+
     /// The login form on the rects login_window placed (UI pixels): the frame, the labelled fields in the input art (the
     /// focused one lit, its caret), Remember password's box, the buttons; their mouse stays the form's.
     pub fn login_form(
@@ -500,13 +554,34 @@ impl Modern {
         p.add(super::borders::window(self, "window_normal", r));
         let c = super::chat::colour(colour);
         p.text(pos2(screen.center().x, cy + 1.0), Align2::CENTER_CENTER, text, FontId::proportional(size), c);
-        p.text(
-            pos2(ver.0 / (k * ui_k.0), r.min.y - 3.0),
-            Align2::LEFT_BOTTOM,
-            format!("ver.{version}"),
-            FontId::proportional(size),
-            self.theme.color("text"),
-        );
+        // Timeless XI: the Timeless title puts the game's notice the retail title art carried bottom right, with the
+        // version on the line above it, both right-aligned. (The theme's flag: `timeless_now` is only kept in the
+        // world's frame.)
+        if self.theme.timeless() {
+            let right = screen.max.x - 16.0;
+            p.text(
+                pos2(right, r.min.y - 3.0),
+                Align2::RIGHT_BOTTOM,
+                "FINAL FANTASY XI \u{a9} SQUARE ENIX CO., LTD.",
+                FontId::proportional((size * 0.85).max(11.0)),
+                self.theme.color("muted"),
+            );
+            p.text(
+                pos2(right, r.min.y - 3.0 - size * 1.35),
+                Align2::RIGHT_BOTTOM,
+                format!("ver.{version}"),
+                FontId::proportional(size),
+                self.theme.color("text"),
+            );
+        } else {
+            p.text(
+                pos2(ver.0 / (k * ui_k.0), r.min.y - 3.0),
+                Align2::LEFT_BOTTOM,
+                format!("ver.{version}"),
+                FontId::proportional(size),
+                self.theme.color("text"),
+            );
+        }
     }
 
     /// A lobby popup on retail's rect (UI pixels): the pack's frame, the text in Fira Sans above the form's size, centred

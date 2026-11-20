@@ -310,6 +310,8 @@ fn icon_size(k: usize) -> (f32, f32) {
 }
 
 pub struct GameUi {
+    /// Timeless XI: the Timeless title draws its own logo (render/screens.rs TitleState::hide_art).
+    pub hide_title_art: bool,
     data: GameUiData,
     renderer: Option<UiRenderer>,
     /// The scene depth name plates are tested against this frame (taken by render).
@@ -456,6 +458,7 @@ impl GameUi {
     pub fn new(data: GameUiData) -> Self {
         crate::render::ui::set_caption_words(caption_words(&data));
         Self {
+            hide_title_art: false,
             data,
             renderer: None,
             scene_depth: None,
@@ -728,6 +731,7 @@ impl GameUi {
             wardrobes,
             press,
             modern,
+            hide_art: self.hide_title_art,
         };
         let (b, text) = screens::title_screen(&self.data.lobby, &self.data.style, w, h, &st);
         self.batch = b;
@@ -2594,7 +2598,9 @@ impl GameUi {
             r.replace_image(gpu, mtext::TEXTURE, side, side, &rgba);
         }
         mtext::set_scale(size[1] as f32 / layout[1].max(1) as f32);
-        let c = LOBBY_CLEAR.map(|v| v as f64 / 255.0 * scene.clamp(0.0, 1.0) as f64);
+        // Timeless XI: the Timeless title clears to black between its reel's shots (retail's grey flashed white there).
+        let base = if self.hide_title_art { [0; 3] } else { LOBBY_CLEAR };
+        let c = base.map(|v| v as f64 / 255.0 * scene.clamp(0.0, 1.0) as f64);
         let clear = (!over).then_some(wgpu::Color { r: c[0], g: c[1], b: c[2], a: 1.0 });
         r.fade = fade;
         r.set_scene_depth(gpu, self.scene_depth.take().as_ref());

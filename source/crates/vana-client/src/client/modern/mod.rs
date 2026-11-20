@@ -58,6 +58,8 @@ mod tabs;
 mod theme;
 /// Timeless XI: the Timeless interface's hotbars and their Actions window.
 mod tlbar;
+// Timeless XI: the Timeless title's logo and /titlecam's guide.
+mod tltitle;
 mod tlbook;
 // Timeless XI: the Timeless Fishing bar game on screen (every interface).
 mod tlfish;
@@ -431,6 +433,7 @@ impl Modern {
         hud::draw(&mut p, w);
         // Timeless XI: the hotbars and their picker (Interface = Timeless).
         tlbar::draw(&mut p, w);
+        tltitle::guide(&mut p, w);
         favs::draw(&mut p, w);
         command::draw(&mut p, w);
         combat::draw(&mut p, w);

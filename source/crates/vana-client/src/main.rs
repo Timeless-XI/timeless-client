@@ -50,6 +50,8 @@ mod render;
 mod secret;
 mod sounddump;
 mod texpack;
+// Timeless XI: reel-shot, the Timeless title reel's frames offscreen.
+mod tlreel;
 mod uishot;
 mod voice;
 
@@ -187,6 +189,26 @@ enum Cmd {
         x: f32,
         #[arg(allow_hyphen_values = true)]
         z: f32,
+    },
+    /// Timeless XI: frames of a Timeless title reel shot (timeless-title.json, else the built-in reel) with its filter
+    /// and the logo.
+    ReelShot {
+        shot: String,
+        #[arg(long)]
+        out_dir: PathBuf,
+        /// Samples per move (t = 0..1).
+        #[arg(long, default_value_t = 3)]
+        steps: u32,
+        /// memory, film, dusk or off (default: the reel's).
+        #[arg(long)]
+        filter: Option<String>,
+        /// Leave the logo out.
+        #[arg(long)]
+        no_logo: bool,
+        #[arg(long, default_value_t = 1600)]
+        width: u32,
+        #[arg(long, default_value_t = 900)]
+        height: u32,
     },
     /// Render the title flyover (file 23): every camera op of one scheduler (mov1..mov8, ex1a..) at a few times.
     FlyoverShot {
@@ -2368,6 +2390,9 @@ fn main() -> Result<()> {
         }
         Cmd::DialogueShot { out, zone, id, speaker, choice, frame, width, height } => {
             dialogshot::dialogue_shot(&out, zone, id, &speaker, choice, frame, width, height)
+        }
+        Cmd::ReelShot { shot, out_dir, steps, filter, no_logo, width, height } => {
+            tlreel::reel_shot(&shot, &out_dir, steps, width, height, filter.as_deref(), !no_logo)
         }
         Cmd::FlyoverShot { scheduler, out_dir, steps, flat, width, height } => {
             flyover_shot(&scheduler, &out_dir, steps, flat, width, height)
