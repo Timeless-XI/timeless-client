@@ -17063,8 +17063,9 @@ impl App {
                         }
                         match step {
                             0 => *race = sel,
-                            1 => *face = (sel * 2 + *face as usize % 2) as u8,
-                            2 => *face = (*face as usize / 2 * 2 + sel) as u8,
+                            // Timeless XI: one model per style (the A face); the custom look covers the colours.
+                            1 => *face = (sel * 2) as u8,
+                            2 => *face = (*face as usize / 2 * 2) as u8,
                             3 => *size = sel as u8,
                             4 => *job = sel,
                             6 => *nation = sel,
@@ -17159,7 +17160,8 @@ impl App {
                                     }
                                 }
                                 _ => {
-                                    self.creator_step = step + 1;
+                                    // Timeless XI: no Hair step (A or B): one model per style.
+                                    self.creator_step = if step == 1 { 3 } else { step + 1 };
                                     self.creator_yes = false;
                                     action = Some(Box::new(|app: &mut App| app.status.clear()));
                                 }
@@ -17172,7 +17174,11 @@ impl App {
                                 ui_se(&mut self.audio, crate::audio::Ui::Cancel);
                             } else {
                                 // Escape on chmktown starts over at the race step, the choices kept.
-                                self.creator_step = if step == 6 { 0 } else { step - 1 };
+                                self.creator_step = match step {
+                                    6 => 0,
+                                    3 => 1, // Timeless XI: past the skipped Hair step
+                                    _ => step - 1,
+                                };
                             }
                         }
                         if ok && let Some((_, then)) = self.creator_ok.take() {
