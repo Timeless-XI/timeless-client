@@ -286,11 +286,11 @@ fn preview_ui(ui: &mut egui::Ui, w: &World, out: &mut Option<Option<(u8, u16)>>)
 /// "Light both sides" and its compare button (hold: the retail lighting while held).
 fn light_ui(ui: &mut egui::Ui, w: &mut World) {
     let mut on = w.looks.light_both_sides;
-    if ui.checkbox(&mut on, RichText::new("Light both sides of hair and clothes").color(text())).changed() {
+    if ui.checkbox(&mut on, RichText::new("Soft fill light on characters").color(text())).changed() {
         looks::set_light_both_sides(&mut w.looks, on);
     }
     ui.label(
-        RichText::new("The inside of hair, manes and capes is lit like the outside instead of going dark. Every character on your screen, saved for this PC.")
+        RichText::new("A soft fill light from the camera, and the inside of hair, manes and capes lit like the outside, so nothing you can see goes black. Every character on your screen, saved for this PC.")
             .small()
             .color(muted()),
     );

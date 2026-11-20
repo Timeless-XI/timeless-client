@@ -592,6 +592,15 @@ fn actor_normal(in: VertexOut, ff: bool) -> vec3<f32> {
     return select(n, -n, u.modes.z > 0.5 && !ff);
 }
 
+// Timeless XI (modes.z = 1): a soft fill light from the camera, so a character's surfaces turned away from the sun
+// (the underside of a mane, a cape's fold) are never left at the ambient level alone; 0 off (retail).
+fn actor_fill(in: VertexOut, ff: bool) -> f32 {
+    if (u.modes.z < 0.5) {
+        return 0.0;
+    }
+    return 0.35 * max(dot(actor_normal(in, ff), normalize(u.eye.xyz - in.world)), 0.0);
+}
+
 fn actor_colour(in: VertexOut, ff: bool) -> vec4<f32> {
     let texel = textureSample(tex, samp, in.uv);
     if (texel.a < 0.3) {
@@ -602,7 +611,7 @@ fn actor_colour(in: VertexOut, ff: bool) -> vec4<f32> {
     if (u.sun.w > 0.5) {
         return vec4<f32>(lit_actor(in, texel, ff).rgb, alpha);
     }
-    let diffuse = max(dot(actor_normal(in, ff), normalize(-u.light.xyz)), 0.0);
+    let diffuse = min(max(dot(actor_normal(in, ff), normalize(-u.light.xyz)), 0.0) + actor_fill(in, ff), 1.0);
     let lit = texel.rgb * (u.light.w + (1.0 - u.light.w) * diffuse) * in.tint;
     return vec4<f32>(shade(in, vec4<f32>(lit, 1.0)).rgb, alpha);
 }
@@ -799,7 +808,8 @@ fn lit_actor(in: VertexOut, t: vec4<f32>, ff: bool) -> vec4<f32> {
     let cloth = in.color.g > 0.5;
     let ga = select(min(floor(amb * 255.0 * mf) / 255.0, vec3<f32>(1.0)), amb, cloth);
     let em = select(0.0, max(mf - 1.5, 0.0), cloth);
-    let lit = clamp((ga + 0.5 * mf * (color * ndl + in.point)) * in.tint + em, vec3<f32>(0.0), vec3<f32>(1.0));
+    let fill = actor_fill(in, ff);
+    let lit = clamp((ga + 0.5 * mf * (color * min(ndl + fill, 1.0) + in.point)) * in.tint + em, vec3<f32>(0.0), vec3<f32>(1.0));
     let rgb = clamp(to_gamma(t.rgb) * lit * 2.0, vec3<f32>(0.0), vec3<f32>(1.0));
     let f = clamp((fog.y - in.depth) / (fog.y - fog.x), 0.0, 1.0);
     let c = mix(fog_color * in.flash.y, rgb, f);
