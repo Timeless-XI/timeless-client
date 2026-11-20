@@ -8,3 +8,4 @@ pub mod hdicon;
 pub mod hotbar;
 pub mod icons;
 pub mod title;
+pub mod vignette;

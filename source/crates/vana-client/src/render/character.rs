@@ -37,6 +37,12 @@ pub fn pose_character(ch: &Character, anims: &[(&crate::dat::character::Animatio
     skin_character(ch, &pose(&ch.skeleton, anims))
 }
 
+/// Timeless XI: the pose of motion queues (motionq::Queues::layers, as the world's actors), skinned. The Select
+/// screen's vignettes (client/timeless/vignette.rs) blend their walks, stops and casts with it.
+pub fn pose_character_layers(ch: &Character, layers: &[crate::dat::character::PoseLayer], over: [f32; 2]) -> PosedMesh {
+    skin_character(ch, &crate::dat::character::pose_layers(&ch.skeleton, layers, over, &[]))
+}
+
 /// `pose_character` with drawn weapons on their grips.
 pub fn pose_character_held(
     ch: &Character,

@@ -210,6 +210,44 @@ enum Cmd {
         #[arg(long, default_value_t = 900)]
         height: u32,
     },
+    /// Timeless XI: the Select screen's vignette for a look in a zone (client/timeless/vignette.rs), a PNG at each
+    /// time. With --at it plays where that record says (fishing with --fishing); without, a picked open spot.
+    VignetteShot {
+        #[arg(long)]
+        zone: u16,
+        #[arg(long)]
+        out_dir: PathBuf,
+        #[arg(long, default_value_t = 1)]
+        race: u8,
+        #[arg(long, default_value_t = 0)]
+        face: u16,
+        /// head,body,hands,legs,feet,main,sub model ids.
+        #[arg(long, default_value = "0,8,8,8,8,0,0")]
+        look: String,
+        /// x,y,z of the record (the place they left off).
+        #[arg(long)]
+        at: Option<String>,
+        /// The record's facing, degrees from +x toward +z.
+        #[arg(long, default_value_t = 0.0)]
+        facing: f32,
+        #[arg(long)]
+        fishing: bool,
+        #[arg(long, default_value_t = 0)]
+        rod: u16,
+        #[arg(long, default_value_t = 17.5)]
+        hour: f32,
+        #[arg(long, default_value = "suny")]
+        weather: String,
+        #[arg(long, default_value = "Vignette")]
+        name: String,
+        /// Seconds to shoot at.
+        #[arg(long, default_value = "2,6,10,14,18,24,30")]
+        times: String,
+        #[arg(long, default_value_t = 1280)]
+        width: u32,
+        #[arg(long, default_value_t = 720)]
+        height: u32,
+    },
     /// Render the title flyover (file 23): every camera op of one scheduler (mov1..mov8, ex1a..) at a few times.
     FlyoverShot {
         scheduler: String,
@@ -2393,6 +2431,59 @@ fn main() -> Result<()> {
         }
         Cmd::ReelShot { shot, out_dir, steps, filter, no_logo, width, height } => {
             tlreel::reel_shot(&shot, &out_dir, steps, width, height, filter.as_deref(), !no_logo)
+        }
+        Cmd::VignetteShot {
+            zone,
+            out_dir,
+            race,
+            face,
+            look,
+            at,
+            facing,
+            fishing,
+            rod,
+            hour,
+            weather,
+            name,
+            times,
+            width,
+            height,
+        } => {
+            use client::tl_vignette::{Record, Request, shot};
+            let n: Vec<u16> = look.split(',').map(|v| v.trim().parse().unwrap_or(0)).collect();
+            let g = |i: usize| n.get(i).copied().unwrap_or(0);
+            let req = Request {
+                name: name.clone(),
+                look: dat::character::Look {
+                    race,
+                    face,
+                    head: g(0),
+                    body: g(1),
+                    hands: g(2),
+                    legs: g(3),
+                    feet: g(4),
+                    main: g(5),
+                    sub: g(6),
+                    range: 0,
+                },
+                size: 1,
+                zone,
+            };
+            let record = at.map(|a| {
+                let p: Vec<f32> = a.split(',').map(|v| v.trim().parse().unwrap_or(0.0)).collect();
+                let (s, c) = facing.to_radians().sin_cos();
+                Record {
+                    zone,
+                    pos: [p.first().copied().unwrap_or(0.0), p.get(1).copied().unwrap_or(0.0), p.get(2).copied().unwrap_or(0.0)],
+                    forward: [c, s],
+                    fishing,
+                    rod,
+                    minute: hour * 60.0,
+                    weather: weather.clone(),
+                }
+            });
+            let t: Vec<f32> = times.split(',').filter_map(|v| v.trim().parse().ok()).collect();
+            shot(&req, record, &t, &out_dir, [width, height])
         }
         Cmd::FlyoverShot { scheduler, out_dir, steps, flat, width, height } => {
             flyover_shot(&scheduler, &out_dir, steps, flat, width, height)
