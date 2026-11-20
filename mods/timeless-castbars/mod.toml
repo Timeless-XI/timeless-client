@@ -1,0 +1,16 @@
+name = "Timeless Cast Bars"
+version = "1.0.0"
+authors = ["TimelessXI"]
+description = "See what monsters are casting (/castbars): a bar over each casting monster's head with the spell or move, the seconds until it lands and its element's colour, framed red when it's aimed at you or hits an area. Exact times on the TimelessXI server."
+permissions = ["packets.write"]
+
+[commands.castbars]
+help = "Turns the cast bars on or off."
+args = ""
+forms = [
+  { args = "target", help = "Bars for your target only." },
+  { args = "all", help = "Bars for every monster near you." },
+  { args = "moves", help = "Bars for moves being readied on or off." },
+  { args = "size <0.6-2>", help = "How big the bars are." },
+  { args = "test", help = "A sample cast on your target (again to interrupt it)." },
+]

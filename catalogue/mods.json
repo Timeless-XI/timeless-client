@@ -3181,6 +3181,83 @@
       }
     },
     {
+      "id": "timeless-castbars",
+      "name": "Timeless Cast Bars",
+      "kind": "lua",
+      "version": "1.0.0",
+      "authors": [
+        "TimelessXI"
+      ],
+      "description": "See what monsters are casting (/castbars): a bar over each casting monster's head with the spell or move, the seconds until it lands and its element's colour, framed red when it's aimed at you or hits an area. Exact times on the TimelessXI server.",
+      "files": [
+        {
+          "path": "init.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-castbars/init.lua",
+          "sha256": "de4473446d74d6cecc5d442397375af157118fd08b2eeb1b7099e6ca5cc7bf3d",
+          "size": 6605
+        },
+        {
+          "path": "lib/action.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-castbars/lib/action.lua",
+          "sha256": "8fd726eeecfa4a367130d68588dafec908ebe3e1ea3542ae1b11c67720df5231",
+          "size": 653
+        },
+        {
+          "path": "lib/bars.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-castbars/lib/bars.lua",
+          "sha256": "0c6f292e04b5d8c193620e8de51f32e33e74a4816f7885e863bbc9e39246c5a3",
+          "size": 4112
+        },
+        {
+          "path": "lib/casts.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-castbars/lib/casts.lua",
+          "sha256": "370413da8822fcf17f9c589b97d22e4302493d1c708df827280ea0bfdb8a58f7",
+          "size": 3838
+        },
+        {
+          "path": "lib/protocol.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-castbars/lib/protocol.lua",
+          "sha256": "aa341eb3050e905bda307b28fc742f24a2d122c21f3a96c7725ae768eb37654e",
+          "size": 1471
+        },
+        {
+          "path": "mod.toml",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-castbars/mod.toml",
+          "sha256": "05fa9fb133b23e432a4234c935df74b21c1ad8fc3ddfd2779bbe39c83ce8e029",
+          "size": 791
+        }
+      ],
+      "required": true,
+      "commands": {
+        "castbars": {
+          "help": "Turns the cast bars on or off.",
+          "args": "",
+          "forms": [
+            {
+              "args": "target",
+              "help": "Bars for your target only."
+            },
+            {
+              "args": "all",
+              "help": "Bars for every monster near you."
+            },
+            {
+              "args": "moves",
+              "help": "Bars for moves being readied on or off."
+            },
+            {
+              "args": "size <0.6-2>",
+              "help": "How big the bars are."
+            },
+            {
+              "args": "test",
+              "help": "A sample cast on your target (again to interrupt it)."
+            }
+          ]
+        }
+      }
+    },
+    {
       "id": "timeless-champions",
       "name": "Timeless Champions",
       "kind": "lua",
