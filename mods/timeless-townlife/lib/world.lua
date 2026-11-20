@@ -1,9 +1,9 @@
--- The town in the world: speech bubbles over townsfolk, the lamplighter's lamps, chimney smoke and sounds by place.
+-- The town in the world: speech bubbles over townsfolk, the lamplighter's lamps and sounds by place. (The chimney smoke
+-- it once drew floated where no chimney stands: the zone has its own.)
 
 local W = {}
 
 W.BUBBLE_SECONDS = 5
-W.SMOKE_RANGE = 80
 W.SOUND_EVERY = { hammer = 5, crowd = 4.5, gulls = 6 } -- seconds between plays (about the sound's length)
 W.SOUND_VOLUME = { hammer = 0.45, crowd = 0.35, gulls = 0.4 }
 
@@ -147,30 +147,12 @@ function W.lights(model, now)
   lights, zones = keep_l, keep_z
 end
 
--- Lamps and smoke: redrawn a few times a second (the smoke drifts up)
+-- The lamplighter's lamps and the carried lights, a few times a second
 function W.scene(model, now, me)
-  local keep = {}
   W.lights(model, now)
-  if me and me.pos then
-    if setting("smoke") then
-      for i, s in pairs(model.scenery) do
-        if s.kind == "smoke" and dist(s.pos, me.pos) <= W.SMOKE_RANGE then
-          for k = 0, 3 do
-            local t = (now * 0.25 + k / 4 + i * 0.37) % 1 -- each puff rises, grows and fades, then starts again
-            local id = ("smoke%d_%d"):format(i, k)
-            local at = { x = s.pos.x + math.sin(t * 3 + k) * 0.6 * t, y = s.pos.y - t * 6, z = s.pos.z + t * 1.5 }
-            draw.image(id, { path = "img/smoke.png", at = at, w = 1.2 + t * 2.4, h = 1.2 + t * 2.4, facing = "camera",
-              colour = { 255, 255, 255, math.floor(170 * math.sin(t * math.pi)) } })
-            keep[id] = true
-          end
-        end
-      end
-    end
-  end
-  for id in pairs(drawn) do
-    if not keep[id] then draw.remove(id) end
-  end
-  drawn = keep
+  -- Anything an older version drew (lamp glows, smoke) goes.
+  for id in pairs(drawn) do draw.remove(id) end
+  drawn = {}
 end
 
 -- Sounds by place: louder the closer you are

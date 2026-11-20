@@ -66,11 +66,7 @@ ok(#H.sounds == 2, "sounds setting off")
 H.settings.sounds = nil
 
 -- Smoke near the furnaces
-ok(H.draws.smoke1_0 and H.draws.smoke1_0.path == "img/smoke.png", "chimney smoke")
-H.settings.smoke = false
-H.run(0.3)
-ok(H.draws.smoke1_0 == nil, "smoke setting off")
-H.settings.smoke = nil
+ok(H.draws.smoke1_0 == nil, "no smoke floating where no chimney stands")
 
 -- Speech bubbles
 H.player.pos = { x = -190, y = -6, z = -78 }

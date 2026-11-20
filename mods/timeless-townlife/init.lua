@@ -2,7 +2,7 @@
 -- shift change, the lamplighter, guards, kids, fishermen, the caravan, market day); this mod lets you see and hear it:
 --
 --   speech bubbles over townsfolk as they talk (the same lines are in chat for everyone)
---   the lamp posts on the lamplighter's round dark until he lights them (Modern night lighting), chimney smoke
+--   the lamp posts on the lamplighter's round dark until he lights them (Modern night lighting)
 --   sounds by place: hammering by the furnaces, crowds on the plaza and in the Steaming Sheep, gulls on the docks
 --   /town  the Town window: headlines, who has the stall, the caravan, market day, your companions in town, gossip
 --
