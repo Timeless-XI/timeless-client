@@ -16487,6 +16487,9 @@ impl App {
                             // lobycwin and our settings screen over the title; modern: both pages of one Config panel.
                             if let Some(c) = self.lobby_cfg.as_mut().filter(|_| modern_title) {
                                 c.owned = self.installed;
+                                if c.account.is_empty() {
+                                    c.account = self.cfg.username.clone();
+                                }
                                 if modern::lobby_config_settings(c) && self.lobby_settings.is_none() {
                                     let mut s = settings::SettingsUi::open(&self.cfg, window);
                                     s.monitors = self.monitors.clone();
@@ -16519,7 +16522,7 @@ impl App {
                                     self.lobby_settings.as_mut(),
                                     sw,
                                 ));
-                                let mut closed = false;
+                                let (mut closed, mut sign_out) = (false, false);
                                 for out in outs {
                                     if let Some(a) = self.audio.as_mut() {
                                         for s in &out.sounds {
@@ -16527,7 +16530,21 @@ impl App {
                                         }
                                     }
                                     lobby_changes(&out.changed, &mut lobby_apply);
-                                    closed |= out.closed;
+                                    closed |= out.closed || out.sign_out;
+                                    sign_out |= out.sign_out;
+                                }
+                                // Sign Out (Config's Account page): back to the login with the Account field focused.
+                                // Under the Timeless title it is the same scene, so no fade.
+                                if sign_out {
+                                    action = Some(Box::new(|app: &mut App| {
+                                        app.phase = Phase::login(&app.cfg);
+                                        if let Phase::Login { focus, .. } = &mut app.phase
+                                            && !is_playonline(&app.cfg.server)
+                                        {
+                                            *focus = 2;
+                                        }
+                                    }));
+                                    fade_action = !tl_title;
                                 }
                                 if closed {
                                     self.lobby_cfg = None;

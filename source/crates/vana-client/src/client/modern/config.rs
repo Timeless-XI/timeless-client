@@ -2039,7 +2039,27 @@ fn keys_page(
 }
 
 /// The title's Config list: retail's page (lobycwin) and ours.
-const LOBBY: [&str; 2] = ["Title Screen", "Settings"];
+const LOBBY: [&str; 3] = ["Title Screen", "Settings", "Account"];
+
+/// The Account entry (its page signs out).
+const ACCOUNT: usize = 2;
+
+const ACCOUNT_HELP: &str = "Sign out to return to the login and use a different account.";
+
+/// The Account page: the account signed in and Sign Out (the keyboard cursor on it while the page is open).
+fn account_page(ui: &mut Ui, m: &super::Modern, c: &ConfigUi, open: bool) -> bool {
+    ui.label(egui::RichText::new("Signed in as").size(m.theme.small).color(m.theme.color("muted")));
+    ui.add_space(2.0);
+    let name = if c.account.is_empty() { "—" } else { c.account.as_str() };
+    ui.label(egui::RichText::new(name).size(m.theme.ui).color(m.theme.color("gold")));
+    ui.add_space(14.0);
+    let s = Btn { cursor: open, ..Default::default() };
+    let resp = kit::button(ui, m, "Sign Out", 160.0, s);
+    if open {
+        kit::ring(ui.painter(), m, resp.rect, 4.0);
+    }
+    kit::clicked(&resp, s)
+}
 
 /// lobycwin's settings in retail's order on screen: the title music first.
 fn lobby_shapes() -> Vec<Shape> {
@@ -2074,6 +2094,7 @@ pub fn lobby(p: &mut Panels, c: &mut ConfigUi, v: &mut Values, s: Option<&mut Se
         entry * 1_000_000 + ours.map_or(row, |o| o.view().row * 100 + o.view().tab + o.m_mods.0 * 10_000),
     );
     let (mut sact, mut mact, mut click, mut hover) = (Vec::new(), Vec::new(), None, None);
+    let mut sign_out = false;
     // Centred, by last frame's size.
     let screen = p.ctx.content_rect();
     let size = m.rects.borrow().get("lobby config").map_or(vec2(640.0, 360.0), |r| r.size());
@@ -2109,6 +2130,7 @@ pub fn lobby(p: &mut Panels, c: &mut ConfigUi, v: &mut Values, s: Option<&mut Se
                                 }
                                 Some(s) => settings_page(ui, m, &s.view(), open, follow, 0, &mut sact),
                                 None if lobby_settings(c) => {}
+                                None if entry == ACCOUNT => sign_out = account_page(ui, m, c, open),
                                 None => {
                                     hover = native_rows(
                                         ui,
@@ -2130,6 +2152,7 @@ pub fn lobby(p: &mut Panels, c: &mut ConfigUi, v: &mut Values, s: Option<&mut Se
             });
             match ours {
                 Some(s) => help_line(ui, m, &ours_help(s)),
+                None if entry == ACCOUNT => help_line(ui, m, ACCOUNT_HELP),
                 None => help_line(
                     ui,
                     m,
@@ -2144,6 +2167,10 @@ pub fn lobby(p: &mut Panels, c: &mut ConfigUi, v: &mut Values, s: Option<&mut Se
         mods_do(s, mact);
         out.sounds.append(&mut s.sounds);
         c.m_open = true;
+    }
+    if sign_out {
+        out.sign_out = true;
+        out.sounds.push(Se::Select);
     }
     match click {
         Some(Click::Entry(k)) => {
@@ -2207,6 +2234,20 @@ pub fn lobby_key(
                 out.sounds.push(Se::Select);
             }
             (a, _) => out.sounds.extend(a.sound()),
+        }
+        return out;
+    }
+    if c.m_entry == ACCOUNT {
+        match key {
+            egui::Key::Enter => {
+                out.sign_out = true;
+                out.sounds.push(Se::Select);
+            }
+            egui::Key::Escape | egui::Key::ArrowLeft | egui::Key::Backspace => {
+                c.m_open = false;
+                out.sounds.push(Se::Cancel);
+            }
+            _ => {}
         }
         return out;
     }
