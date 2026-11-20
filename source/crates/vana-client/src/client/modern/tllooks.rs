@@ -85,7 +85,8 @@ impl super::Modern {
             return;
         }
         let mut s = w.looks.settings.clone();
-        let before = s.clone();
+        let mut before = s.clone();
+        let mut preview: Option<Option<(u8, u16)>> = None;
         let fits = w.looks.fits;
         let mut open = true;
         egui::Window::new(RichText::new("Appearance").color(gold()))
@@ -104,26 +105,41 @@ impl super::Modern {
             .show(ctx, |ui| {
                 ui.checkbox(&mut s.on, RichText::new("Use my custom look").color(text()));
                 let face = w.looks.face;
-                if fits {
-                    ui.label(RichText::new(format!("Mithra face style {}", w.looks.style)).small().color(muted()));
-                } else if face.is_some_and(|(race, _)| race == 7) {
-                    ui.label(
-                        RichText::new("Your face has no custom look yet. Try one on face 6A (only you see it):")
-                            .color(muted()),
-                    );
-                    ui.checkbox(&mut s.try_on, RichText::new("Try on face 6A").color(text()));
-                } else {
-                    ui.label(RichText::new("Custom looks are made for Mithra faces for now.").color(muted()));
+                let shown = w.looks.shown;
+                match shown {
+                    Some((r, f)) if fits => {
+                        ui.label(RichText::new(format!("{} face {}", race_name(r), face_label(r, f))).small().color(muted()));
+                    }
+                    Some((7, _)) => {
+                        ui.label(
+                            RichText::new("This face has no custom look yet. Try one on face 6A (only you see it):")
+                                .color(muted()),
+                        );
+                        ui.checkbox(&mut s.try_on, RichText::new("Try on face 6A").color(text()));
+                    }
+                    _ => {
+                        ui.label(RichText::new("Waiting for the model...").small().color(muted()));
+                    }
                 }
                 ui.label(RichText::new("Only you can see your custom look for now.").small().color(muted()));
                 ui.separator();
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    ui.add_enabled_ui(s.on, |ui| body(ui, &mut s));
+                    egui::CollapsingHeader::new(RichText::new("Test any race (only on your screen)").strong().color(gold()))
+                        .id_salt("tl looks race")
+                        .default_open(false)
+                        .show(ui, |ui| preview_ui(ui, w, &mut preview));
+                    egui::CollapsingHeader::new(RichText::new("Free camera").strong().color(gold()))
+                        .id_salt("tl looks cam")
+                        .default_open(false)
+                        .show(ui, |ui| camera_ui(ui, w));
+                    ui.separator();
+                    let has = shown.map_or(looks::Has { iris: true, lips: true, nose: true }, |(r, f)| looks::layers_of(r, f));
+                    ui.add_enabled_ui(s.on, |ui| body(ui, &mut s, has));
                 });
                 ui.separator();
                 ui.horizontal(|ui| {
-                    if ui.button("Reset to my face").on_hover_text("Your face's own colours and markings").clicked() {
-                        s = face.and_then(|(_, f)| looks::seed(f, &s)).unwrap_or(Settings {
+                    if ui.button("Reset to this face").on_hover_text("The face's own colours (and markings)").clicked() {
+                        s = shown.or(face).and_then(|(r, f)| looks::seed_any(r, f, &s)).unwrap_or(Settings {
                             on: s.on,
                             try_on: s.try_on,
                             ..Settings::default()
@@ -131,6 +147,11 @@ impl super::Modern {
                     }
                 });
             });
+        if let Some(p) = preview {
+            looks::set_preview(&mut w.looks, p);
+            s = w.looks.settings.clone();
+            before = s.clone();
+        }
         if !open {
             w.looks.open = false;
         }
@@ -141,7 +162,7 @@ impl super::Modern {
     }
 }
 
-fn body(ui: &mut egui::Ui, s: &mut Settings) {
+fn body(ui: &mut egui::Ui, s: &mut Settings, has: looks::Has) {
     heading(ui, "Hair");
     rgb(ui, &mut s.hair, &HAIR);
     ui.checkbox(&mut s.two_tone, RichText::new("Two-tone (colour toward the ends)").color(text()));
@@ -157,8 +178,10 @@ fn body(ui: &mut egui::Ui, s: &mut Settings) {
             ui.add(egui::Slider::new(&mut s.tip_blend, 0.02..=0.45).show_value(false));
         });
     }
-    heading(ui, "Eyes");
-    rgb(ui, &mut s.eyes, &EYES);
+    if has.iris {
+        heading(ui, "Eyes");
+        rgb(ui, &mut s.eyes, &EYES);
+    }
     heading(ui, "Face markings");
     s.marks.resize(MARKS.len(), 0);
     ui.label(RichText::new("Left / Right = under your character's own left or right eye.").small().color(muted()));
@@ -189,12 +212,112 @@ fn body(ui: &mut egui::Ui, s: &mut Settings) {
             ui.add(egui::Slider::new(&mut s.mark_strength, 0.2..=1.0).show_value(false));
         });
     }
-    heading(ui, "Lips");
-    rgb(ui, &mut s.lips, &LIPS);
-    heading(ui, "Nose");
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Grey").color(muted()));
-        ui.add(egui::Slider::new(&mut s.nose, 0.0..=1.0).show_value(false));
-        ui.label(RichText::new("Black").color(muted()));
+    if has.lips {
+        heading(ui, "Lips");
+        rgb(ui, &mut s.lips, &LIPS);
+    }
+    if has.nose {
+        heading(ui, "Nose");
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Grey").color(muted()));
+            ui.add(egui::Slider::new(&mut s.nose, 0.0..=1.0).show_value(false));
+            ui.label(RichText::new("Black").color(muted()));
+        });
+    }
+}
+
+fn race_name(r: u8) -> &'static str {
+    looks::RACES.iter().find(|x| x.0 == r).map_or("?", |x| x.1)
+}
+
+/// 1A..8B; Mithra's Timeless colours 16-24 as 1C..8C and 2D.
+fn face_label(r: u8, f: u16) -> String {
+    if r == 7 && f >= 16 {
+        const C: [&str; 9] = ["1C", "2C", "2D", "3C", "4C", "5C", "6C", "7C", "8C"];
+        return C.get(f as usize - 16).unwrap_or(&"?").to_string();
+    }
+    format!("{}{}", f / 2 + 1, if f % 2 == 0 { 'A' } else { 'B' })
+}
+
+/// Race and face to show our model as (this client only).
+fn preview_ui(ui: &mut egui::Ui, w: &World, out: &mut Option<Option<(u8, u16)>>) {
+    let cur = w.looks.preview;
+    let own = w.looks.face;
+    ui.label(
+        RichText::new("Show your character as any race and face to try looks. Only your screen changes; the server and other players still see your real character.")
+            .small()
+            .color(muted()),
+    );
+    ui.horizontal_wrapped(|ui| {
+        if ui.selectable_label(cur.is_none(), "My own").clicked() {
+            *out = Some(None);
+        }
+        for (r, name) in looks::RACES {
+            let on = cur.is_some_and(|(cr, _)| cr == r);
+            if ui.selectable_label(on, name).clicked() && !on {
+                let f = cur.map_or(own.map_or(0, |o| o.1), |c| c.1);
+                let f = if looks::supported(r, f) { f } else { 0 };
+                *out = Some(Some((r, f)));
+            }
+        }
+    });
+    if let Some((r, f)) = cur {
+        ui.add_space(4.0);
+        ui.label(RichText::new(format!("{} faces", race_name(r))).color(muted()));
+        let n: u16 = if r == 7 { 25 } else { 16 };
+        egui::Grid::new("tl looks faces").spacing(vec2(4.0, 4.0)).show(ui, |ui| {
+            for k in 0..n {
+                if ui.selectable_label(f == k, face_label(r, k)).clicked() && f != k {
+                    *out = Some(Some((r, k)));
+                }
+                if k % 8 == 7 {
+                    ui.end_row();
+                }
+            }
+        });
+    }
+}
+
+/// The free camera's switch and sliders.
+fn camera_ui(ui: &mut egui::Ui, w: &mut World) {
+    let c = &mut w.looks.cam;
+    ui.checkbox(&mut c.on, RichText::new("Free camera around my character").color(text()));
+    ui.label(
+        RichText::new("Drag to turn around and tilt, the wheel zooms, middle-drag moves up and down. Your character can still walk.")
+            .small()
+            .color(muted()),
+    );
+    ui.add_enabled_ui(c.on, |ui| {
+        egui::Grid::new("tl looks cam grid").num_columns(2).spacing(vec2(8.0, 4.0)).show(ui, |ui| {
+            ui.label(RichText::new("Around").color(muted()));
+            ui.add(egui::Slider::new(&mut c.yaw, -std::f32::consts::PI..=std::f32::consts::PI).show_value(false));
+            ui.end_row();
+            ui.label(RichText::new("Tilt").color(muted()));
+            ui.add(egui::Slider::new(&mut c.pitch, -1.3..=1.4).show_value(false));
+            ui.end_row();
+            ui.label(RichText::new("Distance").color(muted()));
+            ui.add(egui::Slider::new(&mut c.dist, 0.15..=12.0).logarithmic(true).show_value(false));
+            ui.end_row();
+            ui.label(RichText::new("Height").color(muted()));
+            ui.add(egui::Slider::new(&mut c.height, 0.0..=1.2).show_value(false));
+            ui.end_row();
+        });
+        // Keep the slider's yaw within one turn.
+        c.yaw = (c.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut c.spin, RichText::new("Spin").color(text()));
+            if ui.button("Face").clicked() {
+                c.reset_view();
+            }
+            if ui.button("Full body").clicked() {
+                c.yaw = 0.5;
+                c.pitch = 0.15;
+                c.dist = 4.5;
+                c.height = 0.55;
+            }
+            if ui.button("Back").clicked() {
+                c.yaw = std::f32::consts::PI;
+            }
+        });
     });
 }

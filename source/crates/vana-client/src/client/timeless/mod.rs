@@ -7,4 +7,5 @@ pub mod fishing;
 pub mod hdicon;
 pub mod hotbar;
 pub mod icons;
+pub mod look_files;
 pub mod looks;

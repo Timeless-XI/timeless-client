@@ -1,10 +1,12 @@
-//! Timeless XI: custom looks for every Mithra face (styles 1-8: faces 0-15 and the Timeless colours 16-24). The player
+//! Timeless XI: custom looks for every playable race (Mithra faces 0-24, the other races' faces 0-15). The player
 //! picks hair colours (one or two tone), eye colour, face markings, lip tint and nose shade with sliders; the client
 //! recolours the face texture itself and swaps it into our own model. Nothing is sent: only this client sees it for now.
 //!
 //! The pictures are `assets/timeless/looks/mithra<style>_*.png` (timeless-tools Custom_Faces/looks: the style's HD face
 //! with neutral grey hair, iris, lips and nose and no markings, plus layer masks), and `faces.json` (each face's own
-//! colours and nearest markings, the starting point and Reset):
+//! colours and nearest markings, the starting point and Reset). The other races recolour the face texture the model
+//! already has (`Character::face_texture`): `looks/races/r<race>_s<style>_m*.png` are their masks (512 px, the Mithra
+//! markings carried over in 3D) and `races.json` each face's layer medians (the neutral grey's middle) and colours:
 //! - base: RGBA, the neutral face texture (1024 x 1024);
 //! - m1: hair weight, tip distance (0 crown .. 1 hair ends), iris, lips;
 //! - m2: nose, markings forehead / cheeks / brow;
@@ -186,10 +188,83 @@ pub fn seed(face: u16, keep: &Settings) -> Option<Settings> {
     })
 }
 
-/// The faces with a custom look (Mithra 0-24).
+/// The faces with a custom look (Mithra 0-24, the other races 0-15).
 pub fn supported(race: u8, face: u16) -> bool {
-    race == 7 && face <= 24
+    match race {
+        7 => face <= 24,
+        1..=6 | 8 => face <= 15,
+        _ => false,
+    }
 }
+
+/// Another race's face (races.json): layer medians (hair, iris, lips, nose, skin on 0..255), its own colours, which
+/// layers it has, and whether its markings have a right side of their own (a face mesh that isn't mirrored).
+#[derive(Deserialize)]
+pub struct RaceFace {
+    pub style: u8,
+    med: [f32; 5],
+    hair: [u8; 3],
+    two_tone: bool,
+    tip: [u8; 3],
+    eyes: [u8; 3],
+    lips: [u8; 3],
+    pub has: Has,
+    pub sides: bool,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+pub struct Has {
+    pub iris: bool,
+    pub lips: bool,
+    pub nose: bool,
+}
+
+fn race_faces() -> &'static HashMap<String, RaceFace> {
+    static S: OnceLock<HashMap<String, RaceFace>> = OnceLock::new();
+    S.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../assets/timeless/looks/races/races.json")).unwrap_or_default()
+    })
+}
+
+pub fn race_face(race: u8, face: u16) -> Option<&'static RaceFace> {
+    race_faces().get(&format!("{race}_{face}"))
+}
+
+/// The layers a face has (the window hides the others).
+pub fn layers_of(race: u8, face: u16) -> Has {
+    match race_face(race, face) {
+        Some(f) if race != 7 => f.has,
+        _ => Has { iris: true, lips: true, nose: true },
+    }
+}
+
+/// Any race's face as settings: its own colours (Mithra: and nearest markings); the other settings as given.
+pub fn seed_any(race: u8, face: u16, keep: &Settings) -> Option<Settings> {
+    if race == 7 {
+        return seed(face, keep);
+    }
+    let f = race_face(race, face)?;
+    Some(Settings {
+        hair: f.hair,
+        two_tone: f.two_tone,
+        tip: f.tip,
+        eyes: f.eyes,
+        lips: f.lips,
+        ..keep.clone()
+    })
+}
+
+/// The race names for the window, by race id.
+pub const RACES: [(u8, &str); 8] = [
+    (1, "Hume M"),
+    (2, "Hume F"),
+    (3, "Elvaan M"),
+    (4, "Elvaan F"),
+    (5, "Tarutaru M"),
+    (6, "Tarutaru F"),
+    (7, "Mithra"),
+    (8, "Galka"),
+];
 
 impl Settings {
     /// A marking's sides, a both-sides-only one never one-sided.
@@ -211,11 +286,11 @@ pub struct Looks {
     /// The character the settings belong to (loaded on a name change).
     pub name: String,
     pub open: bool,
-    /// The style and settings the texture on the GPU was made from; a newer one waits for its mips.
-    made: Option<(u8, Settings)>,
+    /// The face (race, face, texture) and settings the texture on the GPU was made from; a newer one waits for its mips.
+    made: Option<(MadeKey, Settings)>,
     made_at: Option<std::time::Instant>,
     /// The new textures (left, right when one-sided) waiting for their mips.
-    pending: Option<(u64, wgpu::BindGroup, Option<wgpu::BindGroup>, (u8, Settings))>,
+    pending: Option<(u64, wgpu::BindGroup, Option<wgpu::BindGroup>, (MadeKey, Settings))>,
     current: Option<(wgpu::BindGroup, Option<wgpu::BindGroup>)>,
     /// Bumped when `try_on` changes: our look loads again.
     pub try_on_ver: u32,
@@ -228,7 +303,42 @@ pub struct Looks {
     /// No settings saved for this character yet: they start from its face once the face is known.
     needs_seed: bool,
     dirty_save: Option<std::time::Instant>,
+    /// Testing: our model drawn as another race / face here (race, face); nothing is sent.
+    pub preview: Option<(u8, u16)>,
+    /// The face drawn now (the preview's or our own) and its layers.
+    pub shown: Option<(u8, u16)>,
+    /// The free camera (orbits our character; the drag and wheel steer it).
+    pub cam: FreeCam,
 }
+
+/// The free camera: around our character's head, `yaw` from its front, `pitch` up, `dist` away, `height` (0 feet .. 1
+/// the head's top), turning by itself with `spin`.
+#[derive(Clone, Copy)]
+pub struct FreeCam {
+    pub on: bool,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub dist: f32,
+    pub height: f32,
+    pub spin: bool,
+    pub last: Option<std::time::Instant>,
+}
+
+impl Default for FreeCam {
+    fn default() -> Self {
+        FreeCam { on: false, yaw: 0.0, pitch: 0.1, dist: 1.0, height: 0.93, spin: false, last: None }
+    }
+}
+
+impl FreeCam {
+    pub fn reset_view(&mut self) {
+        let on = self.on;
+        let spin = self.spin;
+        *self = FreeCam { on, spin, ..FreeCam::default() };
+    }
+}
+
+type MadeKey = (u8, u16, String);
 
 struct Layers {
     base: Vec<u8>,
@@ -239,15 +349,142 @@ struct Layers {
 }
 
 fn png(bytes: &[u8]) -> Vec<u8> {
+    png_sized(bytes, SIZE)
+}
+
+fn png_sized(bytes: &[u8], size: u32) -> Vec<u8> {
     let dec = png::Decoder::new(std::io::Cursor::new(bytes));
-    let Ok(mut r) = dec.read_info() else { return vec![0; (SIZE * SIZE * 4) as usize] };
+    let Ok(mut r) = dec.read_info() else { return vec![0; (size * size * 4) as usize] };
     let mut buf = vec![0; r.output_buffer_size().unwrap_or(0)];
     match r.next_frame(&mut buf) {
-        Ok(info) if info.width == SIZE && info.height == SIZE && info.color_type == png::ColorType::Rgba => {
+        Ok(info) if info.width == size && info.height == size && info.color_type == png::ColorType::Rgba => {
             buf.truncate(info.buffer_size());
             buf
         }
-        _ => vec![0; (SIZE * SIZE * 4) as usize],
+        _ => vec![0; (size * size * 4) as usize],
+    }
+}
+
+/// The other races' mask size.
+pub const RACE_SIZE: u32 = 512;
+
+/// Another race's style masks (m1..m4, and m5 / m6 when the right side has its own), decoded when first used.
+pub struct RaceLayers {
+    m: Vec<Vec<u8>>,
+}
+
+pub fn race_layers(race: u8, style: u8) -> Option<&'static RaceLayers> {
+    static L: OnceLock<HashMap<(u8, u8), OnceLock<RaceLayers>>> = OnceLock::new();
+    let all = L.get_or_init(|| {
+        super::look_files::RACE_MASKS.iter().map(|(r, s, _)| ((*r, *s), OnceLock::new())).collect()
+    });
+    let cell = all.get(&(race, style))?;
+    Some(cell.get_or_init(|| {
+        let files = super::look_files::RACE_MASKS.iter().find(|(r, s, _)| (*r, *s) == (race, style)).map(|x| x.2);
+        RaceLayers { m: files.unwrap_or(&[]).iter().map(|b| png_sized(b, RACE_SIZE)).collect() }
+    }))
+}
+
+/// A mask's four channels at texture position (u, v) in 0..1, bilinear.
+fn sample(m: &[u8], u: f32, v: f32) -> [f32; 4] {
+    let n = RACE_SIZE as usize;
+    let x = (u * n as f32 - 0.5).clamp(0.0, (n - 1) as f32);
+    let y = (v * n as f32 - 0.5).clamp(0.0, (n - 1) as f32);
+    let (x0, y0) = (x as usize, y as usize);
+    let (x1, y1) = ((x0 + 1).min(n - 1), (y0 + 1).min(n - 1));
+    let (fx, fy) = (x - x0 as f32, y - y0 as f32);
+    let px = |xx: usize, yy: usize, c: usize| m[(yy * n + xx) * 4 + c] as f32;
+    std::array::from_fn(|c| {
+        let a = px(x0, y0, c) * (1.0 - fx) + px(x1, y0, c) * fx;
+        let b = px(x0, y1, c) * (1.0 - fx) + px(x1, y1, c) * fx;
+        (a * (1.0 - fy) + b * fy) / 255.0
+    })
+}
+
+/// Another race's face texture (RGBA w x h, the model's own) recoloured. A mirrored face: the markings on `side`; one
+/// with sides of its own (`sides`): every marking on its own side(s) in one texture.
+pub fn compose_race(rl: &RaceLayers, f: &RaceFace, tex: &[u8], w: u32, h: u32, s: &Settings, side: u8) -> Vec<u8> {
+    let mut out = tex.to_vec();
+    let row_bytes = w as usize * 4;
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 8);
+    let per = (h as usize).div_ceil(threads) * row_bytes;
+    std::thread::scope(|sc| {
+        for (k, chunk) in out.chunks_mut(per).enumerate() {
+            let y0 = k * per / row_bytes;
+            sc.spawn(move || compose_race_rows(rl, f, chunk, w, h, y0, s, side));
+        }
+    });
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compose_race_rows(rl: &RaceLayers, f: &RaceFace, out: &mut [u8], w: u32, h: u32, y0: usize, s: &Settings, side: u8) {
+    let none = vec![0u8; 0];
+    let mk = |k: usize| rl.m.get(k).unwrap_or(&none);
+    let (m1, m2, m3, m4) = (mk(0), mk(1), mk(2), mk(3));
+    if m1.is_empty() {
+        return;
+    }
+    let (m5, m6) = (mk(4), mk(5));
+    let right = f.sides && !m5.is_empty();
+    // Which markings show on this texture, from the left masks and (sides of their own) the right masks.
+    let left_on: Vec<bool> =
+        (0..MARKS.len()).map(|k| if right { s.mark(k) & LEFT != 0 } else { s.mark(k) & side != 0 }).collect();
+    let right_on: Vec<bool> = (0..MARKS.len()).map(|k| right && SIDED[k] && s.mark(k) & RIGHT != 0).collect();
+    let (hair, tip, eyes, lips, mark) = (unit(s.hair), unit(s.tip), unit(s.eyes), unit(s.lips), unit(s.mark_colour));
+    let nose = [nose_grey(s.nose); 3];
+    let (t0, t1) = (s.tip_start - s.tip_blend, s.tip_start + s.tip_blend.max(0.005));
+    let [mh, mi, ml, mn, msk] = f.med.map(|m| m.max(1.0) / 255.0);
+    let strength = s.mark_strength.clamp(0.0, 1.0);
+    for (i, px) in out.chunks_exact_mut(4).enumerate() {
+        let (x, y) = (i % w as usize, y0 + i / w as usize);
+        let (u, v) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+        let a = sample(m1, u, v);
+        let b = sample(m2, u, v);
+        let c3 = sample(m3, u, v);
+        let d = sample(m4, u, v);
+        let hw = |n: f32| n.clamp(0.0, 1.0);
+        let mut c = [px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0];
+        let l = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+        if a[0] > 0.0 {
+            let mut g = l * 0.5 / mh;
+            if g > 0.5 {
+                g = 0.5 + (g - 0.5) * 0.55;
+            }
+            let col = if s.two_tone { mix(hair, tip, smoothstep(t0, t1, a[1])) } else { hair };
+            c = mix(c, shade(hw(g), col), a[0]);
+        }
+        // Iris, lips, nose: their highlights eased (a dark layer's median would blow them to white).
+        let knee = |g: f32| if g > 0.5 { 0.5 + (g - 0.5) * 0.4 } else { g };
+        if a[2] > 0.0 {
+            c = mix(c, shade(hw(knee(l * 0.5 / mi)), eyes), a[2]);
+        }
+        if a[3] > 0.0 {
+            c = mix(c, shade(hw(knee(l * 0.5 / ml)), lips), a[3]);
+        }
+        if b[0] > 0.0 {
+            c = mix(c, shade(hw(knee(l * 0.5 / mn)), nose), b[0]);
+        }
+        let cover = [b[1], b[2], b[3], c3[0], c3[1], c3[2], c3[3], d[0], d[1]];
+        let sk = l / msk;
+        let mc = mark.map(|x| (x * sk).min(1.0));
+        for (k, v) in cover.iter().enumerate() {
+            if left_on[k] && *v > 0.0 {
+                c = mix(c, mc, v * strength);
+            }
+        }
+        if right {
+            let (e, g6) = (sample(m5, u, v), sample(m6, u, v));
+            // Right-side masks, MARKS order: cheeks, brow, arc, slash, crescent, chevrons, constellation.
+            for (k, v) in [(1, e[0]), (2, e[1]), (3, e[2]), (4, e[3]), (6, g6[0]), (7, g6[1]), (8, g6[2])] {
+                if right_on[k] && v > 0.0 && !m6.is_empty() {
+                    c = mix(c, mc, v * strength);
+                }
+            }
+        }
+        for k in 0..3 {
+            px[k] = (c[k].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+        }
     }
 }
 
@@ -385,8 +622,9 @@ impl Looks {
     pub fn reset(&mut self) {
         let keep = self.settings.clone();
         self.settings = self
-            .face
-            .and_then(|(_, f)| seed(f, &keep))
+            .shown
+            .or(self.face)
+            .and_then(|(r, f)| seed_any(r, f, &keep))
             .unwrap_or(Settings { on: keep.on, try_on: keep.try_on, ..Settings::default() });
     }
 
@@ -418,11 +656,77 @@ pub fn command(w: &mut World, args: &[&str]) {
 
 /// Our look with the try-on: a Mithra face without a custom look (25-31) shows face 6A here.
 pub fn try_on(l: &Looks, look: crate::dat::character::Look) -> crate::dat::character::Look {
+    if let Some((race, face)) = l.preview {
+        return crate::dat::character::Look { race, face, ..look };
+    }
     if l.settings.on && l.settings.try_on && look.race == 7 && !supported(look.race, look.face) {
         crate::dat::character::Look { face: 10, ..look }
     } else {
         look
     }
+}
+
+/// Show our model as another race / face (None: our own), starting from that face's own colours.
+pub fn set_preview(l: &mut Looks, p: Option<(u8, u16)>) {
+    if l.preview == p {
+        return;
+    }
+    l.preview = p;
+    l.try_on_ver = l.try_on_ver.wrapping_add(1);
+    let before = l.settings.clone();
+    if let Some((r, f)) = p.or(l.face)
+        && let Some(s) = seed_any(r, f, &l.settings)
+    {
+        l.settings = s;
+    }
+    l.changed(&before);
+}
+
+/// The free camera's drag (from the game's look drag): turn and tilt; `raise` (middle button) moves it up and down.
+pub fn cam_drag(w: &mut World, dx: f64, dy: f64, raise: bool) {
+    let c = &mut w.looks.cam;
+    if raise {
+        c.height = (c.height - dy as f32 * 0.002).clamp(0.0, 1.2);
+    } else {
+        c.yaw -= dx as f32 * 0.006;
+        c.pitch = (c.pitch + dy as f32 * 0.005).clamp(-1.3, 1.4);
+    }
+}
+
+/// The free camera's wheel: nearer / farther.
+pub fn cam_wheel(w: &mut World, d: f32) {
+    let c = &mut w.looks.cam;
+    c.dist = (c.dist * (1.0 - d * 0.1)).clamp(0.15, 12.0);
+}
+
+/// The free camera's view, None when it's off or we have no model.
+pub fn free_camera(w: &World) -> Option<crate::render::Camera> {
+    use glam::Vec3;
+    let c = &w.looks.cam;
+    if !c.on {
+        return None;
+    }
+    let my_dir = w.net.me.lock().map(|m| m.dir).unwrap_or(0);
+    let p = super::super::actor_place(w, w.my_id, my_dir)?;
+    let a = w.actors.get(&w.my_id)?;
+    // The head's top: attach point 12 as the dressing camera finds it (Y is down), else 1.8 x scale.
+    let top = a
+        .character
+        .as_ref()
+        .and_then(|ch| ch.skeleton.points.get(12).copied())
+        .and_then(|(bone, off)| {
+            let bones = if a.bones.is_empty() { &a.rest } else { &a.bones };
+            bones.get(bone as usize).map(|b| -b.at(off).y * a.scale)
+        })
+        .filter(|t| *t > 0.1)
+        .unwrap_or(1.8 * a.scale.max(0.3));
+    let target = p.pos - Vec3::Y * top * c.height;
+    let f = Vec3::new(p.forward.x, 0.0, p.forward.z).try_normalize().unwrap_or(Vec3::Z);
+    let side = Vec3::new(-f.z, 0.0, f.x);
+    let flat = f * c.yaw.cos() + side * c.yaw.sin();
+    let dir = flat * c.pitch.cos() - Vec3::Y * c.pitch.sin();
+    let dist = c.dist * (top / 1.8).clamp(0.4, 1.6);
+    Some(crate::render::Camera { eye: target + dir * dist, target, up: Vec3::NEG_Y, fov_y: 40f32.to_radians() })
 }
 
 /// Per frame after posing: the settings loaded for our character, a changed look composed and uploaded (at most
@@ -445,6 +749,14 @@ pub fn apply(gpu: &crate::render::Gpu, w: &mut World, r: &crate::render::ZoneRen
         l.save();
     }
     l.face = w.look_base.get(&w.my_id).map(|lk| (lk.race, lk.face));
+    l.shown = l.preview.or(l.face);
+    let now = std::time::Instant::now();
+    if l.cam.on && l.cam.spin
+        && let Some(t) = l.cam.last
+    {
+        l.cam.yaw += now.duration_since(t).as_secs_f32().min(0.1) * 0.5;
+    }
+    l.cam.last = Some(now);
     if l.needs_seed
         && let Some((race, face)) = l.face
     {
@@ -455,7 +767,17 @@ pub fn apply(gpu: &crate::render::Gpu, w: &mut World, r: &crate::render::ZoneRen
     }
     let Some(a) = w.actors.get_mut(&w.my_id) else { return };
     let Some(g) = a.gpu.as_mut() else { return };
-    let Some((slot, style)) = FACE_TEXTURES.iter().find_map(|(n, st)| g.texture_slot(&[n]).map(|k| (k, *st))) else {
+    let (race, face) = l.shown.unwrap_or((0, 0));
+    // Mithra: the style's own neutral face (by the texture's name); the other races: the model's face texture.
+    let found = if race == 7 {
+        FACE_TEXTURES.iter().find_map(|(n, st)| g.texture_slot(&[n]).map(|k| (k, *st, n.to_string())))
+    } else {
+        race_face(race, face).and_then(|f| {
+            let name = a.character.as_ref()?.face_texture.clone()?;
+            g.texture_slot(&[name.as_str()]).map(|k| (k, f.style, name))
+        })
+    };
+    let Some((slot, style, tex_name)) = found else {
         l.fits = false;
         return;
     };
@@ -469,16 +791,33 @@ pub fn apply(gpu: &crate::render::Gpu, w: &mut World, r: &crate::render::ZoneRen
         l.pending = None;
         return;
     }
-    let want = (style, l.settings.clone());
+    let want = ((race, face, tex_name.clone()), l.settings.clone());
     let busy = l.made_at.is_some_and(|t| t.elapsed().as_secs_f32() < 0.1);
     if l.made.as_ref() != Some(&want) && !busy && l.pending.as_ref().is_none_or(|p| p.3 != want) {
+        let base = if race == 7 {
+            None
+        } else {
+            let Some(ch) = a.character.as_ref() else { return };
+            let Some(t) = ch.textures.iter().find(|t| t.name == tex_name) else { return };
+            let (Some(f), Some(rl)) = (race_face(race, face), race_layers(race, style)) else { return };
+            Some((t, f, rl))
+        };
         let up = |side: u8| {
-            let rgba = compose(style, &want.1, side);
-            let t = crate::dat::zone::Texture::new("timeless look".into(), 0, SIZE, SIZE, rgba);
+            let t = match &base {
+                None => {
+                    crate::dat::zone::Texture::new("timeless look".into(), 0, SIZE, SIZE, compose(style, &want.1, side))
+                }
+                Some((t, f, rl)) => {
+                    let rgba = compose_race(rl, f, t.rgba(), t.width, t.height, &want.1, side);
+                    crate::dat::zone::Texture::new("timeless look".into(), 0, t.width, t.height, rgba)
+                }
+            };
             r.actor_texture(gpu, &t)
         };
         let (left, seq) = up(LEFT);
-        let right = want.1.one_sided().then(|| up(RIGHT));
+        // A face with sides of its own carries both sides in one texture.
+        let sided = base.as_ref().is_some_and(|b| b.1.sides);
+        let right = (want.1.one_sided() && !sided).then(|| up(RIGHT));
         let seq = right.as_ref().map_or(seq, |r| r.1.max(seq));
         l.pending = Some((seq, left, right.map(|r| r.0), want.clone()));
         l.made_at = Some(std::time::Instant::now());
@@ -564,6 +903,55 @@ mod tests {
         assert_eq!(Settings { marks: vec![0, RIGHT], ..Settings::default() }.mark(1), RIGHT);
         let old: Settings = serde_json::from_str(r#"{"marks":[true,false,true,false,false,false]}"#).unwrap();
         assert_eq!(old.marks, vec![BOTH, 0, BOTH, 0, 0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn every_race_face_has_masks_and_colours() {
+        for (race, _) in RACES {
+            if race == 7 {
+                continue;
+            }
+            for face in 0..16u16 {
+                let f = race_face(race, face).expect("races.json");
+                let rl = race_layers(race, f.style).expect("masks");
+                assert!(rl.m.len() >= 4, "race {race} style {}", f.style);
+                assert_eq!(rl.m.len() == 6, f.sides, "race {race} style {}", f.style);
+                for m in &rl.m {
+                    assert_eq!(m.len(), (RACE_SIZE * RACE_SIZE * 4) as usize);
+                }
+                // Hair covers some of every face.
+                assert!(rl.m[0].chunks_exact(4).filter(|p| p[0] > 128).count() > 500, "race {race} face {face}");
+                assert!(seed_any(race, face, &Settings::default()).is_some());
+            }
+        }
+        // Elvaan F's face isn't mirrored: its markings have right sides of their own.
+        assert!(race_face(4, 0).unwrap().sides && !race_face(1, 0).unwrap().sides);
+    }
+
+    #[test]
+    fn race_hair_follows_the_colour() {
+        let f = race_face(1, 0).unwrap();
+        let rl = race_layers(1, f.style).unwrap();
+        // A grey 256 x 256 texture: hair texels take the colour, others stay grey.
+        let n = 256u32;
+        let tex = vec![120u8; (n * n * 4) as usize];
+        let red = compose_race(rl, f, &tex, n, n, &Settings { hair: [200, 30, 30], ..Settings::default() }, LEFT);
+        let m = &rl.m[0];
+        let k = (0..(n * n) as usize)
+            .find(|i| {
+                let (x, y) = (i % n as usize, i / n as usize);
+                sample(m, (x as f32 + 0.5) / n as f32, (y as f32 + 0.5) / n as f32)[0] > 0.99
+            })
+            .expect("hair");
+        assert!(red[k * 4] > red[k * 4 + 2] + 40, "{:?}", &red[k * 4..k * 4 + 4]);
+        let j = (0..(n * n) as usize)
+            .find(|i| {
+                let (x, y) = (i % n as usize, i / n as usize);
+                let (u, v) = ((x as f32 + 0.5) / n as f32, (y as f32 + 0.5) / n as f32);
+                sample(&rl.m[0], u, v)[0] == 0.0 && sample(&rl.m[0], u, v)[2] == 0.0 && sample(&rl.m[0], u, v)[3] == 0.0
+            })
+            .unwrap();
+        assert_eq!(&red[j * 4..j * 4 + 3], &[120, 120, 120]);
     }
 
     /// `cargo test looks_dump -- --ignored`: the "Crimson ombre" preview's texture to /tmp (checked against the tool's).

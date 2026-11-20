@@ -260,6 +260,7 @@ fn self_contained(
         ranged: -1,
         init_hidden: Default::default(),
         grips: [None; 2],
+        face_texture: None,
     };
     ch.merge_size_info(f.info);
     let init = init_scheduler(file);
@@ -487,6 +488,7 @@ mod tests {
             ranged: -1,
             init_hidden: Default::default(),
             grips: [None; 2],
+            face_texture: None,
         };
         let mut later = [0xFFu8; 16];
         later[10..14].copy_from_slice(&[85, 100, 115, 140]);

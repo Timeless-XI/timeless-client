@@ -14430,7 +14430,13 @@ impl App {
             zoom_in: self.input.test(0x4f, input::mode::HELD),
             zoom_out: self.input.test(0x50, input::mode::HELD),
             home: self.input.test(0x51, input::mode::HELD),
-            wheel: std::mem::take(&mut self.wheel),
+            // Timeless XI: the free camera takes the wheel.
+            wheel: if world.looks.cam.on {
+                timeless::looks::cam_wheel(world, std::mem::take(&mut self.wheel));
+                0.0
+            } else {
+                std::mem::take(&mut self.wheel)
+            },
             ..Default::default()
         };
         // First / third person (0x10: Num5, compact V; FUN_100a4580): SE 0014. The dead are third person.
@@ -15264,6 +15270,8 @@ impl App {
         match () {
             // The map's input context (0x26) has no camera functions; its drag scrolls the map.
             _ if world.map.is_some() || world.cnq.is_some() => {}
+            // Timeless XI: the custom looks' free camera takes the drag (middle button: up / down).
+            _ if world.looks.cam.on => timeless::looks::cam_drag(world, dx, dy, self.middle_down),
             // Mouse/Cam. 0x8b / 0x8c invert the third-person camera's X / Y (FUN_1001e030).
             // Down is positive as retail's mode-5 axis 7 (FUN_10122590, the pointer below the drag's start); with
             // 0x8c on, the default, down raises the eye as the camera keys do.
@@ -15438,7 +15446,11 @@ impl App {
     }
 
     fn camera(world: &World) -> Camera {
-        let mut c = rig_camera(world).or_else(|| event::camera(world)).unwrap_or_else(|| camera::view(world));
+        // Timeless XI: the custom looks' free camera (timeless/looks.rs) first.
+        let mut c = timeless::looks::free_camera(world)
+            .or_else(|| rig_camera(world))
+            .or_else(|| event::camera(world))
+            .unwrap_or_else(|| camera::view(world));
         world.camst.shake.apply(&mut c);
         c
     }

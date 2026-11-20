@@ -1099,6 +1099,8 @@ pub struct Character {
     /// Drawn weapons' (carry, grip) bones, main then sub (FUN_10029320): bone(point main info[6]) on bone(point 127),
     /// bone(point sub info[6]) on bone(point 126).
     pub grips: [Option<(u16, u16)>; 2],
+    /// Timeless XI: the face file's texture (custom looks recolour it, client/timeless/looks.rs).
+    pub face_texture: Option<String>,
     pub log: Vec<String>,
     /// The animations as GPU words (`prepare`), else packed when first posed.
     pub packed: Option<std::sync::Arc<super::animpack::Packed>>,
@@ -1247,6 +1249,7 @@ fn load_look(index: &DatIndex, look: &Look) -> Result<Character> {
         ranged: -1,
         init_hidden: Default::default(),
         grips: [None; 2],
+        face_texture: None,
     };
     ch.merge_size_info(base.info);
     let (mut body_info, mut sub_info, mut main_info) = (None, None, None);
@@ -1280,6 +1283,9 @@ fn load_look(index: &DatIndex, look: &Look) -> Result<Character> {
         // The range mesh (wep2) starts hidden, as `init`'s hwpc leaves it; ops 0x75 show it to shoot or play.
         if slot == "range" && !f.parts.is_empty() {
             ch.init_hidden[2][0] = true;
+        }
+        if slot == "face" {
+            ch.face_texture = f.textures.first().map(|t| t.name.clone());
         }
         ch.parts.extend(f.parts);
         ch.textures.extend(f.textures);
