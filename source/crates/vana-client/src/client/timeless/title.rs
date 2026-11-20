@@ -298,6 +298,8 @@ pub struct TitleLook {
     /// The match cut's light at the logo crystal 0..1, and the logo's extra glow after it.
     pub flare: f32,
     pub glow: f32,
+    /// The character menu's buttons coming in after the login, 0..1.
+    pub menu_in: f32,
 }
 
 impl TitleLook {
