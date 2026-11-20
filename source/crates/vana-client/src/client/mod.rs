@@ -928,6 +928,27 @@ pub(super) fn fit_tail(lu: &GameUi, text: &str, max: f32) -> String {
 }
 
 /// What the credentials window's actions do; a combo field's value was picked (now its text) or is to be forgotten.
+/// Timeless XI: the login form's fields shown, as indices of the whole form (`full` fields); the form's focus and
+/// list numbers mapped between the two (past the fields, the box and the actions keep their order).
+struct FormMap {
+    vis: Vec<usize>,
+    full: usize,
+}
+
+impl FormMap {
+    fn local(&self, f: usize) -> usize {
+        if f >= self.full {
+            f - self.full + self.vis.len()
+        } else {
+            self.vis.iter().position(|&v| v >= f).unwrap_or(self.vis.len())
+        }
+    }
+
+    fn whole(&self, f: usize) -> usize {
+        if f >= self.vis.len() { f - self.vis.len() + self.full } else { self.vis[f] }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum LoginChoice {
     LogIn,
@@ -1114,7 +1135,9 @@ fn login_window(
     let base_h = 52.0 + (n + 1) as f32 * pitch;
     // The modern layer's form is half again as large (its text sized to the fields), times the monitor's scale, up to
     // what fits.
-    let f = if modern.is_some() { (1.5 * monitor_scale).min(0.4 * sh / base_h).max(1.5) } else { 1.0 };
+    // Timeless XI: the Timeless title's card a size larger.
+    let grow = if tl { 1.7 } else { 1.5 };
+    let f = if modern.is_some() { (grow * monitor_scale).min(0.4 * sh / base_h).max(grow) } else { 1.0 };
     // Timeless: the row the character menu's buttons sit on, and the room between the logo's tagline and that row.
     let tl_row = tl.then(|| {
         let place = timeless::title::LogoPlace::default();
@@ -1184,7 +1207,9 @@ fn login_window(
     };
     // Log in and Create account need every field but the one-time code; PlayOnline accounts are made on Square Enix's
     // site.
-    let filled = fields[..n - 1].iter().all(|x| !x.text.trim().is_empty());
+    // Timeless XI: the code may be hidden, and then every field shown is needed.
+    let needed = if fields[n - 1].label.starts_with("One-time") { n - 1 } else { n };
+    let filled = fields[..needed].iter().all(|x| !x.text.trim().is_empty());
     let enabled = [filled, filled && !playonline, true];
     // Two-factor (also needing them) under the labels, on the box's row.
     const TF: &str = "Account";
@@ -9096,6 +9121,10 @@ pub struct App {
     flyover_next: Vec<String>,
     /// Timeless XI: the Timeless title's logo and match-cut state (client/timeless/title.rs).
     tl_title: timeless::title::TitleLook,
+    /// Timeless XI: the Timeless login shows Server Type and Server (no server was set when it opened).
+    tl_server_rows: bool,
+    /// Timeless XI: the Timeless login shows One-time code this run (a login was refused, or two-factor turned on).
+    tl_otp_shown: bool,
     /// The character select scene, its loading state and the character list it was built for.
     select: Option<select::SelectScene>,
     select_state: LoadState,
@@ -9399,6 +9428,8 @@ impl App {
             flyover_state: LoadState::Idle,
             flyover_next: Vec::new(),
             tl_title: Default::default(),
+            tl_server_rows: false,
+            tl_otp_shown: false,
             select: None,
             select_state: LoadState::Idle,
             select_key: String::new(),
@@ -10418,6 +10449,18 @@ impl App {
                 self.game_ui_state = LoadState::Failed;
             }
             Task::TwoFa(r) => {
+                // Timeless XI: two-factor turned on or off here: the login's One-time code shows or hides with it.
+                if matches!(r, Ok(Reply::TotpVerified { .. }) | Ok(Reply::TotpRemoved)) {
+                    let on = matches!(r, Ok(Reply::TotpVerified { .. }));
+                    let (server, username) = (self.cfg.server.clone(), self.cfg.username.clone());
+                    self.cfg.set_two_factor(&server, &username, on);
+                    self.tl_otp_shown = on;
+                    if (self.drive.login.is_none() || crate::config::is_copy())
+                        && let Err(e) = self.cfg.save()
+                    {
+                        log::warn!("saving the config: {e:#}");
+                    }
+                }
                 if matches!(r, Ok(Reply::TotpRemoved)) {
                     let (server, username) = (self.cfg.server.clone(), self.cfg.username.clone());
                     keep_trust_token(
@@ -10462,7 +10505,7 @@ impl App {
             Task::LoggedIn(Ok((lobby, chars)), _) | Task::Lobby(Ok((lobby, chars))) => {
                 self.status.clear();
                 // A login that worked: the password is remembered (sealed) or forgotten as the box says.
-                if let Phase::Login { password, pol_password, .. } = &self.phase
+                if let Phase::Login { password, pol_password, otp, .. } = &self.phase
                     && !password.is_empty()
                 {
                     let secret = if is_playonline(&self.cfg.server) {
@@ -10481,6 +10524,12 @@ impl App {
                     };
                     // First in the Server and Account lists.
                     self.cfg.remember_login();
+                    // Timeless XI: a code that worked marks the account as signing in with one.
+                    if !otp.trim().is_empty() {
+                        let (server, user) = (self.cfg.server.clone(), self.cfg.username.clone());
+                        self.cfg.set_two_factor(&server, &user, true);
+                    }
+                    self.tl_otp_shown = false;
                     if (self.drive.login.is_none() || crate::config::is_copy())
                         && let Err(e) = self.cfg.save()
                     {
@@ -11356,6 +11405,10 @@ impl App {
             | Task::Selected(Err(e))
             | Task::SelectFailed(_, e) => {
                 self.status = format!("{e:#}");
+                // Timeless XI: refused for the account, password or code: the code may be what was missing.
+                if e.downcast_ref::<auth::Refused>().is_some_and(|r| r.0 == 0x02) {
+                    self.tl_otp_shown = true;
+                }
                 self.back_to_login(true);
             }
             // The list refresh after a change failed (steps 0x13 / 2, LAB_1023d0a6): the error, then FFXI-3115, and the
@@ -15810,6 +15863,18 @@ impl App {
                     } else {
                         "only with 2FA"
                     };
+                    // Timeless XI: the Timeless login shows what the player needs: Server Type and Server are in
+                    // Settings' Account page (here while no server is set, until the next sign-out), One-time code
+                    // only for an account that signs in with one.
+                    let tl_form = self.cfg.modern_ui && self.cfg.timeless_ui && !playonline;
+                    if self.cfg.server.trim().is_empty() {
+                        self.tl_server_rows = true;
+                    }
+                    let server_rows = self.tl_server_rows;
+                    let show_otp = !otp.is_empty()
+                        || self.tl_otp_shown
+                        || self.cfg.two_factor()
+                        || (self.cfg.trust_computer && !self.cfg.trust_token.is_empty());
                     let mut fields = if playonline {
                         vec![
                             type_field,
@@ -15850,6 +15915,30 @@ impl App {
                         fields[1].options = servers.clone();
                     }
                     fields[account_field].options = accounts.clone();
+                    let full = fields.len();
+                    let map = FormMap {
+                        vis: (0..full)
+                            .filter(|&i| {
+                                !tl_form
+                                    || match i {
+                                        0 | 1 => server_rows,
+                                        4 => show_otp,
+                                        _ => true,
+                                    }
+                            })
+                            .collect(),
+                        full,
+                    };
+                    {
+                        let mut k = 0;
+                        fields.retain(|_| {
+                            k += 1;
+                            map.vis.contains(&(k - 1))
+                        });
+                    }
+                    let mut form_focus = map.local(*focus);
+                    let mut form_combo =
+                        combo.and_then(|(i, c)| map.vis.iter().position(|&v| v == i).map(|p| (p, c)));
                     let remembered = self.cfg.remember_password;
                     let trusted = self.cfg.trust_computer;
                     let stayed = self.cfg.stay_logged_in;
@@ -15886,11 +15975,11 @@ impl App {
                         size,
                         &mut fields,
                         playonline,
-                        combo,
+                        &mut form_combo,
                         &mut self.cfg.remember_password,
                         &mut self.cfg.stay_logged_in,
-                        (!playonline).then_some(&mut self.cfg.trust_computer),
-                        focus,
+                        (!playonline && (!tl_form || show_otp)).then_some(&mut self.cfg.trust_computer),
+                        &mut form_focus,
                         busy,
                         update,
                         &status,
@@ -15902,6 +15991,13 @@ impl App {
                         self.cfg.modern_ui && self.cfg.timeless_ui,
                     );
                     drop(fields);
+                    *focus = map.whole(form_focus);
+                    *combo = form_combo.map(|(p, c)| (map.vis[p], c));
+                    let chosen = chosen.map(|c| match c {
+                        LoginChoice::Picked(i) => LoginChoice::Picked(map.vis[i]),
+                        LoginChoice::Forget(i, k) => LoginChoice::Forget(map.vis[i], k),
+                        other => other,
+                    });
                     // Timeless XI: Stay logged in is saved at once.
                     if stayed != self.cfg.stay_logged_in {
                         save |= self.drive.login.is_none() || crate::config::is_copy();
@@ -16487,9 +16583,9 @@ impl App {
                             // lobycwin and our settings screen over the title; modern: both pages of one Config panel.
                             if let Some(c) = self.lobby_cfg.as_mut().filter(|_| modern_title) {
                                 c.owned = self.installed;
-                                if c.account.is_empty() {
-                                    c.account = self.cfg.username.clone();
-                                }
+                                c.account.clone_from(&self.cfg.username);
+                                c.server.clone_from(&self.cfg.server);
+                                c.servers = self.cfg.servers().into_iter().filter(|s| !is_playonline(s)).collect();
                                 if modern::lobby_config_settings(c) && self.lobby_settings.is_none() {
                                     let mut s = settings::SettingsUi::open(&self.cfg, window);
                                     s.monitors = self.monitors.clone();
@@ -16522,7 +16618,7 @@ impl App {
                                     self.lobby_settings.as_mut(),
                                     sw,
                                 ));
-                                let (mut closed, mut sign_out) = (false, false);
+                                let (mut closed, mut sign_out, mut acct) = (false, false, None);
                                 for out in outs {
                                     if let Some(a) = self.audio.as_mut() {
                                         for s in &out.sounds {
@@ -16530,18 +16626,48 @@ impl App {
                                         }
                                     }
                                     lobby_changes(&out.changed, &mut lobby_apply);
-                                    closed |= out.closed || out.sign_out;
-                                    sign_out |= out.sign_out;
+                                    closed |= out.closed || out.sign_out || out.account.is_some();
+                                    sign_out |= out.sign_out || out.account.is_some();
+                                    acct = acct.or(out.account);
+                                }
+                                // Timeless XI: another server type or server from the Account page: that login's, then
+                                // signed out to it (Other server: an empty Server for its address).
+                                if let Some(a) = acct {
+                                    match a {
+                                        configui::AccountAct::Type(pol) => {
+                                            let blank = crate::config::SavedLogin {
+                                                server: if pol { PLAYONLINE.into() } else { String::new() },
+                                                ..Default::default()
+                                            };
+                                            let l = self
+                                                .cfg
+                                                .logins
+                                                .iter()
+                                                .find(|l| is_playonline(&l.server) == pol)
+                                                .cloned()
+                                                .unwrap_or(blank);
+                                            self.cfg.use_login(&l);
+                                        }
+                                        configui::AccountAct::Server(s) => {
+                                            match self.cfg.saved_login(&s, None).cloned() {
+                                                Some(l) => self.cfg.use_login(&l),
+                                                None => self.cfg.server = s,
+                                            }
+                                        }
+                                        configui::AccountAct::Other => self.cfg.server.clear(),
+                                    }
                                 }
                                 // Sign Out (Config's Account page): back to the login with the Account field focused.
                                 // Under the Timeless title it is the same scene, so no fade.
                                 if sign_out {
                                     action = Some(Box::new(|app: &mut App| {
+                                        let no_server = app.cfg.server.trim().is_empty();
+                                        (app.tl_server_rows, app.tl_otp_shown) = (no_server, false);
                                         app.phase = Phase::login(&app.cfg);
                                         if let Phase::Login { focus, .. } = &mut app.phase
                                             && !is_playonline(&app.cfg.server)
                                         {
-                                            *focus = 2;
+                                            *focus = if no_server { 1 } else { 2 };
                                         }
                                     }));
                                     fade_action = !tl_title;

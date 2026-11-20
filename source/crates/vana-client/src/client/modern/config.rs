@@ -2046,19 +2046,106 @@ const ACCOUNT: usize = 2;
 
 const ACCOUNT_HELP: &str = "Sign out to return to the login and use a different account.";
 
-/// The Account page: the account signed in and Sign Out (the keyboard cursor on it while the page is open).
-fn account_page(ui: &mut Ui, m: &super::Modern, c: &ConfigUi, open: bool) -> bool {
-    ui.label(egui::RichText::new("Signed in as").size(m.theme.small).color(m.theme.color("muted")));
-    ui.add_space(2.0);
-    let name = if c.account.is_empty() { "—" } else { c.account.as_str() };
-    ui.label(egui::RichText::new(name).size(m.theme.ui).color(m.theme.color("gold")));
-    ui.add_space(14.0);
-    let s = Btn { cursor: open, ..Default::default() };
-    let resp = kit::button(ui, m, "Sign Out", 160.0, s);
-    if open {
-        kit::ring(ui.painter(), m, resp.rect, 4.0);
+/// The Account page's choices in order (the keyboard's).
+#[derive(Clone, Copy, PartialEq)]
+enum AccountItem {
+    Type(bool),
+    Server(usize),
+    Other,
+    SignOut,
+}
+
+fn same_server(a: &str, b: &str) -> bool {
+    a.trim().eq_ignore_ascii_case(b.trim())
+}
+
+fn account_items(c: &ConfigUi) -> Vec<AccountItem> {
+    let mut v = vec![AccountItem::Type(false), AccountItem::Type(true)];
+    if !super::super::is_playonline(&c.server) {
+        v.extend((0..c.servers.len()).map(AccountItem::Server));
+        v.push(AccountItem::Other);
     }
-    kit::clicked(&resp, s)
+    v.push(AccountItem::SignOut);
+    v
+}
+
+fn account_help(c: &ConfigUi) -> &'static str {
+    let items = account_items(c);
+    match items.get(c.m_row.min(items.len() - 1)) {
+        Some(AccountItem::Type(_)) => "A private server, or PlayOnline. Changing it signs out to the login.",
+        Some(AccountItem::Server(_)) => "A server you have logged in to. Changing it signs out to the login.",
+        Some(AccountItem::Other) => "Sign out and enter another server's address on the login.",
+        _ => ACCOUNT_HELP,
+    }
+}
+
+/// The Account page: Server Type, the servers logged in to (and Other server), the account signed in and Sign Out;
+/// the keyboard cursor on its row while the page is open. The choice clicked.
+fn account_page(ui: &mut Ui, m: &super::Modern, c: &ConfigUi, open: bool) -> Option<AccountItem> {
+    let items = account_items(c);
+    let cur = c.m_row.min(items.len() - 1);
+    let pol = super::super::is_playonline(&c.server);
+    let heading = |ui: &mut Ui, t: &str| {
+        ui.label(egui::RichText::new(t).size(m.theme.small).color(m.theme.color("muted")));
+        ui.add_space(4.0);
+    };
+    let mut hit = None;
+    let mut btn = |ui: &mut Ui, k: usize, label: &str, lit: bool, w: f32| {
+        let s = Btn { lit, cursor: open && k == cur, off: false };
+        let resp = kit::button(ui, m, label, w, s);
+        if s.cursor {
+            kit::ring(ui.painter(), m, resp.rect, 4.0);
+        }
+        if kit::clicked(&resp, s) {
+            hit = Some(items[k]);
+        }
+    };
+    heading(ui, "Server Type");
+    ui.horizontal(|ui| {
+        btn(ui, 0, "Private", !pol, 150.0);
+        btn(ui, 1, "PlayOnline", pol, 150.0);
+    });
+    if !pol {
+        ui.add_space(14.0);
+        heading(ui, "Server");
+        for (j, s) in c.servers.iter().enumerate() {
+            btn(ui, 2 + j, s, same_server(s, &c.server), 306.0);
+            ui.add_space(2.0);
+        }
+        btn(ui, 2 + c.servers.len(), "Other server\u{2026}", false, 306.0);
+    }
+    ui.add_space(14.0);
+    heading(ui, "Signed in as");
+    let name = if c.account.is_empty() { "\u{2014}" } else { c.account.as_str() };
+    ui.label(egui::RichText::new(name).size(m.theme.ui).color(m.theme.color("gold")));
+    ui.add_space(10.0);
+    btn(ui, items.len() - 1, "Sign Out", false, 160.0);
+    hit
+}
+
+/// A choice on the Account page: a different server type or server (or Other server) for the app to apply, or Sign
+/// Out; the same one as now does nothing.
+fn account_choose(c: &mut ConfigUi, item: AccountItem, out: &mut configui::Out) {
+    use configui::AccountAct;
+    if let Some(k) = account_items(c).iter().position(|&i| i == item) {
+        (c.m_open, c.m_row) = (true, k);
+    }
+    let pol = super::super::is_playonline(&c.server);
+    let act = match item {
+        AccountItem::Type(p) if p != pol => Some(AccountAct::Type(p)),
+        AccountItem::Server(j) => c.servers.get(j).filter(|s| !same_server(s, &c.server)).cloned().map(AccountAct::Server),
+        AccountItem::Other => Some(AccountAct::Other),
+        AccountItem::SignOut => {
+            out.sign_out = true;
+            out.sounds.push(Se::Select);
+            return;
+        }
+        _ => None,
+    };
+    if act.is_some() {
+        out.sounds.push(Se::Select);
+    }
+    out.account = act;
 }
 
 /// lobycwin's settings in retail's order on screen: the title music first.
@@ -2094,14 +2181,18 @@ pub fn lobby(p: &mut Panels, c: &mut ConfigUi, v: &mut Values, s: Option<&mut Se
         entry * 1_000_000 + ours.map_or(row, |o| o.view().row * 100 + o.view().tab + o.m_mods.0 * 10_000),
     );
     let (mut sact, mut mact, mut click, mut hover) = (Vec::new(), Vec::new(), None, None);
-    let mut sign_out = false;
+    let mut account_hit = None;
     // Centred, by last frame's size.
     let screen = p.ctx.content_rect();
     let size = m.rects.borrow().get("lobby config").map_or(vec2(640.0, 360.0), |r| r.size());
     let at = (screen.center() - size / 2.0).round();
     p.panel_at(
         "lobby config",
-        Some(Title { icon: Some("icons/config"), text: "Config", note: None, name: false }),
+        Some(if m.theme.timeless() {
+            Title { icon: Some("icons/settings"), text: "Settings", note: None, name: false }
+        } else {
+            Title { icon: Some("icons/config"), text: "Config", note: None, name: false }
+        }),
         640.0,
         at,
         |ui| {
@@ -2130,7 +2221,7 @@ pub fn lobby(p: &mut Panels, c: &mut ConfigUi, v: &mut Values, s: Option<&mut Se
                                 }
                                 Some(s) => settings_page(ui, m, &s.view(), open, follow, 0, &mut sact),
                                 None if lobby_settings(c) => {}
-                                None if entry == ACCOUNT => sign_out = account_page(ui, m, c, open),
+                                None if entry == ACCOUNT => account_hit = account_page(ui, m, c, open),
                                 None => {
                                     hover = native_rows(
                                         ui,
@@ -2152,7 +2243,7 @@ pub fn lobby(p: &mut Panels, c: &mut ConfigUi, v: &mut Values, s: Option<&mut Se
             });
             match ours {
                 Some(s) => help_line(ui, m, &ours_help(s)),
-                None if entry == ACCOUNT => help_line(ui, m, ACCOUNT_HELP),
+                None if entry == ACCOUNT => help_line(ui, m, account_help(c)),
                 None => help_line(
                     ui,
                     m,
@@ -2168,9 +2259,8 @@ pub fn lobby(p: &mut Panels, c: &mut ConfigUi, v: &mut Values, s: Option<&mut Se
         out.sounds.append(&mut s.sounds);
         c.m_open = true;
     }
-    if sign_out {
-        out.sign_out = true;
-        out.sounds.push(Se::Select);
+    if let Some(item) = account_hit {
+        account_choose(c, item, &mut out);
     }
     match click {
         Some(Click::Entry(k)) => {
@@ -2238,12 +2328,19 @@ pub fn lobby_key(
         return out;
     }
     if c.m_entry == ACCOUNT {
+        let items = account_items(c);
+        let row = c.m_row.min(items.len() - 1);
         match key {
-            egui::Key::Enter => {
-                out.sign_out = true;
-                out.sounds.push(Se::Select);
+            egui::Key::Enter => account_choose(c, items[row], &mut out),
+            egui::Key::ArrowUp | egui::Key::ArrowLeft if row > 0 => {
+                c.m_row = row - 1;
+                out.sounds.push(Se::Cursor);
             }
-            egui::Key::Escape | egui::Key::ArrowLeft | egui::Key::Backspace => {
+            egui::Key::ArrowDown | egui::Key::ArrowRight | egui::Key::Tab if row + 1 < items.len() => {
+                c.m_row = row + 1;
+                out.sounds.push(Se::Cursor);
+            }
+            egui::Key::Escape | egui::Key::Backspace => {
                 c.m_open = false;
                 out.sounds.push(Se::Cancel);
             }

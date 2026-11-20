@@ -168,7 +168,9 @@ impl Modern {
         p.add(super::borders::window(self, "window_normal", frame));
         let blink = (ctx.input(|i| i.time) * 2.0) as i64 % 2 == 0;
         // Text sized to the fields (the retail-sized form drew it far too small).
-        let size = v.fields.first().map_or(self.theme.small, |f| (pt(f.0).height() * 0.46).max(self.theme.small));
+        // Timeless XI: a size larger on the Timeless title.
+        let k_text = if self.theme.timeless() { 0.46 * TL_TEXT } else { 0.46 };
+        let size = v.fields.first().map_or(self.theme.small, |f| (pt(f.0).height() * k_text).max(self.theme.small));
         self.lobby_text.set(size);
         let font = FontId::proportional(size);
         for (i, (r, label, text, hint)) in v.fields.iter().enumerate() {
@@ -802,6 +804,11 @@ impl Modern {
         sw: f32,
     ) -> Out {
         self.zoom_to(ctx, window, scale);
+        // Timeless XI: the title's Settings (its Account page too) reads a size larger.
+        let sizes = (self.theme.ui, self.theme.small);
+        if self.theme.timeless() {
+            (self.theme.ui, self.theme.small) = (sizes.0 * TL_TEXT, sizes.1 * TL_TEXT);
+        }
         let mut layout = Default::default();
         let (mut changed, mut font) = (false, 15.0);
         let mut p = Panels {
@@ -827,9 +834,13 @@ impl Modern {
         };
         let out = super::config::lobby(&mut p, c, v, s, sw);
         *p.m.rects.borrow_mut() = std::mem::take(&mut p.this);
+        (self.theme.ui, self.theme.small) = sizes;
         out
     }
 }
+
+/// Timeless XI: the title's login and Settings text, larger than the theme's.
+const TL_TEXT: f32 = 1.15;
 
 /// A list row in the pack's art, lit on the cursor; its response.
 fn pick_row(ui: &mut Ui, m: &Modern, text: &str, on: bool, live: bool) -> egui::Response {

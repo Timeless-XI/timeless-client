@@ -15,11 +15,11 @@
       "note": "Lufaise Meadows at dusk: past the trees, toward the arch the logo shows, the logo coming in above it.",
       "moves": [
         {
-          "seconds": 39,
+          "seconds": 35,
           "keys": [
             { "eye": [148.0, -41.0, 378.0], "target": [61.0, -101.0, 700.0] },
             { "eye": [135.0, -40.0, 400.0], "target": [62.0, -98.0, 700.0] },
-            { "eye": [123.4, -39.23, 421.6], "target": [62.0, -94.9, 700.0] }
+            { "eye": [126.1, -39.41, 416.5], "target": [62.0, -95.6, 700.0] }
           ]
         }
       ]
