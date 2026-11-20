@@ -1261,25 +1261,6 @@ pub enum Why {
 }
 
 impl Why {
-    /// The short tag across the dimmed icon (none where the dimming says enough).
-    pub fn tag(self) -> &'static str {
-        match self {
-            Why::Learn | Why::Recast | Why::Empty => "",
-            Why::Act => "HALTED",
-            Why::Silence => "SILENCE",
-            Why::Amnesia => "AMNESIA",
-            Why::Status => "BUSY",
-            Why::Mp => "MP",
-            Why::Tp => "TP",
-            Why::Engage => "ENGAGE",
-            Why::Target => "NO TGT",
-            Why::Range => "RANGE",
-            Why::Ammo => "AMMO",
-            Why::Level => "LV",
-            Why::Missing => "MISSING",
-        }
-    }
-
     /// The tooltip's line.
     pub fn text(self) -> &'static str {
         match self {

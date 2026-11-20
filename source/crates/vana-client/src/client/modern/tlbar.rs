@@ -1060,18 +1060,13 @@ fn slot(
                 if v.left >= 60.0 { format!("{}m", (v.left / 60.0).ceil()) } else { format!("{}", v.left.ceil()) };
             outlined(painter, r.max - vec2(4.0, 2.0), Align2::RIGHT_BOTTOM, &secs, 12.0, Color32::WHITE);
         } else if let Some(why) = v.why {
-            let a = if why == hotbar::Why::Empty { 175 } else { 140 };
+            // Timeless XI (owner 2026-11-19): no words over the icon, only colour. The icon dims, with a wash in the
+            // colour of what's missing (MP blue, TP gold, red for out of range or anything that blocks it); the
+            // tooltip still says why.
+            let a = if why == hotbar::Why::Empty { 175 } else { 120 };
             pic.rect_filled(inner, CornerRadius::ZERO, Color32::from_black_alpha(a));
-            let tag = why.tag();
-            if !tag.is_empty() {
-                let c = match why {
-                    hotbar::Why::Mp => m.theme.color("mp"),
-                    hotbar::Why::Tp => m.theme.color("tp"),
-                    hotbar::Why::Range | hotbar::Why::Engage => m.theme.color("text"),
-                    _ => m.theme.color("hp"),
-                };
-                let size = if tag.len() > 5 { 8.5 } else { 10.5 };
-                outlined(painter, inner.center() + vec2(0.0, 1.0), Align2::CENTER_CENTER, tag, size, c);
+            if let Some(c) = why_color(m, why) {
+                pic.rect_filled(inner, CornerRadius::ZERO, c.gamma_multiply(0.22));
             }
         }
         if v.press > 0.0 {
@@ -1081,7 +1076,6 @@ fn slot(
         if v.armed {
             let red = m.theme.color("hp");
             pic.rect_filled(inner, CornerRadius::ZERO, red.gamma_multiply(0.25 + 0.2 * pulse));
-            outlined(painter, inner.center(), Align2::CENTER_CENTER, "AGAIN", 10.0, Color32::WHITE);
         }
         // The ready glint: a band of light sweeping across the icon as the recast comes back.
         if v.flash > 0.0 {
@@ -1118,8 +1112,8 @@ fn slot(
         Stroke::new(1.8, m.theme.color("hp"))
     } else if v.ring {
         Stroke::new(1.6, GREEN)
-    } else if v.why == Some(hotbar::Why::Range) {
-        Stroke::new(1.4, m.theme.color("hp").gamma_multiply(0.8))
+    } else if let Some(c) = v.why.filter(|_| v.left <= 0.0).and_then(|y| why_color(m, y)) {
+        Stroke::new(1.4, c.gamma_multiply(0.8))
     } else {
         Stroke::new(1.0, m.theme.color("bronze"))
     };
@@ -1319,6 +1313,19 @@ fn half_width(wall: &[(f32, f32)], y: f32) -> f32 {
 }
 
 /// Text with a dark outline, readable over any icon.
+/// Timeless XI: the colour a slot that can't go now is washed and edged with (none: just dimmed): MP blue, TP gold,
+/// red for out of range, silenced, busy and the rest; a slot only waiting for a target or to engage, an empty item
+/// slot or an action not learned stays plain dimmed.
+fn why_color(m: &super::Modern, why: hotbar::Why) -> Option<Color32> {
+    use hotbar::Why;
+    match why {
+        Why::Mp => Some(m.theme.color("mp")),
+        Why::Tp => Some(m.theme.color("tp")),
+        Why::Engage | Why::Target | Why::Empty | Why::Learn | Why::Recast => None,
+        _ => Some(m.theme.color("hp")),
+    }
+}
+
 pub(super) fn outlined(painter: &egui::Painter, at: Pos2, align: Align2, text: &str, size: f32, col: Color32) {
     let font = FontId::proportional(size);
     for d in [vec2(-1.0, 0.0), vec2(1.0, 0.0), vec2(0.0, -1.0), vec2(0.0, 1.0)] {
