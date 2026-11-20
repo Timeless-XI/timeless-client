@@ -154,6 +154,8 @@ struct VertexOut {
     @location(11) range: f32,
     // Scenery: the transformed normal's length, which scales every N.L (NORMALIZENORMALS off); 1 for actors.
     @location(12) nscale: f32,
+    // Timeless XI: actors, the texture's number in the model (`/look` debug colours, SkinMesh::build); 0 otherwise.
+    @location(13) @interpolate(flat) piece: u32,
 };
 
 // FUN_100c94a0: of the floor's lights, the strongest w = 1 / max(d^2 Att2, 1e-4) at the actor's position within
@@ -375,7 +377,7 @@ fn skin(v: SkinIn) -> VertexOut {
     var p = qrot(pose[a], pose[a + 2u].xyz * v.p0) + pose[a + 1u].xyz * v.w.x + qrot(pose[b], pose[b + 2u].xyz * v.p1) + pose[b + 1u].xyz * v.w.y;
     var n = qrot(pose[a], v.n0) + qrot(pose[b], v.n1);
     // A cloth particle (client/cloth.rs): the simulation's normal, and its position when free (w 1 = set).
-    let c = v.cloth & 0x7fffffffu;
+    let c = v.cloth & 0x00ffffffu;   // bits 24-30: the texture's number (Timeless XI debug colours)
     if (c != 0u) {
         let cp = pose[c];
         let cn = pose[c + 1u];
@@ -404,6 +406,7 @@ fn skin(v: SkinIn) -> VertexOut {
     out.area = u32(pose[5].x);
     out.tint = pose[5].yzw;
     out.nscale = 1.0;
+    out.piece = (v.cloth >> 24u) & 0x7fu;
     return out;
 }
 
@@ -584,6 +587,22 @@ fn fs_actor(in: VertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4
     return actor_colour(in, ff);
 }
 
+// Timeless XI (modes.w = 1, `/look` "Colour character pieces"): each texture of a character in a flat colour of its
+// own (the window lists them), shaded by how it faces us; the back of a triangle striped, so holes, back faces and
+// whose surface is whose can be told apart.
+fn debug_piece(in: VertexOut, ff: bool) -> vec4<f32> {
+    let pal = array<vec3<f32>, 8>(vec3<f32>(0.95, 0.25, 0.25), vec3<f32>(0.25, 0.85, 0.3), vec3<f32>(0.3, 0.45, 1.0),
+        vec3<f32>(1.0, 0.85, 0.2), vec3<f32>(0.9, 0.3, 0.95), vec3<f32>(0.2, 0.9, 0.95), vec3<f32>(1.0, 0.55, 0.15),
+        vec3<f32>(0.85, 0.85, 0.85));
+    let c = pal[in.piece % 8u] * select(1.0, 0.55, in.piece >= 8u);
+    let nv = abs(dot(normalize(in.normal), normalize(u.eye.xyz - in.world)));
+    var k = 0.45 + 0.55 * nv;
+    if (!ff && fract((in.clip.x + in.clip.y) * 0.125) < 0.5) {
+        k = k * 0.35;
+    }
+    return vec4<f32>(c * k, 1.0);
+}
+
 // Timeless XI (modes.z = 1, `/look` "Soft fill light"): a surface whose normal points away from the camera is seen from
 // behind (the inside of a mane, a cape): its normal is turned toward the camera (by the view, not the triangle's
 // winding, which the models don't keep consistently). Retail lights it by the stored normal (near black).
@@ -608,6 +627,9 @@ fn actor_colour(in: VertexOut, ff: bool) -> vec4<f32> {
     let texel = textureSample(tex, samp, in.uv);
     if (texel.a < 0.3) {
         discard;
+    }
+    if (u.modes.w > 0.5) {
+        return debug_piece(in, ff);
     }
     // Vertex alpha carries the model colour alpha (0x80 = 1.0).
     let alpha = clamp(in.color.a * 2.0, 0.0, 1.0);

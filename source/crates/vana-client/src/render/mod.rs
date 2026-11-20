@@ -452,6 +452,9 @@ pub struct ZoneRenderer {
     /// Timeless XI (`/look` "Light both sides"): characters' back faces lit by their flipped normal (zone.wgsl
     /// `actor_normal`); retail lights them by the front normal only (the inside of a mane goes near black).
     pub two_sided_actors: bool,
+    /// Timeless XI (`/look` "Colour character pieces"): every character drawn in a flat colour per texture (zone.wgsl
+    /// `debug_piece`).
+    pub debug_pieces: bool,
     /// Windowed mode's light boost (light_boost; zero = off).
     pub light_boost: [f32; 4],
     /// The zone's scenery culled on the GPU (render/cull.rs) when the device draws indirectly, and its passes.
@@ -987,6 +990,20 @@ pub struct SkinMesh {
     sim: Option<std::sync::Arc<cloth::ClothModel>>,
 }
 
+/// Timeless XI: a model's textures in debug-colour order (SkinMesh::build's piece numbers), each with the mesh it
+/// first appears on, for the `/look` legend.
+pub fn piece_textures(ch: &crate::dat::character::Character) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for part in &ch.parts {
+        for g in &part.groups {
+            if !out.iter().any(|(t, _)| *t == g.texture) {
+                out.push((g.texture.clone(), part.name.trim_end_matches(['\0', ' ']).to_string()));
+            }
+        }
+    }
+    out
+}
+
 impl SkinMesh {
     pub fn build(ch: &crate::dat::character::Character) -> Self {
         let bones = ch.skeleton.bones.len().min(MAX_BONES);
@@ -996,6 +1013,8 @@ impl SkinMesh {
         let mut mirrored = Vec::new();
         // Cloth particles in part order, after the bones and the identity slot.
         let mut particles = 0usize;
+        // Timeless XI: each texture's number in this model (debug colours), in the order `piece_textures` lists them.
+        let mut tex_ids: Vec<String> = Vec::new();
         for part in &ch.parts {
             let sim = part.sim.as_ref().filter(|s| particles + s.particles() <= MAX_CLOTH);
             let base = particles;
@@ -1010,6 +1029,14 @@ impl SkinMesh {
             let wep = n.strip_prefix("wep").and_then(|d| d.parse::<u8>().ok()).filter(|d| *d < 16).unwrap_or(NO_WEP);
             for g in &part.groups {
                 let start = verts.len() as u32;
+                let piece = match tex_ids.iter().position(|t| *t == g.texture) {
+                    Some(k) => k,
+                    None => {
+                        tex_ids.push(g.texture.clone());
+                        tex_ids.len() - 1
+                    }
+                }
+                .min(127) as u32;
                 for t in &g.triangles {
                     for c in t {
                         let inf = &part.vertices[c.vertex as usize];
@@ -1025,7 +1052,7 @@ impl SkinMesh {
                             w: [i0.weight, w1],
                             uv: c.uv,
                             mat: [g.light, part.cloth as u32 as f32],
-                            cloth: cloth_of(c.vertex),
+                            cloth: cloth_of(c.vertex) | piece << 24,
                         });
                     }
                 }
@@ -2618,6 +2645,7 @@ impl ZoneRenderer {
             bump_mode: true,
             smooth_lights: false,
             two_sided_actors: false,
+            debug_pieces: false,
             light_boost: [0.0; 4],
             scenery_bump: p.scenery_bump,
             scenery: p.scenery,
@@ -3845,7 +3873,7 @@ impl ZoneRenderer {
             area_info: [0.0; 4],
             voyage: self.voyage.to_cols_array_2d(),
             two: [[0.0; 4]; 4],
-            modes: [self.bump_mode as u32 as f32, self.smooth_lights as u32 as f32, self.two_sided_actors as u32 as f32, 0.0],
+            modes: [self.bump_mode as u32 as f32, self.smooth_lights as u32 as f32, self.two_sided_actors as u32 as f32, self.debug_pieces as u32 as f32],
             boost: self.light_boost,
         };
         let mut clear = self.fog_color;

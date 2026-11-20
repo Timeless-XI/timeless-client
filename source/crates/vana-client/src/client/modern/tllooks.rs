@@ -299,6 +299,27 @@ fn light_ui(ui: &mut egui::Ui, w: &mut World) {
     if w.looks.hold_retail {
         ui.label(RichText::new("Retail lighting (release to compare)").small().color(gold()));
     }
+    ui.add_space(6.0);
+    ui.checkbox(&mut w.looks.debug_pieces, RichText::new("Debug: colour character pieces").color(text()));
+    if w.looks.debug_pieces {
+        ui.label(
+            RichText::new("Each texture in its own flat colour; striped = the back of a surface; black = nothing drawn there. Your character's textures:")
+                .small()
+                .color(muted()),
+        );
+        const PAL: [[u8; 3]; 8] =
+            [[242, 64, 64], [64, 217, 77], [77, 115, 255], [255, 217, 51], [230, 77, 242], [51, 230, 242], [255, 140, 38], [217, 217, 217]];
+        let list = w.actors.get(&w.my_id).and_then(|a| a.character.as_ref()).map(|c| crate::render::piece_textures(c)).unwrap_or_default();
+        for (k, (tex, part)) in list.iter().enumerate() {
+            let c = PAL[k % 8];
+            let f = if k >= 8 { 0.55 } else { 1.0 };
+            let col = Color32::from_rgb((c[0] as f32 * f) as u8, (c[1] as f32 * f) as u8, (c[2] as f32 * f) as u8);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("■").color(col));
+                ui.label(RichText::new(format!("{}  ({})", tex.trim_end_matches(['\0', ' ']), part)).small().color(text()));
+            });
+        }
+    }
 }
 
 /// The free camera's switch and sliders.

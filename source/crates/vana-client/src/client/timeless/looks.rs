@@ -325,6 +325,8 @@ pub struct Looks {
     light_loaded: bool,
     /// The window's "Hold to see retail lighting" is held (both sides off while held).
     pub hold_retail: bool,
+    /// Debug: characters drawn in a flat colour per texture (not saved).
+    pub debug_pieces: bool,
 }
 
 fn light_path() -> std::path::PathBuf {
