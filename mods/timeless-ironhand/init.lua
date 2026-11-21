@@ -14,6 +14,7 @@ local book = require("lib.book")
 local tbl = require("lib.table")
 local found = require("lib.found")
 local howto = require("lib.howto")
+local invite = require("lib.invite")
 
 local BEAT = 20
 
@@ -37,6 +38,8 @@ tbl.setup(model)
 tbl.send = ask
 found.setup()
 howto.setup()
+invite.setup()
+invite.send = ask
 book.howto = function() howto.open() end
 tbl.howto = function() howto.open() end
 book.to_table = function() ui.open(tbl.WIN) tbl.render() end
@@ -70,6 +73,11 @@ filters.chat(function(text)
     if model.result.winner == 1 then sound("win", 0.55) elseif model.result.winner == 2 then sound("lose", 0.45) end
     tbl.render()
     if ui.is_open(book.WIN) then ask("ih book") end
+  elseif what == "invite" then
+    invite.show(model.invite, os.clock())
+    sound("flip", 0.5)
+  elseif what == "ready" then
+    tbl.render()
   elseif what == "found" then
     local f = model.found[#model.found]
     local ok, show = pcall(settings.get, "popup")
@@ -83,6 +91,7 @@ end)
 events.on("login", function() st.next_beat = os.clock() + 3 end)
 events.on("zone_change", function() st.next_beat = os.clock() + 3 end)
 events.on("unload", function() pcall(action.send, "ih off") end)
+events.on("target_change", function() if ui.is_open(book.WIN) then book.render() end end)
 
 commands.register("cardbook", function() book.toggle() end)
 commands.register("ironhand", function()
@@ -108,4 +117,5 @@ timer.every(0.1, function()
   if t >= st.next_beat then ask("ih on") end
   if #st.queue > 0 then pcall(action.send, table.remove(st.queue, 1)) end
   found.tick(t)
+  invite.tick(t)
 end)

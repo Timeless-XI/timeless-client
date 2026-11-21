@@ -1,5 +1,5 @@
 name = "Timeless Ironhand"
-version = "1.0.2"
+version = "1.1.0"
 authors = ["TimelessXI"]
 description = "The Steaming Sheep's card game. Monsters drop their own cards, notorious monsters rare ones and Champions foils; keep them in the cardbook (/cardbook, or the Timeless menu), build a deck of fifteen, and play the regulars at the game table after dark. The big cards show each monster's real model from your game files, turning slowly (TimelessXI client). Needs the server's ironhand module."
 permissions = ["packets.write"]

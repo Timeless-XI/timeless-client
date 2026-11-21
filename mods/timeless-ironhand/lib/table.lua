@@ -169,11 +169,17 @@ function T.draw(c)
     c:button(rx + 90, by + 110, 110, 28, "Close", { on = function() ui.close(T.WIN) end, key = "close" })
     c:button(rx + 90, by + 146, 110, 26, "How to play", { on = function() T.howto() end, key = "howto" })
   else
-    c:button(rx, by, 140, 34, st.waiting and "Revealing..." or "Reveal", { style = "primary", on = (not st.waiting) and T.reveal or nil,
+    local pvp = g.key == "pvp"
+    c:button(rx, by, 140, 34, st.waiting and (pvp and "Waiting..." or "Revealing...") or "Reveal", { style = "primary", on = (not st.waiting) and T.reveal or nil,
       enabled = not st.waiting, key = "reveal", tip = "Turn your cards over. Theirs turn over too, and the round ends." })
     c:button(rx + 150, by, 140, 34, "Fold", { style = "danger", on = function() T.send("ih concede") end, key = "fold",
       tip = g.stakes == "ante" and "Give up the game, and the card you put up." or "Give up the game." })
     local hint = st.note or (st.pick and "Now pick a front for it." or (#st.staged > 0 and "Reveal when you're ready." or "Pick a card from your hand."))
+    if pvp and st.waiting then
+      hint = ("Waiting for %s to reveal..."):format(g.opponent)
+    elseif pvp and g.ready and not st.note then
+      hint = ("%s is ready. %s"):format(g.opponent, hint)
+    end
     local hy2 = c:para(rx, by + 44, 290, hint, { size = 0.8, colour = S.MUTED })
     c:button(rx, math.max(hy2 + 8, by + 84), 140, 26, "How to play", { on = function() T.howto() end, key = "howto",
       tip = "The rules: fronts, crystals, the world's bonuses, and collecting cards." })

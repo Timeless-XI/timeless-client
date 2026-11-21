@@ -16,6 +16,7 @@ B.state = { tab = 1, page = 1, pick = 1, edit = nil, note = nil }
 B.send = function() end -- "ih ..." to the server, set by init.lua
 B.howto = function() end -- opens How to play, set by init.lua
 B.to_table = function() end -- opens the table, set by init.lua
+B.RANGE = 15 -- yalms: how close another player must be to challenge (the server's config.pvp.range)
 
 local TABS = {
   { label = "All", tip = "Every card, the ones you have and the ones still to find." },
@@ -200,6 +201,23 @@ function B.draw(c)
   end
   c:text(0, wy, "At the Steaming Sheep (after dark):  " .. table.concat(parts, "  ·  ") .. "  ·  three wins for their own card",
     { size = 0.8, colour = S.MUTED, w = B.W })
+  -- Another player: target them (close by) and challenge them
+  local cy = wy + 24
+  local t = game and game.target and game.target()
+  local busy = g and g.now and not g.now.over and not m.result
+  if t and t.kind == "player" and not t.me then
+    local close = (t.distance or 99) <= B.RANGE
+    local on = close and not busy
+    c:button(0, cy, 200, 26, "Challenge " .. t.name, { style = "primary", key = "challenge", enabled = on,
+      on = on and function() B.send(("ih challenge %d"):format(t.id)) end or nil,
+      tip = close and "A friendly game: nothing changes hands." or "Stand closer to them to play." })
+    c:button(208, cy, 150, 26, "For a card", { key = "challenge_ante", enabled = on,
+      on = on and function() B.send(("ih challenge %d ante"):format(t.id)) end or nil,
+      tip = "You each put up a common you have two of; the winner takes the loser's." })
+    if not close then c:text(370, cy + 5, "Stand closer to " .. t.name .. " to play.", { size = 0.8, colour = S.MUTED }) end
+  else
+    c:text(0, cy + 5, "To play another player: target them while you stand close by, then challenge them here.", { size = 0.8, colour = S.MUTED, w = B.W })
+  end
 end
 
 function B.setup(model)
@@ -208,7 +226,7 @@ function B.setup(model)
     title = "Cardbook",
     width = B.W + 20,
     help = "Your Ironhand cards: the ones you have, the ones still to find, Champions' foils, and the deck you play at the Steaming Sheep's table.",
-    elements = { { type = "canvas", id = "book", w = B.W, h = 740, draw = {} } },
+    elements = { { type = "canvas", id = "book", w = B.W, h = 770, draw = {} } },
   })
   Canvas.add(B.WIN, "book", B.W, B.draw)
   ui.on(B.WIN, function(win, e)

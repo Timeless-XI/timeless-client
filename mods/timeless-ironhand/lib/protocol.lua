@@ -15,6 +15,9 @@
 --   IH1|E                                   the end of the table
 --   IH1|R|<winner 1/2/0>|<you-them-who>,... x3|<text>   the game is over
 --   IH1|N|<card id>|<how>                   you found a card (drop, nm, champion, won, legend, gm)
+--   IH1|Q|<player>|<friendly or ante>|<your card put up, or 0>   another player challenges you
+--   IH1|A|<player>                          your opponent (a player) has revealed: they're ready
+-- A game against a player has the key "pvp" (G line).
 -- No game or UI code here, so it can be tested on its own.
 
 local P = {}
@@ -113,6 +116,7 @@ function P.feed(m, line, now)
     return true
   elseif kind == "E" then
     if m.game and m.pending then
+      m.game.ready = nil
       m.game.now = m.pending
       m.pending = nil
       m.version = m.version + 1
@@ -124,6 +128,12 @@ function P.feed(m, line, now)
     m.result = { winner = tonumber(f[1]) or 0, fronts = fronts, text = f[3] or "", at = now }
     if m.game then m.game.over = true end
     return "result"
+  elseif kind == "Q" then
+    m.invite = { from = f[1] or "?", stakes = f[2] == "ante" and "ante" or "friendly", ante = tonumber(f[3]) or 0, at = now }
+    return "invite"
+  elseif kind == "A" then
+    if m.game then m.game.ready = f[1] or true end
+    return "ready"
   elseif kind == "N" then
     m.found[#m.found + 1] = { id = tonumber(f[1]), how = f[2] or "drop", at = now }
     return "found"

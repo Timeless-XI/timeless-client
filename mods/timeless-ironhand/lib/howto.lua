@@ -10,7 +10,7 @@ local H = {}
 
 H.WIN = "ironhand_rules"
 H.W = 640
-H.H = 560
+H.H = 600
 H.state = { page = 1 }
 
 local PAGES = {
@@ -61,6 +61,8 @@ local TEXT = {
       "The card players sit in the Steaming Sheep in Port Bastok after dark, from 19:00 to 4:00. Talk to one to sit down: Hrodgar is the gentlest, then Fenwick and Kipiko; Dagny plays to win." },
     { "Friendly or for a card",
       "A friendly game costs nothing. A game for a card needs a common you have two of: win, and you take a common from their deck; lose, and they take your spare." },
+    { "Against another player",
+      "Target a player standing close by, open your cardbook and challenge them, for fun or for a card. They accept or decline in a window. You both stage cards and reveal; the round turns when you both have, or after 90 seconds (the slower one plays nothing). Folding, leaving the zone or logging out loses the game. Wins against players don't count towards the regulars' legendaries." },
     { "Leaving", "Closing the table doesn't end the game: Back to the game in the cardbook opens it again. Fold gives up the game (and the card you put up). Leaving the zone ends it." },
     { "Reading a card",
       "Top left: its element crystal. Top right: its cost. Under the name: its family and element. Under the picture: what it is, what it does, and its power. On the table, a strip shows its name and its power now." },
