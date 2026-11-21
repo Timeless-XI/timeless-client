@@ -124,6 +124,11 @@ pub struct Entry {
     pub weather: String,
     #[serde(default)]
     pub character: String,
+    /// The filter it was judged under ("current", "title", "off") and its strength (1 = exact).
+    #[serde(default)]
+    pub filter: String,
+    #[serde(default)]
+    pub filter_strength: f32,
     /// Unix seconds.
     pub updated: u64,
 }
@@ -173,6 +178,8 @@ pub struct Review {
     pub hour: Option<f32>,
     pub weather: Option<String>,
     pub filter: Filter,
+    /// The filter's strength: 0 nothing, 1 exactly as it is, 2 heavy.
+    pub strength: f32,
     pub auto_next: bool,
     pub note: String,
     /// egui had the keyboard (the note field) last frame: the Select screen's keys wait.
@@ -200,6 +207,7 @@ impl Default for Review {
             hour: None,
             weather: None,
             filter: Filter::Stronger,
+            strength: 1.0,
             auto_next: true,
             note: String::new(),
             typing: false,
@@ -320,6 +328,13 @@ impl Review {
             hour: self.hour.unwrap_or(-1.0),
             weather: self.weather.clone().unwrap_or_default(),
             character: character.to_string(),
+            filter: match self.filter {
+                Filter::Stronger => "current",
+                Filter::Title => "title",
+                Filter::Off => "off",
+            }
+            .into(),
+            filter_strength: self.strength,
             updated: now(),
         });
         self.save();
@@ -476,12 +491,38 @@ impl Review {
                     }
                 }
             });
+        });
+        ui.horizontal(|ui| {
             ui.label("Filter:");
-            for (f, l) in [(Filter::Stronger, "Vignette"), (Filter::Title, "Title"), (Filter::Off, "Off")] {
-                if ui.selectable_label(self.filter == f, l).clicked() {
+            for (f, l, tip) in [
+                (
+                    Filter::Stronger,
+                    "Current",
+                    "The Select screen's filter as it ships now (the title's, a little stronger)",
+                ),
+                (Filter::Title, "Title screen", "The title screen's filter exactly"),
+                (Filter::Off, "Off", "No filter at all"),
+            ] {
+                if ui.selectable_label(self.filter == f, l).on_hover_text(tip).clicked() {
                     self.filter = f;
                 }
             }
+        });
+        ui.add_enabled_ui(self.filter != Filter::Off, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Strength:");
+                ui.add(egui::Slider::new(&mut self.strength, 0.0..=2.0).step_by(0.05).custom_formatter(
+                    |v, _| match v {
+                        v if v < 0.001 => "nothing".into(),
+                        v if (v - 1.0).abs() < 0.001 => "exact".into(),
+                        v => format!("{:.0}%", v * 100.0),
+                    },
+                ))
+                .on_hover_text("0 = nothing, 100% = the filter exactly as chosen, 200% = heavy");
+                if ui.small_button("Exact").on_hover_text("Back to 100%").clicked() {
+                    self.strength = 1.0;
+                }
+            });
         });
         ui.label(RichText::new(format!("Camera {:.0}° off the character's facing", self.camera_deg)).small());
         ui.separator();
@@ -650,6 +691,8 @@ mod tests {
             hour: 0.0,
             weather: String::new(),
             character: String::new(),
+            filter: String::new(),
+            filter_strength: 1.0,
             updated: 0,
         });
         assert_eq!(r.next(Some(0), 1, true), Some(2));

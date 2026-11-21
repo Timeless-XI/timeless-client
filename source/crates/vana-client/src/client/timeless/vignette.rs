@@ -681,6 +681,27 @@ fn stronger(g: Option<crate::render::nostalgia::Grade>) -> Option<crate::render:
     })
 }
 
+/// A grade at `k` times its strength: 0 = no change to the picture, 1 = as given, past 1 heavier (kept in range).
+pub fn scaled(g: crate::render::nostalgia::Grade, k: f32) -> crate::render::nostalgia::Grade {
+    let k = k.clamp(0.0, 3.0);
+    let by = |v: f32, none: f32| none + (v - none) * k;
+    let v3 = |v: [f32; 3]| v.map(|x| by(x, 0.0));
+    crate::render::nostalgia::Grade {
+        lift: v3(g.lift),
+        shadow_tint: v3(g.shadow_tint),
+        high_tint: v3(g.high_tint),
+        saturation: by(g.saturation, 1.0).clamp(0.0, 2.0),
+        contrast: by(g.contrast, 1.0).clamp(0.5, 1.6),
+        halation: by(g.halation, 0.0).clamp(0.0, 1.0),
+        vignette: by(g.vignette, 0.0).clamp(0.0, 1.0),
+        grain: by(g.grain, 0.0).max(0.0),
+        soft_edges: by(g.soft_edges, 0.0).clamp(0.0, 1.0),
+        weave: by(g.weave, 0.0).max(0.0),
+        flicker: by(g.flicker, 0.0).max(0.0),
+        ..g
+    }
+}
+
 fn smooth(from: Vec3, to: Vec3, dt: f32, secs: f32) -> Vec3 {
     from + (to - from) * (1.0 - (-dt / secs.max(1e-3)).exp())
 }
@@ -721,7 +742,7 @@ pub struct Vignette {
     weather0: String,
     weather_shown: String,
     title_grade: Option<crate::render::nostalgia::Grade>,
-    filter: super::review::Filter,
+    filter: (super::review::Filter, f32),
 }
 
 impl Vignette {
@@ -770,7 +791,7 @@ impl Vignette {
             minute0,
             weather0,
             title_grade,
-            filter: super::review::Filter::Stronger,
+            filter: (super::review::Filter::Stronger, 1.0),
         };
         v.begin();
         v
@@ -839,16 +860,18 @@ impl Vignette {
         }
     }
 
-    /// The Scene Review's filter: the vignettes' stronger grade, the title's, or none.
-    pub fn set_filter(&mut self, f: super::review::Filter) {
+    /// The Scene Review's filter: the vignettes' stronger grade, the title's, or none; `strength` 0 = nothing,
+    /// 1 = that filter exactly, 2 = heavy.
+    pub fn set_filter(&mut self, f: super::review::Filter, strength: f32) {
         use super::review::Filter;
-        if f != self.filter {
-            self.filter = f;
-            self.grade = match f {
+        if (f, strength) != self.filter {
+            self.filter = (f, strength);
+            let base = match f {
                 Filter::Stronger => stronger(self.title_grade),
                 Filter::Title => self.title_grade,
                 Filter::Off => None,
             };
+            self.grade = base.map(|g| scaled(g, strength));
         }
     }
 
@@ -1290,7 +1313,7 @@ impl Stage {
             }
             c.set_hour(r.hour);
             c.set_weather(r.weather.as_deref());
-            c.set_filter(r.filter);
+            c.set_filter(r.filter, r.strength);
             r.camera_deg = c.camera_deg();
         }
         r.playing = if !self.failed.is_empty() && self.failed == self.wanted {
@@ -1810,6 +1833,20 @@ mod tests {
         assert_eq!(SpotKind::parse("Fishing"), Some(SpotKind::Fish));
         let j = serde_json::to_string(&s).unwrap();
         assert!(j.contains("\"kind\":\"walk\""));
+    }
+
+    #[test]
+    fn filter_strength_scales() {
+        let g = super::super::title::filter_preset("film").expect("film");
+        let same = scaled(g, 1.0);
+        assert_eq!(
+            (same.saturation, same.vignette, same.grain, same.lift),
+            (g.saturation, g.vignette, g.grain, g.lift)
+        );
+        let none = scaled(g, 0.0);
+        assert_eq!((none.saturation, none.contrast, none.vignette, none.grain), (1.0, 1.0, 0.0, 0.0));
+        let heavy = scaled(g, 2.0);
+        assert!(heavy.saturation < g.saturation && heavy.vignette > g.vignette && heavy.vignette <= 1.0);
     }
 
     #[test]
