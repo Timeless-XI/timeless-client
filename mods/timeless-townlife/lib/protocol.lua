@@ -5,6 +5,7 @@
 --   TL1|S|<n>|<kind>|<x>,<y>,<z>|<range>     scenery: smoke, hammer, crowd, gulls, music, cards, docks
 --   TL1|O|<n>|<1 on, 0 off>                  scenery that comes and goes (the tavern's music while the bard plays)
 --   TL1|A|<target index>|<lantern, torch, ->  what a townsperson carries that gives light (- nothing)
+--   TL1|W|<target index>|<0-100>|<craft>|<sound>  an apprentice at the furnace, how far along (TL1|W|<index>|- : stopped)
 --   TL1|T|<section>|<text>                   a Town window row
 --   TL1|E                                    the end of a snapshot
 -- No game or UI code here, so it can be tested on its own.
@@ -14,7 +15,7 @@ local P = {}
 P.VERSION = "TL1"
 
 function P.new_model()
-  return { zone = 0, zone_name = "", lamps = {}, scenery = {}, rows = {}, pending = nil, bubbles = {}, carry = {}, all_lamps = {}, version = 0 }
+  return { zone = 0, zone_name = "", lamps = {}, scenery = {}, rows = {}, pending = nil, bubbles = {}, carry = {}, all_lamps = {}, work = {}, version = 0 }
 end
 
 function P.extract(message)
@@ -39,7 +40,7 @@ function P.feed(m, line, now)
   if kind == "C" then
     local id, name = rest:match("^(%d+)|?(.*)$")
     m.zone, m.zone_name = tonumber(id) or 0, name or ""
-    m.lamps, m.scenery, m.bubbles, m.carry, m.all_lamps = {}, {}, {}, {}, {}
+    m.lamps, m.scenery, m.bubbles, m.carry, m.all_lamps, m.work = {}, {}, {}, {}, {}, {}
     m.pending = {}
     return "zone"
   elseif kind == "B" then
@@ -76,6 +77,16 @@ function P.feed(m, line, now)
     local s = i and m.scenery[tonumber(i)]
     if s then s.off = on == "0" end
     return "scenery"
+  elseif kind == "W" then
+    local index, pct, craft, sound = rest:match("^(%d+)|(%d+)|(%a+)|(%a+)$")
+    m.work = m.work or {}
+    if index then
+      m.work[tonumber(index)] = { pct = math.min(100, tonumber(pct)), craft = craft, sound = sound }
+    else
+      local gone = rest:match("^(%d+)|%-$")
+      if gone then m.work[tonumber(gone)] = nil end
+    end
+    return "work"
   elseif kind == "T" then
     local section, text = rest:match("^(%a+)|(.*)$")
     if section then

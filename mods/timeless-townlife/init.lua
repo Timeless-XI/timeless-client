@@ -6,6 +6,7 @@
 --   sounds by place: hammering by the furnaces, crowds on the plaza and in the Steaming Sheep, gulls on the docks;
 --     after dark the Steaming Sheep's lute and card game, at dawn the docks (only while they're going)
 --   the night watch's lanterns and the card table's candle give light after dark
+--   apprentices at the furnace: a progress bar over their heads, sparks or steam, the furnace's glow, their craft's sound
 --   /town  the Town window: headlines, who has the stall, the caravan, market day, your companions in town, gossip
 --
 -- It asks the server with a packet (not chat): "tl on" every 20 s (the server stops 60 s after the last one), and the
@@ -15,6 +16,7 @@ local action = require("lib.action")
 local protocol = require("lib.protocol")
 local world = require("lib.world")
 local town = require("lib.town")
+local work = require("lib.work")
 
 local BEAT = 20
 
@@ -40,7 +42,8 @@ end)
 
 events.on("zone_change", function()
   world.clear()
-  model.lamps, model.scenery, model.bubbles, model.rows, model.carry = {}, {}, {}, {}, {}
+  work.clear()
+  model.lamps, model.scenery, model.bubbles, model.rows, model.carry, model.work = {}, {}, {}, {}, {}, {}
   model.all_lamps = {}
   model.zone, model.zone_name = 0, ""
   town.render()
@@ -50,6 +53,7 @@ events.on("login", function() st.next_beat = os.clock() + 3 end)
 events.on("unload", function()
   pcall(action.send, "tl off")
   world.clear()
+  work.clear()
 end)
 
 commands.register("town", function(sub)
@@ -78,6 +82,8 @@ timer.every(0.1, function()
   if t >= st.next_beat then ask("on") end
   if #st.queue > 0 then pcall(action.send, table.remove(st.queue, 1)) end
   world.bubbles(model, t)
+  work.update(model, t, t - (st.last_work or t), game.player())
+  st.last_work = t
   if t - st.last_scene >= 0.2 then
     st.last_scene = t
     local me = game.player()

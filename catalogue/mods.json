@@ -3760,17 +3760,17 @@
       "id": "timeless-masterworks",
       "name": "Timeless Masterworks",
       "kind": "lua",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "authors": [
         "TimelessXI"
       ],
-      "description": "Your crafting ledger (/masterworks): skills and guild ranks, recipe mastery with the Masterwork chance each recipe has reached, Masterworks made, rested synths and Flash of Insight, today's craft orders and your apprentice.",
+      "description": "Your crafting ledger (/masterworks): skills and guild ranks, recipe mastery with the Masterwork chance each recipe has reached, Masterworks made, rested synths and Flash of Insight, today's craft orders and your apprentice. A high-quality synth flashes and chimes; a Masterwork bursts gold, eases the camera in on you and saves a screenshot.",
       "files": [
         {
           "path": "init.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/init.lua",
-          "sha256": "5b2e669cbdd1a2b103f2f4aada40b7c1128fbc125881b5c00bc86a35432ac6a6",
-          "size": 3215
+          "sha256": "b2bd2d94e37f4c75cf48540b8f4b587ddc6b4d924fe692f075f78dc6d4c3305b",
+          "size": 4465
         },
         {
           "path": "lib/action.lua",
@@ -3787,8 +3787,14 @@
         {
           "path": "lib/ledger.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/lib/ledger.lua",
-          "sha256": "889b673759194d91b552475e356c3e38a8abcd3f8320c632e7325d589f7dd9e3",
-          "size": 10603
+          "sha256": "f4c06ccc59741ec2e30cd71d3e4c5fe1ea80ba7b4baba9a5041f425f588c681d",
+          "size": 11002
+        },
+        {
+          "path": "lib/moment.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/lib/moment.lua",
+          "sha256": "4933cf3fd7b8a80097362134f5cb635542a0840a886ab42e86c2070a71ae94c0",
+          "size": 7393
         },
         {
           "path": "lib/protocol.lua",
@@ -3805,8 +3811,20 @@
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/mod.toml",
-          "sha256": "3363c271e99dfebdc9f6e2d99715950979efeea726b658b787dbf18b439d8196",
-          "size": 712
+          "sha256": "da4cdf7a553bc45b1783c21362f6c7d1b2076c11288a6b3792e8557377546b4a",
+          "size": 1479
+        },
+        {
+          "path": "sounds/chime.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/sounds/chime.wav",
+          "sha256": "89ec632c1d314bbaf754b3726c13c091880655816d915acef8cb0a54b846ffe4",
+          "size": 70604
+        },
+        {
+          "path": "sounds/fanfare.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-masterworks/sounds/fanfare.wav",
+          "sha256": "62221f15d3d9f434a4ae2d1af1faa7cf5a443905ec10159964a2840d3a499f71",
+          "size": 141164
         }
       ],
       "required": true,
@@ -4370,11 +4388,11 @@
       "id": "timeless-townlife",
       "name": "Timeless Town Life",
       "kind": "lua",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "authors": [
         "TimelessXI"
       ],
-      "description": "Bastok, lived in, by day and by night: speech bubbles over the townsfolk, lamp posts the lamplighter lights at dusk, the night watch's lanterns, sounds by place (hammering, crowds, gulls, the tavern's lute and card game after dark, the docks at dawn) and a Town window (/town) with the headlines, the caravan, market day and the gossip. Needs the server's townlife module.",
+      "description": "Bastok, lived in, by day and by night: speech bubbles over the townsfolk, lamp posts the lamplighter lights at dusk, the night watch's lanterns, sounds by place (hammering, crowds, gulls, the tavern's lute and card game after dark, the docks at dawn), apprentices at work by the furnaces and a Town window (/town) with the headlines, the caravan, market day and the gossip. Needs the server's townlife module.",
       "files": [
         {
           "path": "img/glow.png",
@@ -4391,8 +4409,8 @@
         {
           "path": "init.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/init.lua",
-          "sha256": "209063ef0733f5de6610201c3b9fda93416bf70161d0576887fd52b39cde32db",
-          "size": 3203
+          "sha256": "fb4d9f43055651961b8058ff70e56f22a903618a5749b02a6394618151a97ae3",
+          "size": 3488
         },
         {
           "path": "lib/action.lua",
@@ -4409,8 +4427,8 @@
         {
           "path": "lib/protocol.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/lib/protocol.lua",
-          "sha256": "22c4a4801cfffcc59ae514fc5d8be50bbae0b775db9b852ee70582c655182cb3",
-          "size": 3781
+          "sha256": "c726b9662d66276bc423c0048ed06530972aaa3387bf5302165564ce0f6d48fe",
+          "size": 4306
         },
         {
           "path": "lib/style.lua",
@@ -4425,6 +4443,12 @@
           "size": 2392
         },
         {
+          "path": "lib/work.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/lib/work.lua",
+          "sha256": "9469f699765b757797f8adb094115c0fa0684b568d18ff9765808b66775f6161",
+          "size": 7612
+        },
+        {
           "path": "lib/world.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/lib/world.lua",
           "sha256": "0959225870a6190b942c76f303c35283b3698346349a6ce3159877207635dd77",
@@ -4433,8 +4457,14 @@
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/mod.toml",
-          "sha256": "b16d9b7681fb32893abbb77924cccd5a67d8bec06225fa225e5c397bb6663223",
-          "size": 1438
+          "sha256": "89fb55903f55f3fe0e88a5df38b2282d9b5b3e3f6217e61f6c63176c325147cf",
+          "size": 1772
+        },
+        {
+          "path": "sounds/bubble.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/sounds/bubble.wav",
+          "sha256": "0215e376d09671205f292a0fd5d369dac4f6310c09eed687cea4453157d1d50f",
+          "size": 220544
         },
         {
           "path": "sounds/cards.wav",
@@ -4465,6 +4495,12 @@
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/sounds/hammer.wav",
           "sha256": "f6738c741287dc4ecdfd08a0796bf76159a65ad5f6b8fc2a3e7cb7e6ee36a17c",
           "size": 114704
+        },
+        {
+          "path": "sounds/loom.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-townlife/sounds/loom.wav",
+          "sha256": "3e569ed11b1311563b14326ae48213ebf68ba7fbe8f6719ac878b4a09c6853a9",
+          "size": 176444
         },
         {
           "path": "sounds/music.wav",

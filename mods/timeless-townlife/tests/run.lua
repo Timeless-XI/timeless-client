@@ -102,6 +102,56 @@ H.line("TL1|B|999|Nobody here.")
 H.run(0.2)
 ok(H.hud.tlb_999 == nil, "no bubble for someone out of sight")
 
+-- An apprentice at the furnace
+local work = require("lib.work")
+H.entities[17000410] = { id = 17000410, index = 410, name = "Brokk", kind = "npc", pos = { x = -184.6, y = 2, z = -148.8 }, heading = 1.2, height = 2.2 }
+H.player.pos = { x = -186, y = 2, z = -146 }
+H.sounds = {}
+ok(H.line("TL1|W|410|35|smith|hammer") == false, "the work line is hidden")
+ok(town.model.work[410] and town.model.work[410].pct == 35 and town.model.work[410].craft == "smith", "work read")
+H.run(1)
+ok(H.hud.tlw_410 and H.hud.tlw_410.kind == "bar" and math.abs(H.hud.tlw_410.value - 0.35) < 1e-6, "a progress bar over him")
+ok(H.hud.tlwt_410 and H.hud.tlwt_410.text == "Smithing 35%", "with his craft")
+local sparks = 0
+for id, d in pairs(H.draws) do if id:match("^tlws_410_") and d.kind == "line" then sparks = sparks + 1 end end
+ok(sparks > 0, "sparks fly off the anvil (" .. sparks .. ")")
+local played = false
+for _, snd in ipairs(H.sounds) do if snd.path == "sounds/hammer.wav" then played = true end end
+ok(played, "and he hammers")
+H.line("TL1|W|410|80|cook|bubble")
+H.run(2)
+ok(H.hud.tlwt_410.text == "Cooking 80%", "another craft")
+local steam = 0
+for id, d in pairs(H.draws) do if id:match("^tlws_410_") then steam = steam + 1 assert(d.colour[4] <= 120) end end
+ok(steam > 0, "steam over the pot")
+H.settings.workshop = false
+H.run(0.3)
+ok(H.hud.tlw_410 == nil, "setting off: nothing drawn")
+H.settings.workshop = nil
+H.run(0.3)
+ok(H.hud.tlw_410 ~= nil, "and back")
+H.line("TL1|W|410|-")
+H.run(0.3)
+ok(H.hud.tlw_410 == nil and town.model.work[410] == nil, "he stops: the bar goes")
+local left = 0
+for id in pairs(H.draws) do if id:match("^tlws_410_") then left = left + 1 end end
+ok(left == 0, "and the sparks")
+-- Particles on their own: sparks fall, steam rises
+math.randomseed(3)
+local list = {}
+for _ = 1, 30 do list = work.step(list, "sparks", { x = 0, y = 0, z = 0 }, 0.1) end
+ok(#list <= work.PARTICLES, "never more than a handful")
+local rising = work.step({}, "steam", { x = 0, y = 0, z = 0 }, 0.1)
+for _ = 1, 10 do rising = work.step(rising, "steam", { x = 0, y = 0, z = 0 }, 0.1) end
+ok(rising[1] == nil or rising[1].y < 0, "steam rises (y down)")
+for _, k in ipairs({ "loom", "bubble" }) do
+  local f = io.open(("sounds/%s.wav"):format(k), "rb")
+  ok(f ~= nil, "the " .. k .. " sound is there")
+  if f then f:close() end
+end
+H.entities[17000410] = nil
+H.player.pos = { x = -190, y = -6, z = -78 }
+
 -- The Town window
 H.take_sent()
 H.command("/town")
