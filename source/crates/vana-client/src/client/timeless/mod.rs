@@ -7,5 +7,6 @@ pub mod fishing;
 pub mod hdicon;
 pub mod hotbar;
 pub mod icons;
+pub mod scout;
 pub mod title;
 pub mod vignette;

@@ -240,6 +240,9 @@ enum Cmd {
         weather: String,
         #[arg(long, default_value = "Vignette")]
         name: String,
+        /// Which of the zone's scenes (0 = the best); default: by the name.
+        #[arg(long)]
+        scene: Option<usize>,
         /// Seconds to shoot at.
         #[arg(long, default_value = "2,6,10,14,18,24,30")]
         times: String,
@@ -247,6 +250,21 @@ enum Cmd {
         width: u32,
         #[arg(long, default_value_t = 720)]
         height: u32,
+    },
+    /// Timeless XI: scout zones for the Select screen's most scenic places (client/timeless/scout.rs) into a scenes
+    /// table (assets/timeless/vignette_scenes.json), keeping the zones already in it.
+    VignetteScout {
+        /// Zone ids, comma-separated.
+        #[arg(long)]
+        zones: String,
+        #[arg(long)]
+        out: PathBuf,
+        /// Candidate spots a zone.
+        #[arg(long, default_value_t = 400)]
+        tries: usize,
+        /// Places players reach, by zone (tools/timeless/vignette_seeds.py): scenes are scouted around them.
+        #[arg(long)]
+        seeds: Option<PathBuf>,
     },
     /// Render the title flyover (file 23): every camera op of one scheduler (mov1..mov8, ex1a..) at a few times.
     FlyoverShot {
@@ -2445,6 +2463,7 @@ fn main() -> Result<()> {
             hour,
             weather,
             name,
+            scene,
             times,
             width,
             height,
@@ -2474,7 +2493,11 @@ fn main() -> Result<()> {
                 let (s, c) = facing.to_radians().sin_cos();
                 Record {
                     zone,
-                    pos: [p.first().copied().unwrap_or(0.0), p.get(1).copied().unwrap_or(0.0), p.get(2).copied().unwrap_or(0.0)],
+                    pos: [
+                        p.first().copied().unwrap_or(0.0),
+                        p.get(1).copied().unwrap_or(0.0),
+                        p.get(2).copied().unwrap_or(0.0),
+                    ],
                     forward: [c, s],
                     fishing,
                     rod,
@@ -2483,7 +2506,11 @@ fn main() -> Result<()> {
                 }
             });
             let t: Vec<f32> = times.split(',').filter_map(|v| v.trim().parse().ok()).collect();
-            shot(&req, record, &t, &out_dir, [width, height])
+            shot(&req, record, scene, &t, &out_dir, [width, height])
+        }
+        Cmd::VignetteScout { zones, out, tries, seeds } => {
+            let z: Vec<u16> = zones.split(',').filter_map(|v| v.trim().parse().ok()).collect();
+            client::tl_vignette::scout_zones(&z, &out, tries, seeds.as_deref())
         }
         Cmd::FlyoverShot { scheduler, out_dir, steps, flat, width, height } => {
             flyover_shot(&scheduler, &out_dir, steps, flat, width, height)

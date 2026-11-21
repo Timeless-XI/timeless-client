@@ -15,6 +15,7 @@
 
 use super::super::ground::Ground;
 use super::super::select::{FxLibs, LobbyFx, Target};
+use super::scout::{self, Scene};
 use crate::dat::character::{Animation, Character as Model, Look, PoseLayer, load_character};
 use crate::dat::weather::{Lighting, ZoneWeather};
 use crate::dat::{DatIndex, zone};
@@ -228,15 +229,21 @@ pub struct VignetteData {
     /// Walking: the way out, a point every half unit, on the ground. Fishing: the one spot.
     path: Vec<Vec3>,
     forward: Vec3,
-    /// The camera's side of the walk (+1 / -1 about its right).
+    /// The camera's side of the heading (+1 / -1, scout.rs `turn`'s sense).
     side: f32,
+    /// The body's height (posed in its idle, at its size), for the framing.
+    height: f32,
+    /// Scenery the camera must not look through.
+    occ: scout::Scenery,
+    /// What the scene came from, for the log and the shot tool.
+    source: &'static str,
     minute: f32,
     weather_tag: String,
 }
 
 impl VignetteData {
     pub fn load(index: &Arc<DatIndex>, keys: &Arc<zone::Keys>, req: &Request) -> Result<Self> {
-        Self::load_with(index, keys, req, record_of(&req.name))
+        Self::load_with(index, keys, req, record_of(&req.name), None)
     }
 
     /// `load` with the record given (vignette-shot).
@@ -245,27 +252,19 @@ impl VignetteData {
         keys: &Arc<zone::Keys>,
         req: &Request,
         record: Option<Record>,
+        pick: Option<usize>,
     ) -> Result<Self> {
         let zone_id = req.zone as u32;
         let file = index.read(zone::file_id(zone_id))?;
         let scene = zone::load_scene(keys, &file)?;
         let ground = Ground::build(&scene);
+        let index_scene = scout::SceneIndex::build(&scene);
         let weather = ZoneWeather::parse(&file).ok();
         let fx = FxLibs::load_zone(index, keys, zone_id, &file);
         let model = load_character(index, &req.look).context("the character's model")?;
         let record = record.filter(|r| r.zone == req.zone);
         let town = is_town(req.zone);
-        // Where: the record's spot on the ground, else a picked one.
-        let spot = record.as_ref().and_then(|r| {
-            let p = Vec3::from(r.pos);
-            let y = ground.settle(p.x, p.z, p.y)?;
-            let f = Vec3::new(r.forward[0], 0.0, r.forward[1]).normalize_or(Vec3::X);
-            Some((Vec3::new(p.x, y, p.z), f))
-        });
-        let (start, forward) = match spot.or_else(|| home_spot(&ground, req.zone, seed_of(&req.name))) {
-            Some(s) => s,
-            None => find_spot(&ground, seed_of(&req.name)).context("no open ground in the zone")?,
-        };
+        let seed = seed_of(&req.name);
         let mut anims = model.animations.clone();
         let mut rod = None;
         let mut kind = if town { Kind::Town } else { Kind::Walk };
@@ -293,32 +292,78 @@ impl VignetteData {
                 kind = Kind::Fish;
             }
         }
-        // Fishing: facing the water (the record's facing when it looks at water, else the nearest heading that does).
-        let forward = if kind == Kind::Fish && !ground.water_ahead(start, forward) {
-            (1..12)
-                .flat_map(|k| [k as f32 * 15.0, -(k as f32) * 15.0])
-                .map(|deg| turn(forward, deg))
-                .find(|f| ground.water_ahead(start, *f))
-                .unwrap_or(forward)
-        } else {
-            forward
+        // Where: the zone's most scenic place (the scouted table, else scouted now), one of the best three by the
+        // character's name; failing that, where they left off, the Home Point, or any open ground.
+        let len = if kind == Kind::Town { 8.0 } else { 12.0 };
+        let scenes = scout::table(req.zone);
+        // Scouted now: around where they left off, else the Home Point, else anywhere.
+        let near: Vec<Vec3> =
+            record.as_ref().map(|r| Vec3::from(r.pos)).or_else(|| home_point(req.zone)).into_iter().collect();
+        let from_table = |v: Vec<Scene>| (!v.is_empty()).then_some(v);
+        let (picked, mut source) = match kind {
+            Kind::Fish => match scenes.and_then(|t| from_table(t.fish)) {
+                Some(v) => (v, "the zone's scouted fishing scenes"),
+                None => (
+                    scout::scout_fish(&ground, (&scene, &index_scene), 30, 3, seed, &near),
+                    "fishing scenes scouted now",
+                ),
+            },
+            _ => match scenes.and_then(|t| from_table(t.walk)) {
+                Some(v) => (v, "the zone's scouted scenes"),
+                None => {
+                    (scout::scout_walk(&ground, (&scene, &index_scene), len, 45, 3, seed, &near), "scenes scouted now")
+                }
+            },
         };
-        let (path, side) = match kind {
-            Kind::Fish => (vec![start], open_side(&ground, start, forward, forward)),
-            Kind::Town | Kind::Walk => {
-                let len = if kind == Kind::Town { 7.0 } else { 13.0 };
-                let path = walk_path(&ground, start, forward, len);
-                let dir = path_dir(&path).unwrap_or(forward);
-                let mid = path[path.len() / 2];
-                (path, open_side(&ground, mid, dir, forward))
-            }
+        let mut spot_scene = picked.get(pick.unwrap_or((seed % picked.len().max(1) as u64) as usize)).copied();
+        if spot_scene.is_none() {
+            let spot = record.as_ref().and_then(|r| {
+                let p = Vec3::from(r.pos);
+                let y = ground.settle(p.x, p.z, p.y)?;
+                let f = Vec3::new(r.forward[0], 0.0, r.forward[1]).normalize_or(Vec3::X);
+                Some((Vec3::new(p.x, y, p.z), f))
+            });
+            source = if spot.is_some() { "where they left off" } else { "a picked spot" };
+            let (at, f) = match spot.or_else(|| home_spot(&ground, req.zone, seed)) {
+                Some(s) => s,
+                None => find_spot(&ground, seed).context("no open ground in the zone")?,
+            };
+            // Fishing: facing the water (the nearest heading that looks at it).
+            let f = if kind == Kind::Fish && !ground.water_ahead(at, f) {
+                (1..12)
+                    .flat_map(|k| [k as f32 * 15.0, -(k as f32) * 15.0])
+                    .map(|deg| turn(f, deg))
+                    .find(|g| ground.water_ahead(at, *g))
+                    .unwrap_or(f)
+            } else {
+                f
+            };
+            spot_scene = Some(Scene { at: at.to_array(), dir: [f.x, f.z], len, side: 1.0, score: 0.0 });
+        }
+        let spot_scene = spot_scene.unwrap();
+        let start = ground
+            .settle(spot_scene.at[0], spot_scene.at[2], spot_scene.at[1])
+            .map_or(spot_scene.at(), |y| Vec3::new(spot_scene.at[0], y, spot_scene.at[2]));
+        let forward = spot_scene.dir();
+        let side = if spot_scene.side < 0.0 { -1.0 } else { 1.0 };
+        let path = match kind {
+            Kind::Fish => vec![start],
+            _ => scout::walk_points(&ground, start, forward, spot_scene.len.max(1.0)),
         };
+        // The scenery around the scene, for the camera.
+        let mid = path[path.len() / 2];
+        let occ = index_scene.local(&scene, mid, scout::xz(*path.last().unwrap() - path[0]).length() * 0.5 + 10.0);
+        // The body's height in its idle pose, at its size (y points down: min is the top).
+        let idle: Vec<_> = model.find_animations("idl").into_iter().map(|a| (a, 0.0)).collect();
+        let rest = crate::render::character::pose_character(&model, &idle);
+        let height = ((rest.max.y - rest.min.y) * model.scale(req.size)).clamp(0.6, 4.0);
         let (minute, weather_tag) =
             record.as_ref().map_or((default_minute(), default_weather()), |r| (r.minute, r.weather.clone()));
         log::info!(
-            "vignette {}: zone {zone_id}, {kind:?}, {} ({} path points), {:.1} h {weather_tag}",
+            "vignette {}: zone {zone_id}, {kind:?} from {source} (score {:.2}, {} path points), {:.1} h {weather_tag}, \
+             {height:.2} tall",
             req.name,
-            if spot.is_some() { "where they left off" } else { "a picked spot" },
+            spot_scene.score,
             path.len(),
             minute / 60.0
         );
@@ -337,6 +382,9 @@ impl VignetteData {
             path,
             forward,
             side,
+            height,
+            occ,
+            source,
             minute,
             weather_tag,
         })
@@ -394,28 +442,6 @@ fn path_dir(path: &[Vec3]) -> Option<Vec3> {
     let (a, b) = (path.first()?, path.last()?);
     let d = xz(*b - *a);
     (d.length() > 0.5).then(|| d.normalize())
-}
-
-/// Right of `dir` (y points down, so right is dir x -y).
-fn right_of(dir: Vec3) -> Vec3 {
-    xz(dir.cross(Vec3::NEG_Y)).normalize_or(Vec3::Z)
-}
-
-/// The side of `dir` at `at` with more room for the camera (+1 right, -1 left); the facing's side breaks a tie.
-fn open_side(ground: &Ground, at: Vec3, dir: Vec3, facing: Vec3) -> f32 {
-    let chest = at - Vec3::Y * 1.3;
-    let room = |s: f32| {
-        let want = chest + right_of(dir) * s * 6.0 - Vec3::Y * 0.6;
-        ground.cam_ray(chest, want).map_or(6.0, |h| (h - chest).length())
-    };
-    let (r, l) = (room(1.0), room(-1.0));
-    if (r - l).abs() < 0.5 {
-        if right_of(dir).dot(facing) >= 0.0 { 1.0 } else { -1.0 }
-    } else if r > l {
-        1.0
-    } else {
-        -1.0
-    }
 }
 
 /// The zone's first Home Point (assets/timeless/vignette_spots.json, from the server's data by
@@ -587,6 +613,23 @@ fn seconds_of(anims: &[Animation], name: &str, rate: f32) -> Option<f32> {
     Some(frames / (speed * 0.5 * rate).max(1e-3) / 60.0)
 }
 
+/// The vignettes' grade: the title's filter, a little stronger (owner, 2026-11-20): softer colour, lifted blacks,
+/// more halation, a deeper vignette, more grain and softer edges.
+fn stronger(g: Option<crate::render::nostalgia::Grade>) -> Option<crate::render::nostalgia::Grade> {
+    g.map(|g| crate::render::nostalgia::Grade {
+        lift: g.lift.map(|l| l * 1.3),
+        shadow_tint: g.shadow_tint.map(|t| t * 1.3),
+        high_tint: g.high_tint.map(|t| t * 1.3),
+        saturation: g.saturation * 0.86,
+        contrast: g.contrast * 1.03,
+        halation: (g.halation + 0.1).min(1.0),
+        vignette: (g.vignette + 0.15).min(1.0),
+        grain: g.grain * 1.35,
+        soft_edges: (g.soft_edges + 0.15).min(1.0),
+        ..g
+    })
+}
+
 fn smooth(from: Vec3, to: Vec3, dt: f32, secs: f32) -> Vec3 {
     from + (to - from) * (1.0 - (-dt / secs.max(1e-3)).exp())
 }
@@ -613,8 +656,9 @@ pub struct Vignette {
     act: Act,
     /// The stop part way along has happened on this leg.
     stopped_mid: bool,
-    /// The camera, eased toward where it wants to be.
-    cam: Option<(Vec3, Vec3)>,
+    /// The camera: its angle off the scene's heading (degrees), and the eye, target and focal it eased to.
+    theta: f32,
+    cam: Option<(Vec3, Vec3, f32)>,
     /// 0..1: fades in when it starts and out when another character is wanted.
     pub alpha: f32,
     pub leaving: bool,
@@ -633,7 +677,7 @@ impl Vignette {
             Kind::Fish => data.forward,
             _ => path_dir(&data.path).unwrap_or(data.forward),
         };
-        let grade = super::title::filter_preset(&super::title::Reel::load().filter);
+        let grade = stronger(super::title::filter_preset(&super::title::Reel::load().filter));
         let mut v = Self {
             data,
             zone: None,
@@ -651,8 +695,9 @@ impl Vignette {
             way: 1.0,
             feet,
             facing,
-            act: Act::Stop { left: 1.5, mid: false },
+            act: Act::Stop { left: 0.8, mid: false },
             stopped_mid: false,
+            theta: scout::FRONT_DEG,
             cam: None,
             alpha: 0.0,
             leaving: false,
@@ -810,48 +855,83 @@ impl Vignette {
         }
     }
 
-    /// Where the camera wants to be: (eye, target, focal).
-    fn camera_wants(&self) -> (Vec3, Vec3, f32) {
-        let scale = self.data.model.scale(self.data.size);
-        let chest = self.feet - Vec3::Y * (1.25 * scale);
-        let t = self.time;
+    /// The camera's angle off the scene's heading (degrees, toward `side`) for this moment. It always opens in front
+    /// of the character (`FRONT_DEG`) with the view behind them.
+    ///
+    /// Walking (`dir` = the way toward the camera): in front while they walk in; round to the side while they stop
+    /// at the near end; behind a shoulder while they walk back into the view; in front again as they turn at the
+    /// far end. Fishing (`dir` = the water): in front over the water, round to the side, over the shoulder looking
+    /// out, and back (a 56 s cycle).
+    fn theta_wants(&self) -> f32 {
+        let front = scout::FRONT_DEG;
         match self.data.kind {
             Kind::Fish => {
-                // Behind a shoulder, drifting slowly between 35 and 70 degrees off the facing; looking out past them.
-                let f = xz(self.facing).normalize_or(Vec3::X);
-                let swing = 52.5 + 17.5 * (t * std::f32::consts::TAU / 50.0).sin();
-                let back = turn(-f, swing * self.data.side);
-                let eye = chest + back * 4.4 - Vec3::Y * 0.9;
-                let target = chest + f * 2.5 + Vec3::Y * 0.35;
-                (eye, target, 480.0)
+                let t = self.time.rem_euclid(56.0);
+                let ease = |a: f32, b: f32, t0: f32, t1: f32| {
+                    let k = ((t - t0) / (t1 - t0)).clamp(0.0, 1.0);
+                    a + (b - a) * k * k * (3.0 - 2.0 * k)
+                };
+                match t {
+                    t if t < 9.0 => front,
+                    t if t < 21.0 => ease(front, 95.0, 9.0, 21.0),
+                    t if t < 31.0 => ease(95.0, 158.0, 21.0, 31.0),
+                    t if t < 40.0 => 158.0,
+                    _ => ease(158.0, front, 40.0, 56.0),
+                }
             }
-            Kind::Town | Kind::Walk => {
-                let town = self.data.kind == Kind::Town;
-                let dir = path_dir(&self.data.path).unwrap_or(self.facing);
-                let side = right_of(dir) * self.data.side;
-                let (dist, lift, lead, focal) = if town { (3.9, 0.4, 0.9, 560.0) } else { (5.0, 0.6, 1.4, 500.0) };
-                // Alongside, a little ahead of the way they walk, with a slow breathing drift.
-                let drift = 0.35 * (t * std::f32::consts::TAU / 37.0).sin();
-                let eye = chest + side * dist + dir * (lead * self.way + drift) - Vec3::Y * lift;
-                let target = chest + xz(self.facing) * 0.6;
-                (eye, target, focal)
-            }
+            Kind::Walk | Kind::Town => match self.act {
+                Act::Walk if self.way > 0.0 => front,
+                Act::Stop { mid: true, .. } if self.way > 0.0 => front + 12.0,
+                Act::Stop { mid: true, .. } => 34.0,
+                Act::Stop { .. } if self.s > 0.5 && self.way > 0.0 => 82.0,
+                // Turning back at the near end and walking away: behind a shoulder, the view ahead of them.
+                Act::Turn { .. } | Act::Walk if self.way < 0.0 || self.s > 0.5 => 34.0,
+                _ => front,
+            },
         }
     }
 
+    /// The camera for this frame: the framing for the body's height (it fills `FILL` of the frame, head and feet
+    /// in), eased round to `theta_wants`, kept off the ground and out of walls; pulled in by a wall, it widens to keep
+    /// the whole body in frame.
     fn camera(&mut self, dt: f32) -> Camera {
-        let (mut eye, target, focal) = self.camera_wants();
-        let chest = self.feet - Vec3::Y * 1.25;
-        // Never behind a wall: pulled in to just short of what it hits.
-        if let Some(hit) = self.data.ground.cam_ray(chest, eye) {
-            eye = chest + (hit - chest) * 0.85;
+        let h = self.data.height;
+        let want = self.theta_wants();
+        // The orbit eases (about 2 s) so a change of angle reads as a deliberate move.
+        self.theta += (want - self.theta) * (1.0 - (-dt / 2.0).exp());
+        if self.cam.is_none() {
+            self.theta = want;
         }
-        let (e, t) = match self.cam {
-            None => (eye, target),
-            Some((e, t)) => (smooth(e, eye, dt, 1.8), smooth(t, target, dt, 0.9)),
+        let d = scout::frame_distance(h, scout::FOCAL, scout::FILL);
+        let ground = &self.data.ground;
+        let chest = self.feet - Vec3::Y * (h * 0.62);
+        // The wanted angle; a tree or post in the way: closer (the focal widens to keep the framing), then a little
+        // further round either way. The first that sees the whole body.
+        let place = |deg: f32, k: f32| {
+            let dir = scout::turn(self.data.forward, deg * self.data.side);
+            let (eye, target) = scout::eye_target(self.feet, h, dir, d * k);
+            let mut eye = scout::above_ground(ground, eye);
+            if let Some(hit) = ground.cam_ray(chest, eye) {
+                eye = chest + (hit - chest) * 0.88;
+            }
+            (eye, target)
         };
-        self.cam = Some((e, t));
-        Camera { eye: e, target: t, up: Vec3::NEG_Y, fov_y: crate::dat::title::fov_y(focal) }
+        let tries = [(0.0, 1.0), (0.0, 0.8), (0.0, 0.62), (14.0, 1.0), (-14.0, 1.0), (28.0, 0.8), (-28.0, 0.8)];
+        let (eye, target) = tries
+            .iter()
+            .map(|(off, k)| place(self.theta + off, *k))
+            .find(|(e, _)| scout::body_visible(ground, &self.data.occ, *e, self.feet, h))
+            .unwrap_or_else(|| place(self.theta, 0.62));
+        let focal = scout::frame_focal(h, (eye - target).length(), scout::FILL).clamp(240.0, scout::FOCAL);
+        let (e, t, f) = match self.cam {
+            None => (eye, target, focal),
+            // Tight on the body (it moves), the focal a little slower.
+            Some((e, t, f)) => {
+                (smooth(e, eye, dt, 0.25), smooth(t, target, dt, 0.2), f + (focal - f) * (1.0 - (-dt / 0.4).exp()))
+            }
+        };
+        self.cam = Some((e, t, f));
+        Camera { eye: e, target: t, up: Vec3::NEG_Y, fov_y: crate::dat::title::fov_y(f) }
     }
 
     pub fn take_sounds(&mut self) -> Vec<crate::fx::sound::SoundCmd> {
@@ -932,7 +1012,9 @@ impl Vignette {
             let rmesh = crate::render::character::pose_character_layers(rod, &rpl, rover);
             zone.update_actor(gpu, ra, &rmesh, place);
         }
-        zone.set_camera_list(gpu, self.data.ground.camera_list(cam.eye), far);
+        // All the zone's scenery (list 0), as the title reel's `all_scenery`: the camera lists are made for players
+        // on the paths, and a camera off them (over a drop, on a terrace) leaves the far side of the zone undrawn.
+        zone.set_camera_list(gpu, 0, far);
         let actors: Vec<&ActorGpu> = self.actor.iter().chain(self.rod_actor.iter()).collect();
         zone.render(gpu, encoder, view, depth, &cam, aspect, &actors);
         if let Some(fx) = &mut self.effects {
@@ -1097,6 +1179,7 @@ impl Stage {
 pub fn shot(
     req: &Request,
     record: Option<Record>,
+    pick: Option<usize>,
     at: &[f32],
     out_dir: &std::path::Path,
     size: [u32; 2],
@@ -1104,8 +1187,16 @@ pub fn shot(
     let cfg = crate::config::Config::load();
     let index = Arc::new(DatIndex::open(&cfg.ffxi_dir())?);
     let keys = Arc::new(zone::Keys::from_ffximain(&std::fs::read(crate::dat::ffximain(&cfg.ffxi_dir()))?)?);
-    let data = VignetteData::load_with(&index, &keys, req, record)?;
-    println!("{:?} with {} path points", data.kind, data.path.len());
+    let data = VignetteData::load_with(&index, &keys, req, record, pick)?;
+    println!(
+        "{:?} from {} at {:?} heading {:?}, {} path points, {:.2} tall",
+        data.kind,
+        data.source,
+        data.path[0],
+        data.forward,
+        data.path.len(),
+        data.height
+    );
     let mut v = Vignette::new(data);
     v.effects = None;
     let gpu = Gpu::headless()?;
@@ -1177,8 +1268,66 @@ pub fn shot(
         e.set_color(png::ColorType::Rgba);
         e.set_depth(png::BitDepth::Eight);
         e.write_header()?.write_image_data(&img)?;
-        println!("{}: feet {:.1} {:.1} {:.1}, {:?}", path.display(), v.feet.x, v.feet.y, v.feet.z, v.act);
+        let (eye, _, _) = v.cam.unwrap_or_default();
+        println!(
+            "{}: feet {:.1} {:.1} {:.1}, {:?}, sees {} ({} occluders)",
+            path.display(),
+            v.feet.x,
+            v.feet.y,
+            v.feet.z,
+            v.act,
+            v.data.occ.sees(eye, v.feet, v.data.height),
+            v.data.occ.len()
+        );
     }
+    Ok(())
+}
+
+/// `vana-client vignette-scout`: each zone's best scenes into `out` (assets/timeless/vignette_scenes.json), kept
+/// beside the zones already there. `tries` candidate spots a zone.
+pub fn scout_zones(zones: &[u16], out: &std::path::Path, tries: usize, seeds: Option<&std::path::Path>) -> Result<()> {
+    let seeds: std::collections::HashMap<String, Vec<[f32; 3]>> = seeds
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let cfg = crate::config::Config::load();
+    let index = DatIndex::open(&cfg.ffxi_dir())?;
+    let keys = zone::Keys::from_ffximain(&std::fs::read(crate::dat::ffximain(&cfg.ffxi_dir()))?)?;
+    let mut table: BTreeMap<u16, scout::ZoneScenes> = std::fs::read_to_string(out)
+        .ok()
+        .and_then(|s| serde_json::from_str::<BTreeMap<String, scout::ZoneScenes>>(&s).ok())
+        .map(|m| m.into_iter().filter_map(|(k, v)| Some((k.parse().ok()?, v))).collect())
+        .unwrap_or_default();
+    for &z in zones {
+        let t = std::time::Instant::now();
+        let file = match index.read(zone::file_id(z as u32)) {
+            Ok(f) => f,
+            Err(e) => {
+                println!("zone {z}: {e:#}");
+                continue;
+            }
+        };
+        let scene = zone::load_scene(&keys, &file)?;
+        let ground = Ground::build(&scene);
+        let index_scene = scout::SceneIndex::build(&scene);
+        let len = if is_town(z) { 8.0 } else { 12.0 };
+        let seed = 0x7173_0000 + z as u64;
+        let near: Vec<Vec3> =
+            seeds.get(&z.to_string()).map(|v| v.iter().map(|p| Vec3::from(*p)).collect()).unwrap_or_default();
+        let walk = scout::scout_walk(&ground, (&scene, &index_scene), len, tries, 3, seed, &near);
+        let fish = scout::scout_fish(&ground, (&scene, &index_scene), tries / 2, 3, seed, &near);
+        println!(
+            "zone {z}: {} walk (best {:.2}), {} fish (best {:.2}) in {:.1} s",
+            walk.len(),
+            walk.first().map_or(0.0, |s| s.score),
+            fish.len(),
+            fish.first().map_or(0.0, |s| s.score),
+            t.elapsed().as_secs_f32()
+        );
+        table.insert(z, scout::ZoneScenes { walk, fish });
+    }
+    let named: BTreeMap<String, &scout::ZoneScenes> = table.iter().map(|(k, v)| (k.to_string(), v)).collect();
+    std::fs::write(out, serde_json::to_string_pretty(&named)? + "\n")?;
     Ok(())
 }
 
