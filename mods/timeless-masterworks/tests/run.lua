@@ -44,7 +44,8 @@ local STATUS = {
 ok(H.commands.masterworks and H.commands.timelessmasterworks, "commands")
 ok(H.provided["timeless-masterworks"].timeless_menu().open == "//masterworks", "a TimelessMenu card")
 H.run(5)
-ok(#H.take_sent() == 0, "nothing asked while closed")
+local first = H.take_sent()
+ok(#first == 1 and first[1] == "cb status 1", "only the Masterwork count is asked while closed: " .. table.concat(first, ","))
 
 -- Opening asks, and shows a waiting line
 H.command("/masterworks")
@@ -118,5 +119,79 @@ ok(not ui.is_open("masterworks"), "closes")
 H.take_sent()
 H.run(40)
 ok(#H.take_sent() == 0, "nothing asked while closed")
+
+-- High-quality and Masterwork moments
+local moment = require("lib.moment")
+local shaders, params, lights, cams, shots, sounds = {}, {}, {}, {}, {}, {}
+render.shader = function(id, src) shaders[id] = src end
+render.shader_params = function(id, p) params[id] = p end
+render.light = function(id, spec) lights[id] = spec end
+local camd = 1.4
+render.camera_distance = function() return camd end
+render.set_camera_distance = function(d) camd = d cams[#cams + 1] = d end
+audio = { play = function(path, vol) sounds[#sounds + 1] = path end }
+client = { screenshot = function(name) shots[#shots + 1] = name return name .. ".png" end }
+H.player.index = 1
+local function count_status(made)
+  return { "CB1|B|0|kind=status", "CB1|W|0|n=" .. made .. ",on=1,c=0.2.4,tn=Practiced.Mastered.Grandmaster,hq=10.20.30", "CB1|Z|0|kind=status" }
+end
+for _, l in ipairs(count_status(3)) do H.line(l) end
+ok(moment.state.base == 3, "the Masterwork count to compare with")
+
+-- A high-quality synth that is no Masterwork: flash, chime, a check, no burst
+H.take_sent()
+H.fire("synth_result", 0, 16594, 1, 1)
+ok(shaders.mwflash and sounds[#sounds] == "sounds/chime.wav", "a high-quality synth flashes and chimes")
+H.run(0.2)
+ok(params.mwflash and params.mwflash[1][3] > 0, "the flash is on, round you")
+H.run(0.6)
+ok(H.take_sent()[1] == "cb status 1", "and asks whether it was a Masterwork")
+for _, l in ipairs(count_status(3)) do H.line(l) end
+H.run(1)
+ok(shaders.mwflash == nil and shaders.mwgold == nil, "the flash fades; no Masterwork, no burst")
+H.fire("synth_result", 0, 16594, 1, 0)
+ok(shaders.mwflash == nil, "a normal synth: nothing")
+H.fire("synth_result", 1, 16594, 0, 0)
+ok(shaders.mwflash == nil, "a failed one: nothing")
+
+-- A Masterwork
+H.fire("synth_result", 0, 16594, 1, 1)
+H.run(0.8)
+for _, l in ipairs(count_status(4)) do H.line(l) end
+ok(shaders.mwgold and sounds[#sounds] == "sounds/fanfare.wav", "one more Masterwork: the golden burst and the fanfare")
+ok(lights.mwglow and lights.mwglow.entity == 1, "a golden light on you")
+H.run(0.5)
+ok(params.mwgold and params.mwgold[1][3] > 0.9, "the burst at full")
+ok(#cams > 0 and camd < 1.4 and camd >= 0.5, "the camera eases in")
+H.run(1.0)
+ok(#shots == 1 and shots[1]:find("^masterworks/") and shots[1]:find("Bastokan Axe", 1, true), "a screenshot: " .. tostring(shots[1]))
+ok(storage.character.moments and storage.character.moments[1].item == "Bastokan Axe", "remembered for the ledger")
+H.run(4)
+ok(shaders.mwgold == nil and lights.mwglow == nil, "the burst fades")
+ok(math.abs(camd - 1.4) < 1e-6, "the camera back where it was")
+H.command("/masterworks")
+H.run(0.2)
+for _, l in ipairs(STATUS) do H.line(l) end
+ok(texts():find("Latest Masterwork: Bastokan Axe", 1, true), "the ledger shows the latest")
+ok(tip_with("screenshots/masterworks/"), "and where its screenshot is")
+H.check_draws("masterworks")
+H.command("/masterworks")
+
+-- Settings off
+H.settings.hq_moment, H.settings.masterwork_moment, H.settings.screenshot = false, false, false
+for _, l in ipairs(count_status(4)) do H.line(l) end
+local nshots = #shots
+H.fire("synth_result", 0, 16594, 1, 2)
+ok(shaders.mwflash == nil, "flash off")
+H.run(0.8)
+for _, l in ipairs(count_status(5)) do H.line(l) end
+H.run(3)
+ok(shaders.mwgold == nil and #shots == nshots, "burst and screenshot off")
+ok(moment.safe_name("Mythril Sword +1 / x:y") == "Mythril Sword 1 xy", "a file name from the item")
+for _, k in ipairs({ "chime", "fanfare" }) do
+  local f = io.open(("sounds/%s.wav"):format(k), "rb")
+  ok(f ~= nil, "the " .. k .. " sound is there")
+  if f then f:close() end
+end
 
 io.stdout:write(("ok: %d checks\n"):format(n))

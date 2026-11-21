@@ -8,12 +8,16 @@
 -- It asks the server's Craft Plus module (a packet, not chat: "cb status 20") when it opens, every 30 s while it's
 -- open, and just after each synth; the lines are taken out of the chat log.
 --
+-- A high-quality synth flashes and chimes; a Masterwork bursts gold, eases the camera in, and saves a screenshot
+-- under screenshots/masterworks (each can be turned off in the mod's settings).
+--
 --   /masterworks         open or close the ledger
 --   /masterworks update  ask again now
 
 local action = require("lib.action")
 local protocol = require("lib.protocol")
 local ledger = require("lib.ledger")
+local moment = require("lib.moment")
 
 local REFRESH = 30
 local st = { next_ask = nil, queue = {}, was_busy = false }
@@ -29,7 +33,16 @@ filters.chat(function(text)
   if type(text) ~= "string" then return nil end
   local line = protocol.extract(text)
   if not line then return nil end
-  if protocol.feed(ledger.model, line, os.clock()) == "status" then ledger.render() end
+  if protocol.feed(ledger.model, line, os.clock()) == "status" then
+    local s = ledger.model.status
+    if s and s.masterworks then
+      moment.on_count(s.masterworks.made, os.clock(), function(id)
+        local ok, r = pcall(res.item, id)
+        return ok and r and r.name or "Masterwork"
+      end)
+    end
+    ledger.render()
+  end
   return false
 end)
 
@@ -56,6 +69,19 @@ end
 commands.register("masterworks", masterworks_command)
 commands.register("timelessmasterworks", masterworks_command)
 
+-- High-quality and Masterwork moments (lib/moment.lua): after a high-quality synth, ask for the Masterwork count
+events.on("synth_result", function(result, item, count, grade)
+  if (result == 0 or result == 12) and (grade or 0) >= 1 then
+    moment.on_hq(item, grade, os.clock(), function() st.count_at = os.clock() + 0.5 end)
+  end
+end)
+-- The count to compare with, once logged in
+local function ask_count() st.count_at = os.clock() + 3 end
+ask_count()
+events.on("login", ask_count)
+events.on("unload", function() moment.clear() end)
+events.on("zone_change", function() moment.clear() end)
+
 local bound
 local function apply_key()
   if bound then pcall(binds.unset, bound) bound = nil end
@@ -77,8 +103,14 @@ mods.provide("timeless_menu", function()
   }
 end)
 
+timer.every(0.05, function() moment.update(os.clock()) end)
+
 timer.every(0.1, function()
   local t = os.clock()
+  if st.count_at and t >= st.count_at then
+    st.count_at = nil
+    pcall(action.send, "cb status 1")
+  end
   local open = ui.is_open(ledger.WIN)
   -- Just after a synth, while the ledger is open: ask again
   local ok, synth = pcall(game.synth)

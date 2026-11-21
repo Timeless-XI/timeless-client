@@ -1,7 +1,7 @@
 name = "Timeless Masterworks"
-version = "1.0.0"
+version = "1.1.0"
 authors = ["TimelessXI"]
-description = "Your crafting ledger (/masterworks): skills and guild ranks, recipe mastery with the Masterwork chance each recipe has reached, Masterworks made, rested synths and Flash of Insight, today's craft orders and your apprentice."
+description = "Your crafting ledger (/masterworks): skills and guild ranks, recipe mastery with the Masterwork chance each recipe has reached, Masterworks made, rested synths and Flash of Insight, today's craft orders and your apprentice. A high-quality synth flashes and chimes; a Masterwork bursts gold, eases the camera in on you and saves a screenshot."
 permissions = ["packets.write"]
 
 [settings.key_masterworks]
@@ -9,6 +9,30 @@ type = "key"
 default = ""
 label = "Masterworks Key"
 help = "A key that opens or closes the crafting ledger."
+
+[settings.hq_moment]
+type = "bool"
+default = true
+label = "High-Quality Flash"
+help = "A bright flash round you and a chime when a synth comes out high quality."
+
+[settings.masterwork_moment]
+type = "bool"
+default = true
+label = "Masterwork Moment"
+help = "A golden burst and a fanfare when you make a Masterwork."
+
+[settings.camera_moment]
+type = "bool"
+default = true
+label = "Masterwork Camera"
+help = "The camera eases in on you for a Masterwork, then back."
+
+[settings.screenshot]
+type = "bool"
+default = true
+label = "Masterwork Screenshot"
+help = "Saves a screenshot of each Masterwork under screenshots/masterworks; the ledger lists them."
 
 [commands.masterworks]
 help = "Opens or closes your crafting ledger."

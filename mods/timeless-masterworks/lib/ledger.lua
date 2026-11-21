@@ -40,8 +40,16 @@ function L.draw_head(c, st)
   hammer(c, 34, 6, { 200, 200, 210, 255 })
   c:text(62, 8, "Masterworks", { size = 1.35, bold = true, colour = PARCH, outline = { 0, 0, 0, 160 } })
   local mw = st and st.masterworks
-  c:text(62, 31, mw and (mw.on and "Your crafting ledger" or "Masterworks are off on this server") or "Your crafting ledger",
-    { size = 0.82, colour = BRASS_DIM })
+  local okM, moment = pcall(require, "lib.moment")
+  local last = okM and moment.moments()[1] or nil
+  local sub = mw and (mw.on and "Your crafting ledger" or "Masterworks are off on this server") or "Your crafting ledger"
+  if last then
+    sub = ("Latest Masterwork: %s, %s%s"):format(last.item or "?", last.at or "", last.file and " (screenshot saved)" or "")
+  end
+  c:text(62, 31, sub, { size = 0.82, colour = last and GLOW or BRASS_DIM, w = L.CW - 250 })
+  if last and last.file then
+    c:tip(62, 28, L.CW - 250, 18, "Masterwork screenshot", last.file)
+  end
   local made = mw and mw.made or 0
   c:rect(L.CW - 176, 10, 162, 32, { 0, 0, 0, 90 }, { round = 8 })
   c:rect(L.CW - 176, 10, 162, 32, BRASS, { round = 8, line = 1.2 })
