@@ -14,8 +14,8 @@ local T = {}
 T.WIN = "ironhand"
 T.W = 1040
 T.FW = 236 -- a front's width
-T.MS = 0.5  -- the fronts' cards
-T.HS = 0.66 -- the hand's
+T.ROWS = 6  -- cards a side shows on a front (strips: Art.strip)
+T.HS = 0.84 -- the hand's cards
 T.state = { pick = nil, staged = {}, waiting = false, look = nil }
 T.send = function() end
 T.play = function() end
@@ -93,53 +93,58 @@ function T.draw(c)
   c:text(0, 26, table.concat(parts, "  ·  "), { size = 0.78, colour = { 200, 214, 236, 255 }, w = 700 })
   -- The fronts
   local fy = 50
-  local mw, mh = Art.W * T.MS, Art.H * T.MS
+  local sw, sh = T.FW - 16, Art.STRIP + 4
+  local side = T.ROWS * sh
+  local fh = 40 + side + 6 + 34 + side + 8
   for f = 1, 3 do
     local fr = n.fronts[f] or {}
     local fx = (f - 1) * (T.FW + 10)
-    local fh = 40 + mh * 2 + 8 + 34 + mh * 2 + 8
     local can = st.pick and R.can_stage(n, st.staged, st.pick, f)
     local hot = c:region(fx, fy, T.FW, fh, { on = can and function() T.stage(f) end or nil, enabled = can and true or false, key = "front" .. f })
     c:rect(fx, fy, T.FW, fh, can and { 120, 214, 140, hot and 40 or 18 } or { 0, 0, 0, 70 }, { round = 10 })
     c:rect(fx, fy, T.FW, fh, can and { 120, 214, 140, 200 } or S.EDGE, { round = 10, line = 1 })
     c:text(fx + T.FW / 2, fy + 6, fr.name or "", { size = 0.9, bold = true, colour = S.TEXT, align = "center", w = T.FW - 10 })
-    c:text(fx + T.FW / 2, fy + 23, Canvas.fit(fr.twist or "", T.FW - 10, 0.68), { size = 0.68, colour = S.MUTED, align = "center" })
-    local function row(list, side, y0, extra)
-      local i = 0
-      for _, u in ipairs(list or {}) do
-        local cx = fx + 8 + (i % 3) * (mw + 9)
-        local cy = y0 + (i // 3) * (mh + 6)
-        local hk = c:region(cx, cy, mw, mh, { on = function() st.look = u.id T.render() end, key = ("f%ds%di%d"):format(f, side, i),
-          title = cards.get(u.id) and cards.get(u.id).name, tip = "Click to see it in the big card." })
-        Art.card(c, cx, cy, T.MS, u.id, { power = u.power, bonus = u.bonus, silenced = u.silenced, detail = "mini", selected = hk or st.look == u.id })
-        i = i + 1
-      end
-      for _, sp in ipairs(extra or {}) do
-        local cx = fx + 8 + (i % 3) * (mw + 9)
-        local cy = y0 + (i // 3) * (mh + 6)
-        local id = n.hand[sp.p.h]
-        c:region(cx, cy, mw, mh, { on = function() T.unstage(sp.i) end, key = "staged" .. sp.i, title = "To be played", tip = "Click to take it back." })
-        Art.card(c, cx, cy, T.MS, id, { staged = true, detail = "mini" })
-        i = i + 1
+    c:text(fx + T.FW / 2, fy + 23, Canvas.fit(fr.twist or "", T.FW - 10, 0.72), { size = 0.72, colour = S.MUTED, align = "center" })
+    -- One side's cards as strips; theirs build down from the top, yours up from the score
+    local function row(list, sideNo, y0, extra)
+      local all = {}
+      for _, u in ipairs(list or {}) do all[#all + 1] = { u = u } end
+      for _, sp in ipairs(extra or {}) do all[#all + 1] = { sp = sp } end
+      for i, e in ipairs(all) do
+        if i > T.ROWS then
+          c:text(fx + T.FW - 10, y0 + side - 12, ("+%d more"):format(#all - T.ROWS), { size = 0.66, colour = S.MUTED, align = "right" })
+          break
+        end
+        local cx, cy = fx + 8, y0 + (i - 1) * sh
+        if e.u then
+          local u = e.u
+          local hk = c:region(cx, cy, sw, Art.STRIP, { on = function() st.look = u.id T.render() end, key = ("f%ds%di%d"):format(f, sideNo, i - 1),
+            title = cards.get(u.id) and cards.get(u.id).name, tip = "Click to see it in the big card." })
+          Art.strip(c, cx, cy, sw, u.id, { power = u.power, bonus = u.bonus, silenced = u.silenced, selected = hk or st.look == u.id })
+        else
+          local sp = e.sp
+          c:region(cx, cy, sw, Art.STRIP, { on = function() T.unstage(sp.i) end, key = "staged" .. sp.i, title = "To be played", tip = "Click to take it back." })
+          Art.strip(c, cx, cy, sw, n.hand[sp.p.h], { staged = true })
+        end
       end
     end
     row(fr.cards and fr.cards[2], 2, fy + 40)
-    local ty = fy + 40 + mh * 2 + 8
+    local ty = fy + 40 + side + 6
     local mine, theirs = fr.mine or 0, fr.theirs or 0
     c:rect(fx + 8, ty, T.FW - 16, 28, { 0, 0, 0, 90 }, { round = 6 })
     c:text(fx + 20, ty + 5, tostring(theirs), { size = 1.1, bold = true, colour = theirs > mine and S.GOLD or S.TEXT })
-    c:text(fx + T.FW / 2, ty + 8, theirs > mine and "they lead" or (mine > theirs and "you lead" or "even"), { size = 0.72, colour = S.MUTED, align = "center" })
+    c:text(fx + T.FW / 2, ty + 7, theirs > mine and "they lead" or (mine > theirs and "you lead" or "even"), { size = 0.78, colour = S.MUTED, align = "center" })
     c:text(fx + T.FW - 20, ty + 5, tostring(mine), { size = 1.1, bold = true, colour = mine > theirs and S.GOLD or S.TEXT, align = "right" })
     row(fr.cards and fr.cards[1], 1, ty + 34, staged_on(f))
   end
   -- The hand
-  local hy = fy + 40 + mh * 4 + 8 + 34 + 8 + 16
+  local hy = fy + fh + 30
   local spent = R.spent(n, st.staged)
   c:text(0, hy - 18, ("Your hand  ·  crystals %d of %d  ·  %d cards left in your deck"):format(n.crystals - spent, n.crystals, n.deck_left or 0),
     { size = 0.8, colour = S.MUTED, w = 720 })
   local hw = Art.W * T.HS
   for h, id in ipairs(n.hand) do
-    local hx = (h - 1) * (hw + 5)
+    local hx = (h - 1) * (hw + 8)
     if hx + hw <= 728 then
       local card = cards.get(id)
       local affordable = card and card.cost <= n.crystals - spent
@@ -177,7 +182,7 @@ function T.setup(model)
     title = "Ironhand",
     width = T.W + 20,
     help = "A game of Ironhand: take two of the three fronts. Pick a card, then a front; Reveal to play the round.",
-    elements = { { type = "canvas", id = "table", w = T.W, h = 690, draw = {} } },
+    elements = { { type = "canvas", id = "table", w = T.W, h = 50 + (40 + 2 * T.ROWS * (Art.STRIP + 4) + 48) + 30 + Art.H * T.HS + 12, draw = {} } },
   })
   Canvas.add(T.WIN, "table", T.W, T.draw)
   ui.on(T.WIN, function(win, e)

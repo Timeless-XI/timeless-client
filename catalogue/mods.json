@@ -3582,7 +3582,7 @@
       "id": "timeless-ironhand",
       "name": "Timeless Ironhand",
       "kind": "lua",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "authors": [
         "TimelessXI"
       ],
@@ -3603,14 +3603,14 @@
         {
           "path": "lib/art.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/art.lua",
-          "sha256": "11dcb74b0b686b119864dfd49b624543fc3558cb3b4665541dc32ce49ce758a5",
-          "size": 21280
+          "sha256": "b58094154acde80eee909378f2a85acfe656bae85f0101edac8bcab55a5c6336",
+          "size": 23507
         },
         {
           "path": "lib/book.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/book.lua",
-          "sha256": "88e261ef7f044a7ccfba850cd9078efbfe755c73cdc0e2bf315caf7f373b5c61",
-          "size": 9405
+          "sha256": "a3b50db9e18f186062d7bccd809b4bfc79a399eef777c47120aedfc625301eda",
+          "size": 9501
         },
         {
           "path": "lib/canvas.lua",
@@ -3651,13 +3651,13 @@
         {
           "path": "lib/table.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/table.lua",
-          "sha256": "3de44e7ca05f42802e88a82e5366106b80910c3326c7018ad83397981c8c3918",
-          "size": 9415
+          "sha256": "3289e90e86156d6b2381db233ffaacd9f6521d876427df569d71f38ba64e2b26",
+          "size": 9786
         },
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/mod.toml",
-          "sha256": "d5e4a1375b66b2b4ef9c2d27c4841e057b11cee97693210561d54a539c6c21ef",
+          "sha256": "8d282e80a98e86d7550b3158e59bcba35b64534de272e7198a6f1a6d7d5b73a6",
           "size": 983
         },
         {

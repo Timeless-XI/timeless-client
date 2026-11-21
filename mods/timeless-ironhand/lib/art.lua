@@ -203,6 +203,41 @@ local function detail_for(s)
   return "big"
 end
 
+-- A card as a strip, w x Art.STRIP: its crystal, name and power in print you can read. On the table's fronts and in
+-- the cardbook's deck list, where whole cards would be too small to read. o: power, bonus, silenced, selected, staged.
+Art.STRIP = 24
+
+function Art.strip(c, x, y, w, id, o)
+  o = o or {}
+  local card = cards.get(id)
+  local h = Art.STRIP
+  if not card then return end
+  local th = Art.THEMES[card.theme] or Art.THEMES.guild
+  local foil = card.variant and Art.FOIL[card.variant]
+  if o.selected or o.staged then
+    c:rect(x - 2, y - 2, w + 4, h + 4, o.staged and rgba(120, 214, 140, 130) or rgba(255, 230, 150, 150), { round = 6 })
+  end
+  c:rect(x, y, w, h, th.bg, { round = 5, to = th.bg2 })
+  c:rect(x, y, w, h, foil and foil.edge or th.accent, { round = 5, line = foil and 1.6 or 1 })
+  Art.crystal(c, x + 10, y + h / 2, h * 0.7, Art.ELEMENT[card.el] or CREAM)
+  -- Power (now, on the table) on the right, the bonus before it
+  local pw = tostring(o.power or card.power)
+  local pwW = Canvas.measure(pw, 0.85, true) + 10
+  c:rect(x + w - pwW - 3, y + 3, pwW, h - 6, rgba(0, 0, 0, 110), { round = 4 })
+  c:text(x + w - pwW / 2 - 3, y + 3, pw, { size = 0.85, align = "center", bold = true, colour = th.accent })
+  local right = x + w - pwW - 6
+  if o.bonus and o.bonus ~= 0 then
+    local b = (o.bonus > 0 and "+" or "") .. o.bonus
+    local bw = Canvas.measure(b, 0.66, true) + 8
+    right = right - bw
+    c:rect(right, y + 5, bw, h - 10, o.bonus > 0 and rgba(47, 107, 58) or rgba(140, 46, 40), { round = 3 })
+    c:text(right + bw / 2, y + 5, b, { size = 0.66, align = "center", bold = true, colour = rgba(240, 248, 236) })
+    right = right - 3
+  end
+  local name = o.silenced and (card.name .. " (silenced)") or card.name
+  c:text(x + 20, y + 4, Canvas.fit(name, right - x - 22, 0.74, true), { size = 0.74, bold = true, colour = o.silenced and rgba(236, 160, 150) or th.title, outline = SHADOW })
+end
+
 function Art.card(c, x, y, s, id, o)
   o = o or {}
   local card = cards.get(id)
@@ -210,6 +245,8 @@ function Art.card(c, x, y, s, id, o)
   if not card then return w, h end
   local th = Art.THEMES[card.theme] or Art.THEMES.guild
   local detail = o.detail or detail_for(s)
+  -- Print never smaller than this on a small card (the hand, the cardbook's pages): the art shrinks, the words don't
+  local function ts(k, least) return detail == "small" and math.max(k * s, least) or k * s end
   local foil = card.variant and Art.FOIL[card.variant]
   local legend = card.rarity == 3
   -- The light round foils and legendaries, and the selection
@@ -246,12 +283,12 @@ function Art.card(c, x, y, s, id, o)
   local cost = card.cost
   c:rect(bx + bw - chip - 3 * s, by + (hb - chip) / 2, chip, chip, rgba(0, 0, 0, 120), { round = 3 * s })
   c:rect(bx + bw - chip - 3 * s, by + (hb - chip) / 2, chip, chip, th.accent, { round = 3 * s, line = 1 })
-  c:text(bx + bw - chip / 2 - 3 * s, by + (hb - chip) / 2 + 1.5 * s, tostring(cost), { size = 0.7 * s, align = "center", bold = true, colour = th.accent })
+  c:text(bx + bw - chip / 2 - 3 * s, by + (hb - chip) / 2 + 1.5 * s, tostring(cost), { size = ts(0.7, 0.72), align = "center", bold = true, colour = th.accent })
   local nameW = bw - 14 * s - chip - 6 * s
-  local nameSize = (detail == "mini" and 0.52 or 0.62) * s
+  local nameSize = detail == "mini" and 0.52 * s or ts(0.62, 0.64)
   c:text(bx + 14 * s, by + (detail == "mini" and 4 or 3) * s, Canvas.fit(card.name, nameW, nameSize, true), { size = nameSize, bold = true, colour = th.title, outline = SHADOW })
   if detail ~= "mini" then
-    c:text(bx + 14 * s, by + 16 * s, Canvas.fit((th.label or "") .. "  ·  " .. (Art.ELEMENT_NAME[card.el] or ""), nameW, 0.45 * s), { size = 0.45 * s, colour = th.muted })
+    c:text(bx + 14 * s, by + 16 * s, Canvas.fit((th.label or "") .. "  ·  " .. (Art.ELEMENT_NAME[card.el] or ""), nameW, ts(0.45, 0.5)), { size = ts(0.45, 0.5), colour = th.muted })
   end
   local cy = by + hb + 4 * s
   -- The voice, under the header (big cards)
@@ -281,14 +318,14 @@ function Art.card(c, x, y, s, id, o)
     if card.rarity == 2 then tags[#tags + 1] = "Rare" end
     if card.rarity == 3 then tags[#tags + 1] = "Rare" tags[#tags + 1] = "Ex" end
     if foil then tags[#tags + 1] = foil.label end
-    c:text(bx + 1, cy, Canvas.fit("[" .. card.fam .. "] " .. card.species, bw * 0.62, 0.5 * s), { size = 0.5 * s, colour = GOLDTXT })
+    c:text(bx + 1, cy, Canvas.fit("[" .. card.fam .. "] " .. card.species, bw * 0.62, ts(0.5, 0.54)), { size = ts(0.5, 0.54), colour = GOLDTXT })
     local tx = bx + bw
     for i = #tags, 1, -1 do
-      local tw = Canvas.measure(tags[i], 0.42 * s) + 6 * s
+      local tw = Canvas.measure(tags[i], ts(0.42, 0.46)) + 6 * s
       tx = tx - tw
       c:rect(tx, cy, tw, 10 * s, rgba(0, 0, 0, 70), { round = 2 * s })
       c:rect(tx, cy, tw, 10 * s, CREAM, { round = 2 * s, line = 1 })
-      c:text(tx + tw / 2, cy + 1, tags[i], { size = 0.42 * s, align = "center", colour = rgba(242, 215, 122) })
+      c:text(tx + tw / 2, cy + 1, tags[i], { size = ts(0.42, 0.46), align = "center", colour = rgba(242, 215, 122) })
       tx = tx - 2 * s
     end
     cy = cy + 12 * s
@@ -323,16 +360,16 @@ function Art.card(c, x, y, s, id, o)
       cy = cy + 1.5 * s
     end
   elseif detail == "small" and card.text[1] then
-    c:text(bx + 1, cy, Canvas.fit(card.text[1][1], bw, 0.5 * s), { size = 0.5 * s, colour = SKY })
+    c:text(bx + 1, cy + 2 * s, Canvas.fit(card.text[1][1], bw, ts(0.5, 0.58)), { size = ts(0.5, 0.58), colour = SKY })
   end
   -- Power, in the theme's chip (on the table: its power now, the bonus in green or red)
   local pw = o.power or card.power
   local label = detail == "mini" and tostring(pw) or ("Power " .. pw)
-  local lw = Canvas.measure(label, 0.6 * s, true) + 10 * s
+  local lw = Canvas.measure(label, ts(0.6, 0.64), true) + 10 * s
   local px, py = x + w - pad - lw, y + h - pad - 13 * s
   c:rect(px, py, lw, 13 * s, th.bg, { round = 3 * s, to = th.bg2 })
   c:rect(px, py, lw, 13 * s, th.accent, { round = 3 * s, line = 1 })
-  c:text(px + lw / 2, py + 1.5 * s, label, { size = 0.6 * s, align = "center", bold = true, colour = th.accent })
+  c:text(px + lw / 2, py + 1.5 * s, label, { size = ts(0.6, 0.64), align = "center", bold = true, colour = th.accent })
   if o.bonus and o.bonus ~= 0 then
     local b = (o.bonus > 0 and "+" or "") .. o.bonus
     local bw2 = Canvas.measure(b, 0.5 * s, true) + 6 * s
@@ -346,7 +383,7 @@ function Art.card(c, x, y, s, id, o)
     local cw = 18 * s
     c:circle(x + w - 4 * s, y + 4 * s, cw / 2, rgba(30, 22, 14, 240))
     c:circle(x + w - 4 * s, y + 4 * s, cw / 2, th.accent, 1)
-    c:text(x + w - 4 * s, y - 1 * s, "x" .. o.count, { size = 0.5 * s, align = "center", bold = true, colour = INK })
+    c:text(x + w - 4 * s, y - 1 * s, "x" .. o.count, { size = ts(0.5, 0.56), align = "center", bold = true, colour = INK })
   end
   return w, h
 end

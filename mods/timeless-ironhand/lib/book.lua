@@ -162,20 +162,22 @@ function B.draw(c)
   local deck = B.deck()
   local why = R.deck_problem(deck, h)
   c:heading(0, dy, B.W, ("Your deck (%d of %d)"):format(#deck, R.DECK_SIZE), st.edit and "Changed: save it to play with it" or "The deck you play at the table")
-  local ms = 0.42
+  -- Fifteen strips in three columns, so the names can be read
+  local sw = (B.W - 4 - 2 * 12) / 3
   for i = 1, R.DECK_SIZE do
-    local x = 4 + (i - 1) * (Art.W * ms + 4)
+    local col, rowi = (i - 1) // 5, (i - 1) % 5
+    local x, y = 2 + col * (sw + 12), dy + 30 + rowi * (Art.STRIP + 4)
     local id = deck[i]
     if id then
-      local hot = c:region(x, dy + 30, Art.W * ms, Art.H * ms, { on = function() st.pick = id B.render() end, key = "deck" .. i,
+      local hot = c:region(x, y, sw, Art.STRIP, { on = function() st.pick = id B.render() end, key = "deck" .. i,
         title = cards.get(id).name, tip = "Click to look at it; take it out from the big card." })
-      Art.card(c, x, dy + 30, ms, id, { selected = hot or st.pick == id, detail = "mini" })
+      Art.strip(c, x, y, sw, id, { selected = hot or st.pick == id })
     else
-      c:rect(x, dy + 30, Art.W * ms, Art.H * ms, S.SLOT, { round = 4 })
-      c:rect(x, dy + 30, Art.W * ms, Art.H * ms, S.EDGE, { round = 4, line = 1 })
+      c:rect(x, y, sw, Art.STRIP, S.SLOT, { round = 5 })
+      c:rect(x, y, sw, Art.STRIP, S.EDGE, { round = 5, line = 1 })
     end
   end
-  local by = dy + 30 + Art.H * ms + 10
+  local by = dy + 30 + 5 * (Art.STRIP + 4) + 8
   c:button(0, by, 110, 26, "Save deck", { style = "primary", on = (st.edit and not why) and B.save or nil, enabled = st.edit ~= nil and not why, key = "save" })
   c:button(118, by, 110, 26, "Undo changes", { on = st.edit and function() st.edit, st.note = nil, nil B.render() end or nil, enabled = st.edit ~= nil, key = "undo" })
   local note = st.note or (st.edit and why) or (m and m.message and m.message.text)
@@ -197,7 +199,7 @@ function B.setup(model)
     title = "Cardbook",
     width = B.W + 20,
     help = "Your Ironhand cards: the ones you have, the ones still to find, Champions' foils, and the deck you play at the Steaming Sheep's table.",
-    elements = { { type = "canvas", id = "book", w = B.W, h = 640, draw = {} } },
+    elements = { { type = "canvas", id = "book", w = B.W, h = 740, draw = {} } },
   })
   Canvas.add(B.WIN, "book", B.W, B.draw)
   ui.on(B.WIN, function(win, e)
