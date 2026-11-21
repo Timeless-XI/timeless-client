@@ -719,6 +719,16 @@ pub(super) fn run_unfiltered(w: &mut World, line: &str, mode: Mode) {
         }
         return;
     }
+    // Timeless XI: /vigspot walk|town|fish|stand [length] [note] | list [all] | undo records places (and the
+    // camera) for the Select screen's vignettes (timeless/vignette.rs `spots`).
+    if first.eq_ignore_ascii_case("/vigspot") {
+        let args: Vec<&str> = line.split_whitespace().skip(1).collect();
+        let cam = super::App::camera(w);
+        for l in super::timeless::vignette::spots::command(w, &cam, &args) {
+            super::timeless::angler::chat_note(w, &l);
+        }
+        return;
+    }
     if first.eq_ignore_ascii_case("/tfish") {
         let args: Vec<&str> = line.split_whitespace().skip(1).collect();
         if args.first().is_some_and(|a| a.eq_ignore_ascii_case("practice")) {

@@ -254,8 +254,8 @@ enum Cmd {
     /// Timeless XI: scout zones for the Select screen's most scenic places (client/timeless/scout.rs) into a scenes
     /// table (assets/timeless/vignette_scenes.json), keeping the zones already in it.
     VignetteScout {
-        /// Zone ids, comma-separated.
-        #[arg(long)]
+        /// Zone ids, comma-separated (none: only --spots).
+        #[arg(long, default_value = "")]
         zones: String,
         #[arg(long)]
         out: PathBuf,
@@ -265,6 +265,9 @@ enum Cmd {
         /// Places players reach, by zone (tools/timeless/vignette_seeds.py): scenes are scouted around them.
         #[arg(long)]
         seeds: Option<PathBuf>,
+        /// Places recorded in game with /vigspot (timeless-vignette-spots.json): put first in their zones.
+        #[arg(long)]
+        spots: Option<PathBuf>,
     },
     /// Render the title flyover (file 23): every camera op of one scheduler (mov1..mov8, ex1a..) at a few times.
     FlyoverShot {
@@ -2508,9 +2511,15 @@ fn main() -> Result<()> {
             let t: Vec<f32> = times.split(',').filter_map(|v| v.trim().parse().ok()).collect();
             shot(&req, record, scene, &t, &out_dir, [width, height])
         }
-        Cmd::VignetteScout { zones, out, tries, seeds } => {
+        Cmd::VignetteScout { zones, out, tries, seeds, spots } => {
             let z: Vec<u16> = zones.split(',').filter_map(|v| v.trim().parse().ok()).collect();
-            client::tl_vignette::scout_zones(&z, &out, tries, seeds.as_deref())
+            if !z.is_empty() {
+                client::tl_vignette::scout_zones(&z, &out, tries, seeds.as_deref())?;
+            }
+            match spots {
+                Some(s) => client::tl_vignette::import_spots(&s, &out),
+                None => Ok(()),
+            }
         }
         Cmd::FlyoverShot { scheduler, out_dir, steps, flat, width, height } => {
             flyover_shot(&scheduler, &out_dir, steps, flat, width, height)

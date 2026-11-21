@@ -37,6 +37,10 @@ pub struct Scene {
     pub side: f32,
     #[serde(default)]
     pub score: f32,
+    /// The opening camera's angle off `dir` (degrees, toward `side`), when someone chose it (a `/vigspot` place);
+    /// else `FRONT_DEG`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub front: Option<f32>,
 }
 
 impl Scene {
@@ -614,7 +618,7 @@ pub fn scout_walk(
             if let Some((score, side)) = judge_walk(ground, occ, p, dir, len, rays)
                 && best.is_none_or(|b| score > b.score)
             {
-                best = Some(Scene { at: p.to_array(), dir: [dir.x, dir.z], len, side, score });
+                best = Some(Scene { at: p.to_array(), dir: [dir.x, dir.z], len, side, score, front: None });
             }
         }
         all.extend(best);
@@ -682,7 +686,7 @@ pub fn scout_fish(
             if let Some((score, side)) = judge_fish(ground, occ, p, dir, rays)
                 && best.is_none_or(|b| score > b.score)
             {
-                best = Some(Scene { at: p.to_array(), dir: [dir.x, dir.z], len: 0.0, side, score });
+                best = Some(Scene { at: p.to_array(), dir: [dir.x, dir.z], len: 0.0, side, score, front: None });
             }
         }
         all.extend(best);
@@ -737,7 +741,7 @@ mod tests {
 
     #[test]
     fn scenes_read_back() {
-        let s = Scene { at: [1.0, 2.0, 3.0], dir: [0.0, 1.0], len: 12.0, side: -1.0, score: 1.5 };
+        let s = Scene { at: [1.0, 2.0, 3.0], dir: [0.0, 1.0], len: 12.0, side: -1.0, score: 1.5, front: Some(30.0) };
         let z = ZoneScenes { walk: vec![s], fish: Vec::new() };
         let j = serde_json::to_string(&z).unwrap();
         let back: ZoneScenes = serde_json::from_str(&j).unwrap();

@@ -233,6 +233,8 @@ pub struct VignetteData {
     side: f32,
     /// The body's height (posed in its idle, at its size), for the framing.
     height: f32,
+    /// The opening camera's angle off the heading (degrees): the scene's chosen one, else `FRONT_DEG`.
+    front: f32,
     /// Scenery the camera must not look through.
     occ: scout::Scenery,
     /// What the scene came from, for the log and the shot tool.
@@ -300,7 +302,10 @@ impl VignetteData {
         let near: Vec<Vec3> =
             record.as_ref().map(|r| Vec3::from(r.pos)).or_else(|| home_point(req.zone)).into_iter().collect();
         let from_table = |v: Vec<Scene>| (!v.is_empty()).then_some(v);
+        // Places recorded with /vigspot come first (yours, then the table's).
+        let mine = spots::scenes(req.zone, kind == Kind::Fish);
         let (picked, mut source) = match kind {
+            _ if !mine.is_empty() => (mine, "places recorded with /vigspot"),
             Kind::Fish => match scenes.and_then(|t| from_table(t.fish)) {
                 Some(v) => (v, "the zone's scouted fishing scenes"),
                 None => (
@@ -338,7 +343,7 @@ impl VignetteData {
             } else {
                 f
             };
-            spot_scene = Some(Scene { at: at.to_array(), dir: [f.x, f.z], len, side: 1.0, score: 0.0 });
+            spot_scene = Some(Scene { at: at.to_array(), dir: [f.x, f.z], len, side: 1.0, score: 0.0, front: None });
         }
         let spot_scene = spot_scene.unwrap();
         let start = ground
@@ -383,6 +388,7 @@ impl VignetteData {
             forward,
             side,
             height,
+            front: spot_scene.front.unwrap_or(scout::FRONT_DEG),
             occ,
             source,
             minute,
@@ -678,6 +684,7 @@ impl Vignette {
             _ => path_dir(&data.path).unwrap_or(data.forward),
         };
         let grade = stronger(super::title::filter_preset(&super::title::Reel::load().filter));
+        let data_front = data.front;
         let mut v = Self {
             data,
             zone: None,
@@ -697,7 +704,7 @@ impl Vignette {
             facing,
             act: Act::Stop { left: 0.8, mid: false },
             stopped_mid: false,
-            theta: scout::FRONT_DEG,
+            theta: data_front,
             cam: None,
             alpha: 0.0,
             leaving: false,
@@ -863,7 +870,7 @@ impl Vignette {
     /// far end. Fishing (`dir` = the water): in front over the water, round to the side, over the shoulder looking
     /// out, and back (a 56 s cycle).
     fn theta_wants(&self) -> f32 {
-        let front = scout::FRONT_DEG;
+        let front = self.data.front;
         match self.data.kind {
             Kind::Fish => {
                 let t = self.time.rem_euclid(56.0);
@@ -1331,9 +1338,302 @@ pub fn scout_zones(zones: &[u16], out: &std::path::Path, tries: usize, seeds: Op
     Ok(())
 }
 
+/// `vana-client vignette-scout --spots <timeless-vignette-spots.json>`: places recorded with `/vigspot` into the
+/// scenes table, first in their zones (a place already there, same spot and kind, is not added twice).
+pub fn import_spots(spots: &std::path::Path, out: &std::path::Path) -> Result<()> {
+    let list: Vec<spots::Spot> = serde_json::from_str(&std::fs::read_to_string(spots)?)?;
+    let mut table: BTreeMap<u16, scout::ZoneScenes> = std::fs::read_to_string(out)
+        .ok()
+        .and_then(|s| serde_json::from_str::<BTreeMap<String, scout::ZoneScenes>>(&s).ok())
+        .map(|m| m.into_iter().filter_map(|(k, v)| Some((k.parse().ok()?, v))).collect())
+        .unwrap_or_default();
+    let mut added = 0;
+    for sp in list.iter().rev() {
+        let mut scene = sp.scene();
+        if sp.kind == spots::SpotKind::Stand {
+            scene.len = 0.0;
+        }
+        let z = table.entry(sp.zone).or_default();
+        let list = if sp.kind == spots::SpotKind::Fish { &mut z.fish } else { &mut z.walk };
+        if list.iter().any(|s| s.at == scene.at && s.dir == scene.dir) {
+            continue;
+        }
+        list.insert(0, scene);
+        added += 1;
+    }
+    let named: BTreeMap<String, &scout::ZoneScenes> = table.iter().map(|(k, v)| (k.to_string(), v)).collect();
+    std::fs::write(out, serde_json::to_string_pretty(&named)? + "\n")?;
+    println!("{added} recorded places added to {}", out.display());
+    Ok(())
+}
+
+/// `/vigspot`: places recorded in game for the vignettes (owner, 2026-11-20), so a spot and its opening camera can
+/// be chosen by hand and carried into the scenes table later (`vignette-scout --spots`).
+///
+/// Stand where the character should be, face the way they walk (or the water, fishing), set the camera where the
+/// opening shot should be, and type `/vigspot walk` (or `town`, `fish`, `stand`). Saved to
+/// `timeless-vignette-spots.json` beside config.json, with the place, the facing, the camera (eye, target, focal),
+/// the hour and the weather. The Select screen uses them at once, before the scouted table.
+pub mod spots {
+    use super::*;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "lowercase")]
+    pub enum SpotKind {
+        Walk,
+        Town,
+        Fish,
+        Stand,
+    }
+
+    impl SpotKind {
+        pub fn parse(s: &str) -> Option<Self> {
+            match s.to_ascii_lowercase().as_str() {
+                "walk" | "walking" => Some(Self::Walk),
+                "town" | "stroll" => Some(Self::Town),
+                "fish" | "fishing" => Some(Self::Fish),
+                "stand" | "idle" | "pose" => Some(Self::Stand),
+                _ => None,
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+    pub struct Spot {
+        pub zone: u16,
+        pub kind: SpotKind,
+        /// Where the character stands (the walk's start).
+        pub at: [f32; 3],
+        /// The way they face (x, z): the way they walk, or the water.
+        pub facing: [f32; 2],
+        /// The walk's length (walk / town).
+        #[serde(default)]
+        pub len: f32,
+        /// The camera when it was recorded.
+        pub eye: [f32; 3],
+        pub target: [f32; 3],
+        pub focal: f32,
+        /// Its angle off the facing (degrees, + toward scout `turn`'s sense), distance and height over the feet.
+        pub cam_deg: f32,
+        pub cam_dist: f32,
+        pub cam_height: f32,
+        #[serde(default)]
+        pub hour: f32,
+        #[serde(default)]
+        pub weather: String,
+        #[serde(default)]
+        pub character: String,
+        #[serde(default)]
+        pub note: String,
+        /// Unix seconds.
+        #[serde(default)]
+        pub saved: u64,
+    }
+
+    impl Spot {
+        /// As a scene: the walk's heading is the facing; the opening camera at the recorded angle (a walk's kept in
+        /// front: at most 75 degrees off).
+        pub fn scene(&self) -> Scene {
+            let walking = matches!(self.kind, SpotKind::Walk | SpotKind::Town);
+            let len = match self.kind {
+                SpotKind::Walk | SpotKind::Town => self.len.max(2.0),
+                _ => 0.0,
+            };
+            let front = if walking { self.cam_deg.abs().min(75.0) } else { self.cam_deg.abs() };
+            Scene {
+                at: self.at,
+                dir: self.facing,
+                len,
+                side: if self.cam_deg < 0.0 { -1.0 } else { 1.0 },
+                score: 99.0,
+                front: Some(front),
+            }
+        }
+    }
+
+    pub fn path() -> std::path::PathBuf {
+        crate::config::config_path().with_file_name("timeless-vignette-spots.json")
+    }
+
+    pub fn load() -> Vec<Spot> {
+        std::fs::read_to_string(path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    }
+
+    fn save(spots: &[Spot]) -> std::io::Result<()> {
+        std::fs::write(path(), serde_json::to_string_pretty(spots).unwrap_or_default() + "\n")
+    }
+
+    /// The zone's recorded scenes for a fishing or a walking vignette (walk, town and stand all serve a walk; a stand
+    /// place has no walk).
+    pub fn scenes(zone: u16, fishing: bool) -> Vec<Scene> {
+        load()
+            .iter()
+            .filter(|s| s.zone == zone && (s.kind == SpotKind::Fish) == fishing)
+            .map(|s| Scene { len: if s.kind == SpotKind::Stand { 0.0 } else { s.scene().len }, ..s.scene() })
+            .collect()
+    }
+
+    /// The signed angle (degrees) from `f` to `v` about the vertical, in scout `turn`'s sense.
+    pub fn angle(f: Vec3, v: Vec3) -> f32 {
+        let (f, v) = (scout::xz(f).normalize_or(Vec3::X), scout::xz(v).normalize_or(Vec3::X));
+        (f.x * v.z - f.z * v.x).atan2(f.dot(v)).to_degrees()
+    }
+
+    const HELP: [&str; 6] = [
+        "/vigspot walk|town|fish|stand [length] [note]: record this place for the Select screen's vignettes.",
+        "  Stand where the character should be and face the way they walk (fishing: the water),",
+        "  then set the camera where the opening shot should be. Walks are 12 yalms (town 8) unless you give a length.",
+        "/vigspot list: this zone's places (/vigspot list all: every zone).",
+        "/vigspot undo: forget the last place recorded.",
+        "Saved in timeless-vignette-spots.json beside config.json; the Select screen uses them before its own picks.",
+    ];
+
+    /// `/vigspot ...`: the lines to show in the chat log.
+    pub(in crate::client) fn command(w: &super::super::super::World, cam: &Camera, args: &[&str]) -> Vec<String> {
+        let Some(first) = args.first() else { return HELP.iter().map(|s| s.to_string()).collect() };
+        let mut spots = load();
+        match first.to_ascii_lowercase().as_str() {
+            "list" => {
+                let all = args.get(1).is_some_and(|a| a.eq_ignore_ascii_case("all"));
+                let mine: Vec<&Spot> = spots.iter().filter(|s| all || w.zone.is_some_and(|z| z == s.zone)).collect();
+                if mine.is_empty() {
+                    return vec![
+                        if all { "No places recorded yet." } else { "No places recorded in this zone." }.into(),
+                    ];
+                }
+                mine.iter()
+                    .enumerate()
+                    .map(|(i, s)| {
+                        format!(
+                            "#{} zone {} {:?}{} at ({:.1}, {:.1}, {:.1}), camera {:.0} deg {}{}",
+                            i + 1,
+                            s.zone,
+                            s.kind,
+                            if s.len > 0.0 { format!(" {:.0} yalms", s.len) } else { String::new() },
+                            s.at[0],
+                            s.at[1],
+                            s.at[2],
+                            s.cam_deg.abs(),
+                            if s.cam_deg < 0.0 { "left" } else { "right" },
+                            if s.note.is_empty() { String::new() } else { format!(": {}", s.note) }
+                        )
+                    })
+                    .collect()
+            }
+            "undo" => match spots.pop() {
+                Some(s) => match save(&spots) {
+                    Ok(()) => vec![format!("Forgot the last place ({:?} in zone {}).", s.kind, s.zone)],
+                    Err(e) => vec![format!("Couldn't save {}: {e}", path().display())],
+                },
+                None => vec!["No places to forget.".into()],
+            },
+            "help" | "?" => HELP.iter().map(|s| s.to_string()).collect(),
+            k => {
+                let Some(kind) = SpotKind::parse(k) else {
+                    return std::iter::once(format!("Unknown kind '{k}'."))
+                        .chain(HELP.iter().map(|s| s.to_string()))
+                        .collect();
+                };
+                let Some(zone) = w.zone else { return vec!["Not in a zone yet.".into()] };
+                if w.mog_zone {
+                    return vec!["Not in a Mog House: record a place out in the zone.".into()];
+                }
+                let feet = w.pos;
+                let facing = w
+                    .my_draw_yaw
+                    .map_or_else(|| Vec3::new(w.yaw.sin(), 0.0, w.yaw.cos()), |t| Vec3::new(t.cos(), 0.0, -t.sin()));
+                let mut rest = &args[1..];
+                let mut len = match kind {
+                    SpotKind::Walk => 12.0,
+                    SpotKind::Town => 8.0,
+                    _ => 0.0,
+                };
+                if let Some(n) = rest.first().and_then(|a| a.parse::<f32>().ok()) {
+                    if matches!(kind, SpotKind::Walk | SpotKind::Town) {
+                        len = n.clamp(2.0, 40.0);
+                    }
+                    rest = &rest[1..];
+                }
+                let to_eye = cam.eye - feet;
+                let hour = w
+                    .clock
+                    .map_or(17.5, |(gt, at)| crate::dat::weather::vana_minute(gt, at.elapsed().as_secs_f32()) / 60.0);
+                let spot = Spot {
+                    zone,
+                    kind,
+                    at: feet.to_array(),
+                    facing: [facing.x, facing.z],
+                    len,
+                    eye: cam.eye.to_array(),
+                    target: cam.target.to_array(),
+                    focal: crate::dat::title::focal_of(cam.fov_y),
+                    cam_deg: (angle(facing, to_eye) * 10.0).round() / 10.0,
+                    cam_dist: (scout::xz(to_eye).length() * 100.0).round() / 100.0,
+                    cam_height: (-to_eye.y * 100.0).round() / 100.0,
+                    hour: (hour.rem_euclid(24.0) * 10.0).round() / 10.0,
+                    weather: crate::dat::weather::weather_tag(super::super::super::event::weather(w)).to_string(),
+                    character: w.name.clone(),
+                    note: rest.join(" "),
+                    saved: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |d| d.as_secs()),
+                };
+                let mut lines = vec![format!(
+                    "Recorded a {:?} place in zone {zone} (#{} here): camera {:.0} deg {} of your facing, {:.1} away.",
+                    kind,
+                    spots.iter().filter(|s| s.zone == zone).count() + 1,
+                    spot.cam_deg.abs(),
+                    if spot.cam_deg < 0.0 { "left" } else { "right" },
+                    spot.cam_dist
+                )];
+                if matches!(kind, SpotKind::Walk | SpotKind::Town) && spot.cam_deg.abs() > 75.0 {
+                    lines.push("The camera is behind you: walks open in front, so it will start 75 deg off.".into());
+                }
+                spots.push(spot);
+                if let Err(e) = save(&spots) {
+                    lines = vec![format!("Couldn't save {}: {e}", path().display())];
+                }
+                lines
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spot_angles_and_scenes() {
+        use spots::*;
+        // A camera to the facing's turn side reads positive, the other side negative.
+        let f = Vec3::X;
+        assert!((angle(f, scout::turn(f, 30.0)) - 30.0).abs() < 1e-3);
+        assert!((angle(f, scout::turn(f, -50.0)) + 50.0).abs() < 1e-3);
+        let s = Spot {
+            zone: 100,
+            kind: SpotKind::Walk,
+            at: [1.0, 2.0, 3.0],
+            facing: [1.0, 0.0],
+            len: 10.0,
+            eye: [0.0; 3],
+            target: [0.0; 3],
+            focal: 500.0,
+            cam_deg: -120.0,
+            cam_dist: 5.0,
+            cam_height: 1.2,
+            hour: 17.0,
+            weather: "suny".into(),
+            character: "Test".into(),
+            note: String::new(),
+            saved: 0,
+        };
+        let sc = s.scene();
+        assert_eq!((sc.side, sc.front, sc.len), (-1.0, Some(75.0), 10.0));
+        assert_eq!(SpotKind::parse("Fishing"), Some(SpotKind::Fish));
+        let j = serde_json::to_string(&s).unwrap();
+        assert!(j.contains("\"kind\":\"walk\""));
+    }
 
     #[test]
     fn towns() {
