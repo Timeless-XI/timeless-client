@@ -3123,7 +3123,7 @@
       "id": "timeless-atlas",
       "name": "Timeless NM Atlas",
       "kind": "lua",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "authors": [
         "TimelessXI"
       ],
@@ -3144,8 +3144,8 @@
         {
           "path": "lib/atlas.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-atlas/lib/atlas.lua",
-          "sha256": "5d306cfadab489b4478cb5ae526f3b4a68b43c47cc8ec7874f7fae64d900549d",
-          "size": 19977
+          "sha256": "095b7874253c18f24cb8a0494ff021703ccca8f7fb5aee10a26d8b7d92435381",
+          "size": 20332
         },
         {
           "path": "lib/canvas.lua",
@@ -3168,7 +3168,7 @@
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-atlas/mod.toml",
-          "sha256": "df35d2d8cad639e90bc049986bf4e262b2a8b1716aad4603dd67407375b74480",
+          "sha256": "e6d01b3984c1c40a587bb19d728c6291a15a6801e7a10d7078cd385e04bb7e9e",
           "size": 762
         }
       ],
@@ -3574,6 +3574,131 @@
         },
         "timelessgauges": {
           "help": "The same as /gauges.",
+          "args": ""
+        }
+      }
+    },
+    {
+      "id": "timeless-ironhand",
+      "name": "Timeless Ironhand",
+      "kind": "lua",
+      "version": "1.0.0",
+      "authors": [
+        "TimelessXI"
+      ],
+      "description": "The Steaming Sheep's card game. Monsters drop their own cards, notorious monsters rare ones and Champions foils; keep them in the cardbook (/cardbook, or the Timeless menu), build a deck of fifteen, and play the regulars at the game table after dark. The big cards show each monster's real model from your game files, turning slowly (TimelessXI client). Needs the server's ironhand module.",
+      "files": [
+        {
+          "path": "init.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/init.lua",
+          "sha256": "f8249c22ca26e1c6b6bbe09a7c7298018c770f8486333f77b549961fb34b5c66",
+          "size": 3454
+        },
+        {
+          "path": "lib/action.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/action.lua",
+          "sha256": "b5d1d2c8620cfb9f1f511ad445a6ce379e785e3f1c9e240d2f3a7d36c8f5a8b2",
+          "size": 650
+        },
+        {
+          "path": "lib/art.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/art.lua",
+          "sha256": "11dcb74b0b686b119864dfd49b624543fc3558cb3b4665541dc32ce49ce758a5",
+          "size": 21280
+        },
+        {
+          "path": "lib/book.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/book.lua",
+          "sha256": "88e261ef7f044a7ccfba850cd9078efbfe755c73cdc0e2bf315caf7f373b5c61",
+          "size": 9405
+        },
+        {
+          "path": "lib/canvas.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/canvas.lua",
+          "sha256": "644f8cf3d74340a1c4c6a92f73aa2d17d2aa3195e51b992948c73d93ee29384b",
+          "size": 11261
+        },
+        {
+          "path": "lib/cards.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/cards.lua",
+          "sha256": "87c506261e38f790d0c262be03c1348a28e871ddd1ac75635b2e5910c2524b7f",
+          "size": 16543
+        },
+        {
+          "path": "lib/found.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/found.lua",
+          "sha256": "3f697ae99f9a1bd775a546c417b48504d056804be7acef9e461e3d34ce00422e",
+          "size": 1905
+        },
+        {
+          "path": "lib/protocol.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/protocol.lua",
+          "sha256": "52bbaeb165651fbda6cc7e8c511cb703923ec1824e2861d1ef05929e2cde88fd",
+          "size": 5520
+        },
+        {
+          "path": "lib/rules.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/rules.lua",
+          "sha256": "774216714bc86e1d2ac871d955cf2187cbfcc09593896d495995fe39f9a2c73d",
+          "size": 2026
+        },
+        {
+          "path": "lib/style.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/style.lua",
+          "sha256": "c906bac41070aed7af413fa07cb10bc308baf1ab1be99c9f5e4c24e2ff3961f2",
+          "size": 2753
+        },
+        {
+          "path": "lib/table.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/table.lua",
+          "sha256": "3de44e7ca05f42802e88a82e5366106b80910c3326c7018ad83397981c8c3918",
+          "size": 9415
+        },
+        {
+          "path": "mod.toml",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/mod.toml",
+          "sha256": "d5e4a1375b66b2b4ef9c2d27c4841e057b11cee97693210561d54a539c6c21ef",
+          "size": 983
+        },
+        {
+          "path": "sounds/flip.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/sounds/flip.wav",
+          "sha256": "a71f469fd95e510042badccc5834f0c53a91eb24ce021a5c7c485d664d4f0eff",
+          "size": 22094
+        },
+        {
+          "path": "sounds/found.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/sounds/found.wav",
+          "sha256": "07ddde7a359fa6c165556e2680a6da4161b44371b576dbb75616c236dd9faed6",
+          "size": 61782
+        },
+        {
+          "path": "sounds/lose.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/sounds/lose.wav",
+          "sha256": "b9ed3f8cb9468192f2832173ef54970e6105783bff9f7e8894599d13953e66a0",
+          "size": 61782
+        },
+        {
+          "path": "sounds/shuffle.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/sounds/shuffle.wav",
+          "sha256": "8a685320a0d3dad499381f0514ea7d8d08e71671ff1b1e6549a589c2da93a3cc",
+          "size": 264644
+        },
+        {
+          "path": "sounds/win.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/sounds/win.wav",
+          "sha256": "c4c7160823270fd3e8590cda285c594985ce1c8cf646dec02be8c7c6c768a09d",
+          "size": 70604
+        }
+      ],
+      "required": true,
+      "commands": {
+        "cardbook": {
+          "help": "Opens or closes your cardbook.",
+          "args": ""
+        },
+        "ironhand": {
+          "help": "Opens the table while a game is on; otherwise the cardbook.",
           "args": ""
         }
       }

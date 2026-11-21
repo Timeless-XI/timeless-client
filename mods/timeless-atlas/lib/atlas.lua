@@ -237,14 +237,18 @@ local function detail(c, x0, y0, w)
   local tw = w - pw - 14
   -- The model, turning slowly
   local px = x0 + w - pw
-  c:rect(px, y0, pw, pw, { 12, 14, 22, 230 }, { round = 8 })
   if mod and mod.model_portraits and i.model > 0 then
-    c:portrait(px + 2, y0 + 2, pw - 4, pw - 4, { model = i.model, spin = 24, bg = { 12, 14, 22, 255 } })
+    -- No box behind it: the model stands on the window itself, in a soft pool of light with a shadow at its feet.
+    local cx, cy = px + pw / 2, y0 + pw / 2
+    for k = 5, 1, -1 do c:circle(cx, cy, pw * 0.1 * k, { 228, 192, 119, 7 }) end
+    for k = 3, 1, -1 do c:rect(cx - pw * 0.12 * k, y0 + pw * 0.86 - k * 2, pw * 0.24 * k, k * 4, { 0, 0, 0, 34 }, { round = k * 2 }) end
+    c:portrait(px + 2, y0 + 2, pw - 4, pw - 4, { model = i.model, spin = 24 })
   else
+    c:rect(px, y0, pw, pw, { 12, 14, 22, 230 }, { round = 8 })
     c:para(px + 12, y0 + pw / 2 - 18, pw - 24, i.model > 0 and "Update your TimelessXI client to see the monster here."
       or "No model to show.", { size = 0.8, colour = S.FAINT })
+    c:rect(px, y0, pw, pw, S.EDGE, { round = 8, line = 1 })
   end
-  c:rect(px, y0, pw, pw, S.EDGE, { round = 8, line = 1 })
   -- Name, place, level
   local y = y0
   c:text(x0, y, i.name, { bold = true, size = 1.25, colour = S.GOLD, w = tw })

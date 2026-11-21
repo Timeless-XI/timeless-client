@@ -1,5 +1,5 @@
 name = "Timeless NM Atlas"
-version = "1.0.2"
+version = "1.0.3"
 authors = ["TimelessXI"]
 description = "Every notorious monster of the open world, searchable by name, drop or placeholder: whether it's up or how long until it can spawn, how it spawns (its timer, a lottery, the items for its ???), what it's weak to and what it drops with each chance, and its model turning slowly (TimelessXI client build 6). Open it from the Timeless menu. Needs the server's nm_atlas module."
 permissions = ["packets.write"]
