@@ -3,7 +3,9 @@
 --
 --   speech bubbles over townsfolk as they talk (the same lines are in chat for everyone)
 --   the lamp posts on the lamplighter's round dark until he lights them (Modern night lighting)
---   sounds by place: hammering by the furnaces, crowds on the plaza and in the Steaming Sheep, gulls on the docks
+--   sounds by place: hammering by the furnaces, crowds on the plaza and in the Steaming Sheep, gulls on the docks;
+--     after dark the Steaming Sheep's lute and card game, at dawn the docks (only while they're going)
+--   the night watch's lanterns and the card table's candle give light after dark
 --   /town  the Town window: headlines, who has the stall, the caravan, market day, your companions in town, gossip
 --
 -- It asks the server with a packet (not chat): "tl on" every 20 s (the server stops 60 s after the last one), and the

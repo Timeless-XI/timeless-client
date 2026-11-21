@@ -1,11 +1,11 @@
--- The town in the world: speech bubbles over townsfolk, the lamplighter's lamps and sounds by place. (The chimney smoke
+-- The town in the world: speech bubbles over townsfolk, the lamplighter's lamps, carried lights and sounds by place. (The chimney smoke
 -- it once drew floated where no chimney stands: the zone has its own.)
 
 local W = {}
 
 W.BUBBLE_SECONDS = 5
-W.SOUND_EVERY = { hammer = 5, crowd = 4.5, gulls = 6 } -- seconds between plays (about the sound's length)
-W.SOUND_VOLUME = { hammer = 0.45, crowd = 0.35, gulls = 0.4 }
+W.SOUND_EVERY = { hammer = 5, crowd = 4.5, gulls = 6, music = 12, cards = 6, docks = 5 } -- seconds between plays (about the sound's length)
+W.SOUND_VOLUME = { hammer = 0.45, crowd = 0.35, gulls = 0.4, music = 0.5, cards = 0.55, docks = 0.5 }
 
 -- Real lights (TimelessXI's Night Lighting Modern: render.lamp_zone / render.light): the zone's lamp posts by the
 -- lamplighter's round stay dark at night until he lights them, then fade on; his lantern and the guards' torches give
@@ -14,6 +14,7 @@ W.LAMP_FADE = 1.5 -- seconds a lamp takes to come on
 W.CARRY = {
   lantern = { colour = { 255, 196, 120 }, range = 7, intensity = 7, halo = 0.45, height = 1.3 },
   torch = { colour = { 255, 150, 70 }, range = 9, intensity = 10, halo = 0.6, height = 2.0 },
+  candle = { colour = { 255, 180, 100 }, range = 4, intensity = 4, halo = 0.3, height = 0.9 }, -- on the card table
 }
 W.SNAP = 8          -- yalms: a lamplighter's lamp is the zone's own lamp post this close to it (none: nothing shows)
 W.ZONE_RADIUS = 1.5 -- yalms round that lamp post's glow
@@ -160,7 +161,7 @@ function W.sounds(model, now, me)
   if not (me and me.pos) or not setting("sounds") then return end
   for i, s in pairs(model.scenery) do
     local every = W.SOUND_EVERY[s.kind]
-    if every and s.range > 0 then
+    if every and s.range > 0 and not s.off then
       local d = dist(s.pos, me.pos)
       if d <= s.range and now >= (next_sound[i] or 0) then
         next_sound[i] = now + every

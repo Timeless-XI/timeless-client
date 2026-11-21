@@ -2,7 +2,8 @@
 --   TL1|C|<zone id>|<zone name>              a new zone: forget everything
 --   TL1|B|<target index>|<text>              a speech bubble over that townsperson
 --   TL1|L|<lamp>|<x>,<y>,<z>|<1 lit, 0 out>  a street lamp
---   TL1|S|<n>|<kind>|<x>,<y>,<z>|<range>     scenery: smoke, hammer, crowd, gulls
+--   TL1|S|<n>|<kind>|<x>,<y>,<z>|<range>     scenery: smoke, hammer, crowd, gulls, music, cards, docks
+--   TL1|O|<n>|<1 on, 0 off>                  scenery that comes and goes (the tavern's music while the bard plays)
 --   TL1|A|<target index>|<lantern, torch, ->  what a townsperson carries that gives light (- nothing)
 --   TL1|T|<section>|<text>                   a Town window row
 --   TL1|E                                    the end of a snapshot
@@ -69,6 +70,11 @@ function P.feed(m, line, now)
     local pos = point(p)
     if not i or not pos then return true end
     m.scenery[tonumber(i)] = { kind = what, pos = pos, range = tonumber(range) or 0 }
+    return "scenery"
+  elseif kind == "O" then
+    local i, on = rest:match("^(%d+)|([01])$")
+    local s = i and m.scenery[tonumber(i)]
+    if s then s.off = on == "0" end
     return "scenery"
   elseif kind == "T" then
     local section, text = rest:match("^(%a+)|(.*)$")

@@ -65,6 +65,28 @@ H.run(10)
 ok(#H.sounds == 2, "sounds setting off")
 H.settings.sounds = nil
 
+-- Sounds that come and go: the tavern's music only while the bard plays
+H.sounds = {}
+H.player.pos = { x = -158, y = -7.5, z = 11 }
+H.line("TL1|S|7|music|-160.0,-7.5,11.0|26")
+H.line("TL1|O|7|0")
+H.run(1)
+ok(#H.sounds == 0, "no music while the bard is away")
+H.line("TL1|O|7|1")
+H.run(0.5)
+ok(#H.sounds == 1 and H.sounds[1].path == "sounds/music.wav", "the tavern's lute while he plays")
+H.run(13)
+ok(#H.sounds == 2, "played again after the tune's length")
+H.line("TL1|O|7|0")
+H.run(13)
+ok(#H.sounds == 2, "and stops when he does")
+for _, k in ipairs({ "music", "cards", "docks" }) do
+  local f = io.open(("sounds/%s.wav"):format(k), "rb")
+  ok(f ~= nil, "the " .. k .. " sound is there")
+  if f then f:close() end
+end
+H.player.pos = { x = -190, y = 2, z = -140 }
+
 -- Smoke near the furnaces
 ok(H.draws.smoke1_0 == nil, "no smoke floating where no chimney stands")
 
@@ -114,6 +136,10 @@ ok(Z.tlz1 and Z.tlz1.x == -142.0 and Z.tlz1.level == 1, "a lit lamp is the lamp 
 ok(Z.tlz3 == nil, "a spot with no lamp post near it shows nothing")
 ok(next(L) and L.tlc301 and L.tlc301.entity == 301 and L.tlc301.night_only, "the lamplighter's lantern")
 ok(L.tlc302 and L.tlc302.range > L.tlc301.range, "a guard's torch")
+H.line("TL1|A|303|candle")
+H.run(0.3)
+ok(L.tlc303 and L.tlc303.range < L.tlc301.range and L.tlc303.night_only, "the card table's candle")
+H.line("TL1|A|303|-")
 ok(L.tll1 == nil and L.tll3 == nil, "no lights floating at the lamp spots")
 H.line("TL1|L|1|-140.2,-4.0,-107.5|0")
 H.run(0.3)

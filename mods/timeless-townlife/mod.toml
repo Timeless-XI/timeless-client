@@ -1,7 +1,7 @@
 name = "Timeless Town Life"
-version = "1.1.2"
+version = "1.2.0"
 authors = ["TimelessXI"]
-description = "Bastok, lived in: speech bubbles over the townsfolk, lamp posts the lamplighter lights at dusk, sounds by place (hammering, crowds, gulls) and a Town window (/town) with the headlines, the caravan, market day and the gossip. Needs the server's townlife module."
+description = "Bastok, lived in, by day and by night: speech bubbles over the townsfolk, lamp posts the lamplighter lights at dusk, the night watch's lanterns, sounds by place (hammering, crowds, gulls, the tavern's lute and card game after dark, the docks at dawn) and a Town window (/town) with the headlines, the caravan, market day and the gossip. Needs the server's townlife module."
 permissions = ["packets.write"]
 
 [settings.bubbles]
@@ -14,13 +14,13 @@ help = "What townsfolk say shows in a bubble over their head."
 type = "bool"
 default = true
 label = "Lamp Glow"
-help = "With Night Lighting set to Modern (TimelessXI client build 7): the lamp posts on the lamplighter's round stay dark at night until he lights them, and his lantern and the guards' torches give light after dark."
+help = "With Night Lighting set to Modern (TimelessXI client build 7): the lamp posts on the lamplighter's round stay dark at night until he lights them, and his lantern, the guards' torches, the night watch's lanterns and the candle on the Steaming Sheep's card table give light after dark."
 
 [settings.sounds]
 type = "bool"
 default = true
 label = "Town Sounds"
-help = "Hammering by the furnaces, crowds on the plaza and in the tavern, gulls on the docks."
+help = "Hammering by the furnaces, crowds on the plaza and in the tavern, gulls on the docks, the Steaming Sheep's lute and card game after dark, and crates on the docks at dawn."
 
 [commands.town]
 help = "Opens or closes the Town window."
