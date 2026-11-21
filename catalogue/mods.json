@@ -3582,7 +3582,7 @@
       "id": "timeless-ironhand",
       "name": "Timeless Ironhand",
       "kind": "lua",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "authors": [
         "TimelessXI"
       ],
@@ -3591,8 +3591,8 @@
         {
           "path": "init.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/init.lua",
-          "sha256": "f8249c22ca26e1c6b6bbe09a7c7298018c770f8486333f77b549961fb34b5c66",
-          "size": 3454
+          "sha256": "591cfdf4e6e8ef6a160de829d1473f8eb099ae14165084d98098230ddf59275d",
+          "size": 3999
         },
         {
           "path": "lib/action.lua",
@@ -3609,8 +3609,8 @@
         {
           "path": "lib/book.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/book.lua",
-          "sha256": "a3b50db9e18f186062d7bccd809b4bfc79a399eef777c47120aedfc625301eda",
-          "size": 9501
+          "sha256": "320f60d34ef90d1675d2f4589ac23d53d3f9c239d75ed7127e2aa3277dadb384",
+          "size": 10101
         },
         {
           "path": "lib/canvas.lua",
@@ -3629,6 +3629,12 @@
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/found.lua",
           "sha256": "3f697ae99f9a1bd775a546c417b48504d056804be7acef9e461e3d34ce00422e",
           "size": 1905
+        },
+        {
+          "path": "lib/howto.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/howto.lua",
+          "sha256": "43be2180f5db6eaabf322f39863ccf1869e622ac4125d192b19b27056ea7a66f",
+          "size": 6316
         },
         {
           "path": "lib/protocol.lua",
@@ -3651,13 +3657,13 @@
         {
           "path": "lib/table.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/table.lua",
-          "sha256": "3289e90e86156d6b2381db233ffaacd9f6521d876427df569d71f38ba64e2b26",
-          "size": 9786
+          "sha256": "049e1db38b7e4186db7920e7b0bbc187311bc738abb3e3b570cf6e8eed5442d2",
+          "size": 10135
         },
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/mod.toml",
-          "sha256": "8d282e80a98e86d7550b3158e59bcba35b64534de272e7198a6f1a6d7d5b73a6",
+          "sha256": "7e0641def624d145b6f3e2d17cf9007ec22702e03aaae13c1879c0173c4d1501",
           "size": 983
         },
         {

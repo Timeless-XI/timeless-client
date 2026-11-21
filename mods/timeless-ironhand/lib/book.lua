@@ -14,6 +14,8 @@ B.W = 900
 B.COLS, B.ROWS, B.S = 5, 2, 0.82
 B.state = { tab = 1, page = 1, pick = 1, edit = nil, note = nil }
 B.send = function() end -- "ih ..." to the server, set by init.lua
+B.howto = function() end -- opens How to play, set by init.lua
+B.to_table = function() end -- opens the table, set by init.lua
 
 local TABS = {
   { label = "All", tip = "Every card, the ones you have and the ones still to find." },
@@ -179,9 +181,16 @@ function B.draw(c)
   end
   local by = dy + 30 + 5 * (Art.STRIP + 4) + 8
   c:button(0, by, 110, 26, "Save deck", { style = "primary", on = (st.edit and not why) and B.save or nil, enabled = st.edit ~= nil and not why, key = "save" })
+  local g = m and m.game
+  if g and g.now and not g.now.over and not (m.result) then
+    c:button(B.W - 270, by, 140, 26, "Back to the game", { style = "primary", on = function() B.to_table() end, key = "totable",
+      tip = "Your game at the Steaming Sheep is still on." })
+  end
+  c:button(B.W - 120, by, 120, 26, "How to play", { on = function() B.howto() end, key = "howto",
+    tip = "The rules: fronts, crystals, the world's bonuses, and collecting cards." })
   c:button(118, by, 110, 26, "Undo changes", { on = st.edit and function() st.edit, st.note = nil, nil B.render() end or nil, enabled = st.edit ~= nil, key = "undo" })
   local note = st.note or (st.edit and why) or (m and m.message and m.message.text)
-  if note then c:text(240, by + 5, note, { size = 0.85, colour = (why and st.edit) and S.WARN or S.MUTED, w = B.W - 240 }) end
+  if note then c:text(240, by + 5, note, { size = 0.85, colour = (why and st.edit) and S.WARN or S.MUTED, w = B.W - 240 - 280 }) end
   -- The regulars
   local wy = by + 38
   local parts = {}

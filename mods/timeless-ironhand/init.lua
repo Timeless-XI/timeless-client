@@ -2,6 +2,7 @@
 --
 --   /cardbook   your cards (and the ones still to find), Champions' foils and your deck; also on the Timeless menu
 --   /ironhand   the table, while a game is on (talk to a card player at the Steaming Sheep after dark to sit down)
+--   How to play: a button on the table and in the cardbook (and it opens by itself with your first game)
 --
 -- Cards wear the game's own window with a header dressed for their family, as the shop windows dress for their
 -- shopkeeper; the big card shows the monster's real model from your game files, turning slowly (TimelessXI client).
@@ -12,6 +13,7 @@ local protocol = require("lib.protocol")
 local book = require("lib.book")
 local tbl = require("lib.table")
 local found = require("lib.found")
+local howto = require("lib.howto")
 
 local BEAT = 20
 
@@ -34,6 +36,10 @@ book.send = ask
 tbl.setup(model)
 tbl.send = ask
 found.setup()
+howto.setup()
+book.howto = function() howto.open() end
+tbl.howto = function() howto.open() end
+book.to_table = function() ui.open(tbl.WIN) tbl.render() end
 found.open_book = function() if not ui.is_open(book.WIN) then book.toggle() end end
 
 filters.chat(function(text)
@@ -49,6 +55,12 @@ filters.chat(function(text)
     tbl.reset()
     ui.open(tbl.WIN)
     sound("shuffle", 0.45)
+    -- The first game: the rules open beside the table
+    if storage and storage.character and not storage.character.ironhand_rules_seen then
+      storage.character.ironhand_rules_seen = true
+      pcall(storage.save)
+      howto.open(1)
+    end
   elseif what == "state" then
     if tbl.state.waiting then sound("flip", 0.5) end
     tbl.state.waiting = false
