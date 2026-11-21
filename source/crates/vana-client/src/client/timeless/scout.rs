@@ -63,14 +63,22 @@ pub struct ZoneScenes {
 }
 
 /// The scouted table (assets/timeless/vignette_scenes.json): zone id -> scenes.
+static TABLE: std::sync::LazyLock<std::collections::HashMap<String, ZoneScenes>> = std::sync::LazyLock::new(|| {
+    // VANA_VIGNETTE_SCENES: a table to try in place of the built-in one (vignette-scout's output).
+    let file = std::env::var_os("VANA_VIGNETTE_SCENES").and_then(|p| std::fs::read_to_string(p).ok());
+    serde_json::from_str(file.as_deref().unwrap_or(include_str!("../../../assets/timeless/vignette_scenes.json")))
+        .unwrap_or_default()
+});
+
 pub fn table(zone: u16) -> Option<ZoneScenes> {
-    static TABLE: std::sync::LazyLock<std::collections::HashMap<String, ZoneScenes>> = std::sync::LazyLock::new(|| {
-        // VANA_VIGNETTE_SCENES: a table to try in place of the built-in one (vignette-scout's output).
-        let file = std::env::var_os("VANA_VIGNETTE_SCENES").and_then(|p| std::fs::read_to_string(p).ok());
-        serde_json::from_str(file.as_deref().unwrap_or(include_str!("../../../assets/timeless/vignette_scenes.json")))
-            .unwrap_or_default()
-    });
     TABLE.get(&zone.to_string()).cloned()
+}
+
+/// The zones in the scouted table.
+pub fn table_zones() -> Vec<u16> {
+    let mut z: Vec<u16> = TABLE.keys().filter_map(|k| k.parse().ok()).collect();
+    z.sort();
+    z
 }
 
 pub fn xz(v: Vec3) -> Vec3 {

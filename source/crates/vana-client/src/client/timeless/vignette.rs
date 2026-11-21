@@ -51,6 +51,9 @@ const WALK: (f32, f32) = (1.6, 0.96);
 const STROLL: (f32, f32) = (1.2, 0.72);
 
 /// Retail's rod files by race (client/fishrod.rs ROD_FILES): + the rod's kind (range look + 5) - 5.
+/// The rod a review pick fishes with when the character has none on record (a range look, as `Record::rod`).
+const DEFAULT_ROD: u16 = 14;
+
 const ROD_FILES: [u32; 9] = [39307, 39307, 39339, 39371, 39403, 39435, 39435, 39467, 39499];
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -196,12 +199,15 @@ pub struct Request {
     pub look: Look,
     pub size: u8,
     pub zone: u16,
+    /// The Scene Review panel's pick (client/timeless/review.rs): its zone, scene and action in place of theirs.
+    pub review: Option<super::review::Choice>,
 }
 
 impl Request {
-    /// What tells one request from another: the name, the look and the zone.
+    /// What tells one request from another: the name, the look, the zone and a review pick.
     pub fn key(&self) -> String {
-        format!("{}:{:?}:{}:{}", self.name, self.look, self.size, self.zone)
+        let review = self.review.as_ref().map(|c| c.key()).unwrap_or_default();
+        format!("{}:{:?}:{}:{}{review}", self.name, self.look, self.size, self.zone)
     }
 }
 
@@ -210,6 +216,8 @@ pub enum Kind {
     Walk,
     Town,
     Fish,
+    /// Standing in place (the Scene Review's "Standing"): the idle, the camera slowly round.
+    Stand,
 }
 
 pub struct VignetteData {
@@ -256,7 +264,10 @@ impl VignetteData {
         record: Option<Record>,
         pick: Option<usize>,
     ) -> Result<Self> {
-        let zone_id = req.zone as u32;
+        use super::review::Action;
+        let review = req.review.clone();
+        let zone_no = review.as_ref().map_or(req.zone, |c| c.zone);
+        let zone_id = zone_no as u32;
         let file = index.read(zone::file_id(zone_id))?;
         let scene = zone::load_scene(keys, &file)?;
         let ground = Ground::build(&scene);
@@ -264,8 +275,23 @@ impl VignetteData {
         let weather = ZoneWeather::parse(&file).ok();
         let fx = FxLibs::load_zone(index, keys, zone_id, &file);
         let model = load_character(index, &req.look).context("the character's model")?;
-        let record = record.filter(|r| r.zone == req.zone);
-        let town = is_town(req.zone);
+        // A review pick: a record made for it (fishing as asked, the character's rod, hour and weather if any).
+        let record = match &review {
+            Some(c) => {
+                let own = record.clone();
+                Some(Record {
+                    zone: c.zone,
+                    pos: c.scene.at,
+                    forward: c.scene.dir,
+                    fishing: c.action == Action::Fish,
+                    rod: own.as_ref().filter(|r| r.fishing && r.rod != 0).map_or(DEFAULT_ROD, |r| r.rod),
+                    minute: own.as_ref().map_or(default_minute(), |r| r.minute),
+                    weather: own.map_or(default_weather(), |r| r.weather),
+                })
+            }
+            None => record.filter(|r| r.zone == req.zone),
+        };
+        let town = is_town(zone_no);
         let seed = seed_of(&req.name);
         let mut anims = model.animations.clone();
         let mut rod = None;
@@ -294,17 +320,34 @@ impl VignetteData {
                 kind = Kind::Fish;
             }
         }
+        if let Some(c) = &review {
+            kind = match c.action {
+                Action::Walk => Kind::Walk,
+                Action::Town => Kind::Town,
+                Action::Stand => Kind::Stand,
+                // No fishing motions for this model: it stands.
+                Action::Fish if kind == Kind::Fish => Kind::Fish,
+                Action::Fish => Kind::Stand,
+            };
+        }
         // Where: the zone's most scenic place (the scouted table, else scouted now), one of the best three by the
         // character's name; failing that, where they left off, the Home Point, or any open ground.
         let len = if kind == Kind::Town { 8.0 } else { 12.0 };
-        let scenes = scout::table(req.zone);
+        let scenes = scout::table(zone_no);
         // Scouted now: around where they left off, else the Home Point, else anywhere.
         let near: Vec<Vec3> =
-            record.as_ref().map(|r| Vec3::from(r.pos)).or_else(|| home_point(req.zone)).into_iter().collect();
+            record.as_ref().map(|r| Vec3::from(r.pos)).or_else(|| home_point(zone_no)).into_iter().collect();
         let from_table = |v: Vec<Scene>| (!v.is_empty()).then_some(v);
         // Places recorded with /vigspot come first (yours, then the table's).
-        let mine = spots::scenes(req.zone, kind == Kind::Fish);
+        let mine = spots::scenes(zone_no, kind == Kind::Fish);
         let (picked, mut source) = match kind {
+            // The review's pick: its scene alone (a walk asked of a fishing spot walks a few steps).
+            _ if review.is_some() => {
+                let c = review.as_ref().expect("checked");
+                let walks = matches!(kind, Kind::Walk | Kind::Town);
+                let len = if walks && c.scene.len < 2.0 { len * 0.75 } else { c.scene.len };
+                (vec![Scene { len, ..c.scene }], "the Scene Review's pick")
+            }
             _ if !mine.is_empty() => (mine, "places recorded with /vigspot"),
             Kind::Fish => match scenes.and_then(|t| from_table(t.fish)) {
                 Some(v) => (v, "the zone's scouted fishing scenes"),
@@ -320,7 +363,9 @@ impl VignetteData {
                 }
             },
         };
-        let mut spot_scene = picked.get(pick.unwrap_or((seed % picked.len().max(1) as u64) as usize)).copied();
+        let mut spot_scene = picked
+            .get(pick.filter(|_| review.is_none()).unwrap_or((seed % picked.len().max(1) as u64) as usize))
+            .copied();
         if spot_scene.is_none() {
             let spot = record.as_ref().and_then(|r| {
                 let p = Vec3::from(r.pos);
@@ -329,7 +374,7 @@ impl VignetteData {
                 Some((Vec3::new(p.x, y, p.z), f))
             });
             source = if spot.is_some() { "where they left off" } else { "a picked spot" };
-            let (at, f) = match spot.or_else(|| home_spot(&ground, req.zone, seed)) {
+            let (at, f) = match spot.or_else(|| home_spot(&ground, zone_no, seed)) {
                 Some(s) => s,
                 None => find_spot(&ground, seed).context("no open ground in the zone")?,
             };
@@ -352,7 +397,7 @@ impl VignetteData {
         let forward = spot_scene.dir();
         let side = if spot_scene.side < 0.0 { -1.0 } else { 1.0 };
         let path = match kind {
-            Kind::Fish => vec![start],
+            Kind::Fish | Kind::Stand => vec![start],
             _ => scout::walk_points(&ground, start, forward, spot_scene.len.max(1.0)),
         };
         // The scenery around the scene, for the camera.
@@ -668,6 +713,15 @@ pub struct Vignette {
     /// 0..1: fades in when it starts and out when another character is wanted.
     pub alpha: f32,
     pub leaving: bool,
+    /// The Scene Review's live controls: play speed and pause.
+    pub speed: f32,
+    pub paused: bool,
+    /// The hour and weather it was loaded with, the weather now shown, and the title's grade (for the filter).
+    minute0: f32,
+    weather0: String,
+    weather_shown: String,
+    title_grade: Option<crate::render::nostalgia::Grade>,
+    filter: super::review::Filter,
 }
 
 impl Vignette {
@@ -683,8 +737,10 @@ impl Vignette {
             Kind::Fish => data.forward,
             _ => path_dir(&data.path).unwrap_or(data.forward),
         };
-        let grade = stronger(super::title::filter_preset(&super::title::Reel::load().filter));
+        let title_grade = super::title::filter_preset(&super::title::Reel::load().filter);
+        let grade = stronger(title_grade);
         let data_front = data.front;
+        let (minute0, weather0) = (data.minute, data.weather_tag.clone());
         let mut v = Self {
             data,
             zone: None,
@@ -708,7 +764,39 @@ impl Vignette {
             cam: None,
             alpha: 0.0,
             leaving: false,
+            speed: 1.0,
+            paused: false,
+            weather_shown: weather0.clone(),
+            minute0,
+            weather0,
+            title_grade,
+            filter: super::review::Filter::Stronger,
         };
+        v.begin();
+        v
+    }
+
+    /// From the opening shot (new, and the Scene Review's Restart).
+    pub fn restart(&mut self) {
+        self.q = Queues::default();
+        self.rod_q = Queues::default();
+        self.time = 0.0;
+        self.s = 0.0;
+        self.way = 1.0;
+        self.feet = self.data.path[0];
+        self.facing = match self.data.kind {
+            Kind::Fish | Kind::Stand => self.data.forward,
+            _ => path_dir(&self.data.path).unwrap_or(self.data.forward),
+        };
+        self.act = Act::Stop { left: 0.8, mid: false };
+        self.stopped_mid = false;
+        self.theta = self.data.front;
+        self.cam = None;
+        self.begin();
+    }
+
+    fn begin(&mut self) {
+        let v = self;
         match v.data.kind {
             Kind::Fish => {
                 v.act = Act::Hold { left: 9.0 };
@@ -722,11 +810,67 @@ impl Vignette {
                 v.motion("idl", 1.0, 1.0);
             }
         }
-        v
     }
 
     pub fn key(&self) -> &str {
         &self.data.key
+    }
+
+    /// The Scene Review's hour (None: as loaded).
+    pub fn set_hour(&mut self, hour: Option<f32>) {
+        let m = hour.map_or(self.minute0, |h| h * 60.0);
+        if (m - self.data.minute).abs() > 0.01 {
+            self.data.minute = m;
+            if let Some(fx) = &mut self.effects {
+                fx.set_minute(m);
+            }
+        }
+    }
+
+    /// The Scene Review's weather (None: as loaded).
+    pub fn set_weather(&mut self, tag: Option<&str>) {
+        let t = tag.unwrap_or(&self.weather0).to_string();
+        if t != self.weather_shown {
+            if let Some(fx) = &mut self.effects {
+                fx.set_weather(&t);
+            }
+            self.data.weather_tag = t.clone();
+            self.weather_shown = t;
+        }
+    }
+
+    /// The Scene Review's filter: the vignettes' stronger grade, the title's, or none.
+    pub fn set_filter(&mut self, f: super::review::Filter) {
+        use super::review::Filter;
+        if f != self.filter {
+            self.filter = f;
+            self.grade = match f {
+                Filter::Stronger => stronger(self.title_grade),
+                Filter::Title => self.title_grade,
+                Filter::Off => None,
+            };
+        }
+    }
+
+    /// The camera's angle off the scene's heading now (degrees).
+    pub fn camera_deg(&self) -> f32 {
+        self.theta
+    }
+
+    /// One line for the Scene Review: what is playing, from where, at what hour and weather.
+    pub fn describe(&self) -> String {
+        let p = self.data.path[0];
+        format!(
+            "{:?} from {} · {:.1} h, {} · at ({:.1}, {:.1}, {:.1}), {:.0} units of walk",
+            self.data.kind,
+            self.data.source,
+            self.data.minute / 60.0,
+            self.data.weather_tag,
+            p.x,
+            p.y,
+            p.z,
+            self.path_len()
+        )
     }
 
     /// The model's motion (and the rod's, fishing).
@@ -761,17 +905,19 @@ impl Vignette {
 
     pub fn advance(&mut self, dt: f32) {
         let dt = dt.min(0.1);
+        let to = if self.leaving { 0.0 } else { 1.0 };
+        let rate = if self.leaving { 2.5 } else { 0.8 };
+        self.alpha = if to > self.alpha { (self.alpha + dt * rate).min(to) } else { (self.alpha - dt * rate).max(to) };
+        // The Scene Review's pause and speed (the fade keeps its own time).
+        let dt = if self.paused { 0.0 } else { dt * self.speed.clamp(0.1, 8.0) };
         self.time += dt;
         if let Some(fx) = &mut self.effects {
             fx.advance(dt);
         }
-        let to = if self.leaving { 0.0 } else { 1.0 };
-        let rate = if self.leaving { 2.5 } else { 0.8 };
-        self.alpha = if to > self.alpha { (self.alpha + dt * rate).min(to) } else { (self.alpha - dt * rate).max(to) };
         match self.data.kind {
             Kind::Fish => self.fish(dt),
             Kind::Town => self.walk(dt, STROLL, (5.5, 7.5), true),
-            Kind::Walk => self.walk(dt, WALK, (2.5, 4.0), false),
+            Kind::Walk | Kind::Stand => self.walk(dt, WALK, (2.5, 4.0), false),
         }
         self.q.tick(dt * 60.0);
         self.rod_q.tick(dt * 60.0);
@@ -885,6 +1031,11 @@ impl Vignette {
                     t if t < 40.0 => 158.0,
                     _ => ease(158.0, front, 40.0, 56.0),
                 }
+            }
+            // Standing: in front, slowly round to one side and back (40 s).
+            Kind::Stand => {
+                let k = (self.time / 40.0 * std::f32::consts::TAU).sin() * 0.5 + 0.5;
+                front + (80.0 - front) * k * k
             }
             Kind::Walk | Kind::Town => match self.act {
                 Act::Walk if self.way > 0.0 => front,
@@ -1055,7 +1206,11 @@ pub struct Stage {
     /// The key last asked for, and one that failed (not asked again).
     wanted: String,
     failed: String,
+    /// Why the wanted one failed (for the Scene Review).
+    failed_why: String,
     sounds: Vec<crate::fx::sound::SoundCmd>,
+    /// The Scene Review panel (client/timeless/review.rs): its pick goes into each request.
+    pub review: super::review::Review,
 }
 
 impl Stage {
@@ -1070,7 +1225,8 @@ impl Stage {
     }
 
     /// `req` is the highlighted character. Starts its load when it is a new one (the shown one starts to fade).
-    pub fn want(&mut self, req: Request, data: impl FnOnce() -> Option<(Arc<DatIndex>, Arc<zone::Keys>)>) {
+    pub fn want(&mut self, mut req: Request, data: impl FnOnce() -> Option<(Arc<DatIndex>, Arc<zone::Keys>)>) {
+        req.review = self.review.choice.clone();
         let key = req.key();
         if key == self.wanted {
             return;
@@ -1112,6 +1268,7 @@ impl Stage {
                 Ok(_) => {}
                 Err(e) => {
                     log::warn!("vignette: {e:#}");
+                    self.failed_why = format!("{e:#}");
                     self.failed = key;
                 }
             }
@@ -1123,6 +1280,26 @@ impl Stage {
             }
             self.current = self.next.take();
         }
+        // The Scene Review's live controls, and what it shows as playing.
+        let r = &mut self.review;
+        let restart = std::mem::take(&mut r.restart);
+        if let Some(c) = &mut self.current {
+            (c.speed, c.paused) = (r.speed, r.paused);
+            if restart {
+                c.restart();
+            }
+            c.set_hour(r.hour);
+            c.set_weather(r.weather.as_deref());
+            c.set_filter(r.filter);
+            r.camera_deg = c.camera_deg();
+        }
+        r.playing = if !self.failed.is_empty() && self.failed == self.wanted {
+            format!("Couldn't load: {}", self.failed_why)
+        } else if self.loading.is_some() || self.current.as_ref().is_some_and(|c| c.key() != self.wanted) {
+            "Loading…".into()
+        } else {
+            self.current.as_ref().map(|c| c.describe()).unwrap_or_default()
+        };
         if let Some(c) = &mut self.current {
             c.advance(dt);
         }

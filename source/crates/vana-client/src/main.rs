@@ -243,6 +243,10 @@ enum Cmd {
         /// Which of the zone's scenes (0 = the best); default: by the name.
         #[arg(long)]
         scene: Option<usize>,
+        /// As the Scene Review plays it: the table's scene `--scene` (walk list, or fish list with --fishing) as walk,
+        /// town, fish or stand.
+        #[arg(long)]
+        review: Option<String>,
         /// Seconds to shoot at.
         #[arg(long, default_value = "2,6,10,14,18,24,30")]
         times: String,
@@ -2467,6 +2471,7 @@ fn main() -> Result<()> {
             weather,
             name,
             scene,
+            review,
             times,
             width,
             height,
@@ -2490,6 +2495,19 @@ fn main() -> Result<()> {
                 },
                 size: 1,
                 zone,
+                review: review.as_deref().map(|a| {
+                    use client::tl_review::{Action, Choice};
+                    let action = match a {
+                        "town" => Action::Town,
+                        "fish" => Action::Fish,
+                        "stand" => Action::Stand,
+                        _ => Action::Walk,
+                    };
+                    let t = client::tl_scout::table(zone).unwrap_or_default();
+                    let list = if fishing { t.fish } else { t.walk };
+                    let scene = list.get(scene.unwrap_or(0)).copied().expect("no such scene in the table");
+                    Choice { zone, action, scene, fishing_list: fishing }
+                }),
             };
             let record = at.map(|a| {
                 let p: Vec<f32> = a.split(',').map(|v| v.trim().parse().unwrap_or(0.0)).collect();

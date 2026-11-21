@@ -167,6 +167,8 @@ mod tilt;
 mod timeless;
 // Timeless XI: the title reel, for main.rs's reel-shot (tlreel.rs).
 pub(crate) use timeless::title as tl_title;
+pub(crate) use timeless::review as tl_review;
+pub(crate) use timeless::scout as tl_scout;
 pub(crate) use timeless::vignette as tl_vignette;
 mod timers;
 mod trade;
@@ -16770,8 +16772,10 @@ impl App {
                             None
                         };
                         let modern_ui = self.cfg.modern_ui;
+                        // Timeless XI: typing in the Scene Review's note, the Select screen's keys wait.
+                        let typing = self.cfg.modern_ui && self.cfg.timeless_ui && self.tl_vig.review.typing;
                         let sin = select::Input {
-                            events: &input.events,
+                            events: if typing { &[] } else { &input.events },
                             pointer: input.pointer,
                             moved: input.moved,
                             clicked: input.clicked,
@@ -16793,6 +16797,12 @@ impl App {
                             out.action = out.action.or(more.action);
                             out.moved = more.moved.or(out.moved);
                             out.input |= more.input;
+                            // Timeless XI: the Scene Review panel (client/timeless/review.rs), over the vignette.
+                            if self.cfg.timeless_ui && !deleting {
+                                let name =
+                                    list.get(chars, self.select_ui.cursor).map(|c| c.name.clone()).unwrap_or_default();
+                                self.tl_vig.review.ui(ctx, &name);
+                            }
                         }
                         if let Some(a) = self.audio.as_mut() {
                             for s in &out.sounds {
@@ -18237,6 +18247,7 @@ impl App {
                         },
                         size: c.size,
                         zone: c.zone,
+                        review: None,
                     }
                 })
             }
