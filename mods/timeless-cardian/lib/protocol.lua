@@ -4,6 +4,7 @@
 --   CD1|D|<id>,...                          your hand of five
 --   CD1|W|<opponent>:<wins>,...             wins against each opponent
 --   CD1|L|<town>|<next town>                where Shaali the card shark is today, and tomorrow
+--   CD1|V|<binder 1/0>|<binder price>|<Card Mod here 1/0>   your Card Binder, and whether Card Mod works where you are
 --   CD1|B                                   the end of the cardbook
 --   CD1|M|<text>                            a word from the server (a hand it won't take, and why)
 --   CD1|G|<opponent>|<friendly or ante>|<key>|<rules: open,same,plus,elemental>   a game starts (key "pvp": a player)
@@ -17,7 +18,7 @@
 --   CD1|Z|<square>|<who: 1 you, 2 them>|<square:how,...>         the last move and what it flipped
 --   CD1|E                                                        the end of the table
 --   CD1|R|<winner 1/2/0>|<mine-theirs-who>,... x3|<text>         the game is over
---   CD1|N|<card id>|<how>                   you found a card (drop, nm, champion, won, legend, gm)
+--   CD1|N|<card id>|<how>                   you found a card (drop, nm, champion, bound, set, won, legend, gm)
 --   CD1|Q|<player>|<friendly or ante>|<your card put up, or 0>   another player challenges you
 -- No game or UI code here, so it can be tested on its own.
 
@@ -77,6 +78,10 @@ function P.feed(m, line, now)
     return true
   elseif kind == "L" then
     m.shark = { town = f[1] or "", next = f[2] or "" }
+    return true
+  elseif kind == "V" then
+    local b = m.pending_book or m.book
+    b.binder, b.binder_price, b.mod_here = f[1] == "1", tonumber(f[2]) or 0, f[3] == "1"
     return true
   elseif kind == "B" then
     local b = m.pending_book or m.book

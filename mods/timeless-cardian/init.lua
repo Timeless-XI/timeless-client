@@ -4,6 +4,8 @@
 --   /cardian    the table, while a game is on (talk to a card player at the Steaming Sheep after dark, or to Shaali
 --               the travelling card shark, to sit down)
 --   How to play: a button on the table and in the cardbook (and it opens by itself with your first game)
+--   Card: with a Card Binder (Shaali sells it), a button above the screen's middle while the monster you're fighting
+--         is at 20% HP or less: it becomes its card (no experience for it)
 --
 -- Cards wear the game's own window with a header dressed for their family, as the shop windows dress for their
 -- shopkeeper; the big card shows the monster's real model from your game files, turning slowly (TimelessXI client).
@@ -18,6 +20,7 @@ local howto = require("lib.howto")
 local invite = require("lib.invite")
 
 local BEAT = 20
+local CARD_BTN = "cardian_bind"
 
 local model = protocol.new_model()
 local st = { next_beat = os.clock() + 2, queue = {}, version = 0 }
@@ -90,7 +93,11 @@ end)
 
 events.on("login", function() st.next_beat = os.clock() + 3 end)
 events.on("zone_change", function() st.next_beat = os.clock() + 3 end)
-events.on("unload", function() pcall(action.send, "cd off") end)
+events.on("unload", function()
+  pcall(action.send, "cd off")
+  pcall(hud.remove, CARD_BTN)
+  pcall(hud.remove, CARD_BTN .. "_t")
+end)
 events.on("target_change", function() if ui.is_open(book.WIN) then book.render() end end)
 
 commands.register("cardbook", function() book.toggle() end)
@@ -108,9 +115,44 @@ mods.provide("timeless_menu", function()
     order = 18,
     open = "//cardbook",
     command = "/cardbook",
-    desc = "Your Cardian cards and hand. Monsters drop their cards; play the Steaming Sheep's regulars after dark, Shaali the card shark, or other players.",
+    desc = "Your Cardian cards, sets and hand. Monsters drop their cards (some only at night, in a weather or under the beastmen); bind one with a Card Binder; play the Steaming Sheep's regulars after dark, Shaali the card shark, or other players.",
   }
 end)
+
+-- The Card button: a Card Binder, and the monster you're fighting is weak enough
+local BIND_HPP, BIND_RANGE = 20, 20
+st.card_shown = false
+local function card_target()
+  if not (model.book.binder) then return nil end
+  local ok, t = pcall(game.target)
+  if not ok or not t or t.kind ~= "mob" or t.me then return nil end
+  if (t.status or 0) ~= 1 or (t.hpp or 100) > BIND_HPP or (t.hpp or 0) <= 0 or (t.distance or 99) > BIND_RANGE then return nil end
+  return t
+end
+function st.card_button()
+  local t = card_target()
+  if not t then
+    if st.card_shown then pcall(hud.remove, CARD_BTN) pcall(hud.remove, CARD_BTN .. "_t") st.card_shown = false end
+    return
+  end
+  local s = hud.screen()
+  local k = s.ui_scale or 1
+  local w, h = math.floor(120 * k), math.floor(34 * k)
+  local x, y = math.floor((s.width - w) / 2), math.floor(s.height * 0.62)
+  hud.rect(CARD_BTN, { x = x, y = y, w = w, h = h, colour = { 120, 86, 40, 220 }, layer = 5,
+    tip = { title = "Card", text = ("Turn %s into its card with your Card Binder. You get no experience for it."):format(t.name) } })
+  hud.text(CARD_BTN .. "_t", { x = x + w / 2, y = y + math.floor(8 * k), text = "Card", size = 1.15 * k, colour = { 255, 236, 196, 255 },
+    align = "center", layer = 6 })
+  if not st.card_shown then
+    hud.on(CARD_BTN, function(_, e)
+      if e.kind == "click" and e.button == "left" then
+        local tt = card_target()
+        if tt then ask("cd bind " .. tt.id) sound("flip", 0.5) end
+      end
+    end)
+  end
+  st.card_shown = true
+end
 
 timer.every(0.1, function()
   local t = os.clock()
@@ -118,4 +160,5 @@ timer.every(0.1, function()
   if #st.queue > 0 then pcall(action.send, table.remove(st.queue, 1)) end
   found.tick(t)
   invite.tick(t)
+  pcall(st.card_button)
 end)

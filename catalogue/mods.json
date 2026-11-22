@@ -3184,7 +3184,7 @@
       "id": "timeless-cardian",
       "name": "Timeless Cardian",
       "kind": "lua",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "authors": [
         "TimelessXI"
       ],
@@ -3193,8 +3193,8 @@
         {
           "path": "init.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/init.lua",
-          "sha256": "8fcd7cbd1f7998a584e0ae3098e00d286397ad69f80b010bc054b3aa6a378936",
-          "size": 4424
+          "sha256": "216b37ea84f3729fa8ec80626e0f66ac81c4f0147fc9cae3945856c9dff5ce2b",
+          "size": 6358
         },
         {
           "path": "lib/action.lua",
@@ -3205,14 +3205,14 @@
         {
           "path": "lib/art.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/art.lua",
-          "sha256": "440f0cd97101a0e4ab17d878e0eddecdebed1f970613ffe8489c86dee5b7eea6",
-          "size": 23477
+          "sha256": "3a0b9eca0b5f79bfd92d369ba7230a43761ba06a027bf8adcd0769ab68faa306",
+          "size": 23507
         },
         {
           "path": "lib/book.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/book.lua",
-          "sha256": "b2d5a094b1eedb90b318202dbcf2a71631a4655a801497c888614a30d57790b5",
-          "size": 11937
+          "sha256": "05dbffb85b836fc4662a23b51382ead79d0d9fa20836de15d148cbacf0f66690",
+          "size": 16796
         },
         {
           "path": "lib/canvas.lua",
@@ -3223,20 +3223,20 @@
         {
           "path": "lib/cards.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/cards.lua",
-          "sha256": "ae9acbfc3b071e5ea5ec119165e1ae73470bbb6569a3cdc4a186ca4150f77352",
-          "size": 13291
+          "sha256": "07393f635c5cea9999d87210ca040fb8303348f68f5e08da48466e92fa99c2b6",
+          "size": 35926
         },
         {
           "path": "lib/found.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/found.lua",
-          "sha256": "a7a5676bd4a0f8745e36b716d3f68b43b82be813157f76ca45bb537fe3b51b3a",
-          "size": 1886
+          "sha256": "234276d0f4b124e638b2aced1a80247cab013af05cd88cb515bb67c0ea30300e",
+          "size": 1968
         },
         {
           "path": "lib/howto.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/howto.lua",
-          "sha256": "fde283e75bdf2b714bbbff5ea57b84d46241e6791aaf4c39b5543b97485cb0b2",
-          "size": 6112
+          "sha256": "7bb4c99d52a7e4eb21830652da41a54552a56f2d25c870f8287fb658709bbaac",
+          "size": 6640
         },
         {
           "path": "lib/invite.lua",
@@ -3247,8 +3247,8 @@
         {
           "path": "lib/protocol.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/protocol.lua",
-          "sha256": "a3e35020e9fa458a55dcd3abd9808df6bb7ec148dd10ad72cef08cfa3ea8b7e3",
-          "size": 6628
+          "sha256": "f9a180dce5159c10f14edc021717dc5486241873de5e951a3a05394fab1239e5",
+          "size": 6930
         },
         {
           "path": "lib/rules.lua",
@@ -3271,7 +3271,7 @@
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/mod.toml",
-          "sha256": "3ecb9fde31e17af771138f7eeaeccf8d16120390f94f46c8e58e2863961f1d9b",
+          "sha256": "7ac2624b321d5e6a682ff5825364b4503e1922b3392a3530bb40972943dc0c97",
           "size": 1122
         },
         {

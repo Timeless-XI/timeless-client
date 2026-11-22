@@ -13,7 +13,7 @@ local B = {}
 B.WIN = "cardbook"
 B.W = 900
 B.COLS, B.ROWS, B.S = 5, 2, 0.82
-B.state = { tab = 1, page = 1, pick = 1, edit = nil, note = nil }
+B.state = { tab = 1, page = 1, pick = 1, edit = nil, note = nil, confirm = nil }
 B.send = function() end -- "cd ..." to the server, set by init.lua
 B.howto = function() end -- opens How to play, set by init.lua
 B.to_table = function() end -- opens the table, set by init.lua
@@ -25,7 +25,53 @@ local TABS = {
   { label = "Rares", tip = "Notorious monsters' cards." },
   { label = "Legendaries", tip = "A great wyrm's, and the card players' own (beat one three times)." },
   { label = "Foils", tip = "Champions' cards: Gilded, Nightborne, Rift-touched and Juggernaut. The ones you have." },
+  { label = "Sets", tip = "A region's (or kind's) cards: own one of each and its crest card is yours." },
 }
+
+local EL = { fire = "fire", ice = "ice", wind = "wind", earth = "earth", thunder = "thunder", water = "water", light = "light", dark = "dark" }
+
+-- Where a card comes from, in a few words (the world's own: when they drop)
+function B.where(card)
+  if card.crest then
+    for _, set in ipairs(cards.SETS) do
+      if set.crest == card.id then return ("Own every card of %s: its crest is yours."):format(set.name) end
+    end
+  end
+  if card.nm then return "A notorious monster's: hunt it." end
+  if card.key == "shaali" then return "Beat Shaali, the travelling card shark, three times." end
+  if card.rarity == 3 then return card.fam == "Townsfolk" and "Beat its owner three times at the Steaming Sheep." or "A legend's: hunt it." end
+  local w = card.when
+  if w then
+    if w.night then return "Its monsters drop it only at night (20:00 to 6:00)." end
+    if w.weather then return ("Its monsters drop it only in %s weather."):format(EL[w.weather] or w.weather) end
+    if w.beastHeld then return "Its monsters drop it only while the beastmen hold their region (conquest)." end
+    if w.region then
+      local r = w.region:lower():gsub("_", " "):gsub("^%l", string.upper)
+      return ("Its monsters drop it only in %s."):format(r)
+    end
+  end
+  return "Its monsters drop it now and then, or bind one with a Card Binder."
+end
+
+-- What Card Mod breaks a card into (the server's ca.modYield), in words; nil when it won't
+local CRYSTAL = { fire = "Fire", ice = "Ice", wind = "Wind", earth = "Earth", thunder = "Lightning", water = "Water", light = "Light", dark = "Dark" }
+local FOIL_ITEM = { "a gold beastcoin", "a moonstone", "a petrified log", "a darksteel ingot" }
+function B.mod_yield(id)
+  local c = cards.get(id)
+  if not c or c.rarity == 3 or c.crest then return nil end
+  local el = CRYSTAL[c.el] or "Fire"
+  local out = c.rarity == 2 and ("a %s cluster"):format(el)
+    or ("%d %s crystals"):format(c.level <= 2 and 2 or (c.level <= 4 and 4 or 6), el)
+  if c.variant then out = out .. " and " .. FOIL_ITEM[c.variant] end
+  return out
+end
+
+function B.set_progress(set)
+  local h = B.model and B.model.book.have or {}
+  local n = 0
+  for _, id in ipairs(set.cards) do if (h[id] or 0) > 0 then n = n + 1 end end
+  return n, #set.cards
+end
 
 local REGULARS = { { "hrodgar", "Hrodgar" }, { "fenwick", "Fenwick" }, { "kipiko", "Kipiko" }, { "dagny", "Dagny" }, { "shaali", "Shaali" } }
 
@@ -42,8 +88,9 @@ function B.list()
     table.sort(out, function(a, b) return (a % 1000) * 10 + a // 1000 < (b % 1000) * 10 + b // 1000 end)
     return out
   end
+  if t == 6 then return out end
   for _, c in ipairs(cards.list) do
-    if t == 1 or c.rarity == t - 1 then out[#out + 1] = c.id end
+    if (t == 1 and not c.crest) or (t > 1 and c.rarity == t - 1 and not c.crest) then out[#out + 1] = c.id end
   end
   return out
 end
@@ -109,14 +156,16 @@ function B.draw(c)
   end
   c:text(0, 2, "Cardbook", { size = 1.3, bold = true, colour = S.GOLD })
   c:text(110, 7, ("%d of %d cards  ·  %d foils"):format(owned, #cards.list, foils), { size = 0.85, colour = S.MUTED })
-  c:switch(B.W - 470, 0, 26, TABS, st.tab, { on = function(i) st.tab, st.page = i, 1 B.render() end, key = "tab" })
+  c:switch(B.W - 540, 0, 26, TABS, st.tab, { on = function(i) st.tab, st.page = i, 1 B.render() end, key = "tab" })
   local list = B.list()
   local per = B.COLS * B.ROWS
   local pages = math.max(1, math.ceil(#list / per))
   st.page = math.min(st.page, pages)
   local cw, ch = Art.W * B.S, Art.H * B.S
   local gx, gy = 4, 40
-  if #list == 0 then
+  if st.tab == 6 then
+    B.draw_sets(c, gx, gy)
+  elseif #list == 0 then
     c:para(gx, gy + 20, 560, st.tab == 5 and "No foils yet. Champions drop them: a Gilded, Nightborne, Rift-touched or Juggernaut card of their family."
       or "Nothing here yet.", { colour = S.MUTED })
   end
@@ -152,15 +201,28 @@ function B.draw(c)
       enabled = can_add, key = "add", tip = can_add and "Puts it in the hand you're picking." or "Every copy you have is in your hand." })
     c:button(ix + 144, iy + 22, 110, 26, "Take out", { on = in_hand(pick) > 0 and function() B.remove(pick) end or nil,
       enabled = in_hand(pick) > 0, key = "out" })
-    if card.rarity == 3 and card.fam == "Townsfolk" then
+    local yield = B.mod_yield(pick)
+    if yield then
+      local here = m and m.book.mod_here
+      local sure = st.confirm == pick
+      c:button(ix + 26, iy + 54, 228, 26, sure and "Break it? Click again" or "Card Mod", { style = sure and "danger" or nil, key = "mod", enabled = here,
+        on = here and function()
+          if st.confirm == pick then
+            st.confirm = nil
+            B.send("cd mod " .. pick)
+          else
+            st.confirm = pick
+            B.render()
+          end
+        end or nil,
+        tip = here and ("Breaks one copy into %s, for crafting."):format(yield) or ("In a town, this breaks one copy into %s, for crafting."):format(yield) })
+    elseif card.rarity == 3 and card.fam == "Townsfolk" then
       c:text(ix + 26, iy + 54, "Won from its owner at the table.", { size = 0.8, colour = S.MUTED, w = 270 })
+    elseif card.crest then
+      c:text(ix + 26, iy + 54, "A set's crest: yours for good.", { size = 0.8, colour = S.MUTED, w = 270 })
     end
   else
-    local card = cards.get(pick)
-    local how = card.nm and "A notorious monster's: hunt it." or (card.key == "shaali" and "Beat Shaali, the travelling card shark, three times."
-      or card.rarity == 3 and "Beat its owner three times at the Steaming Sheep."
-      or "Its monsters drop it now and then.")
-    c:para(ix + 26, iy, 260, how, { size = 0.85, colour = S.MUTED })
+    c:para(ix + 26, iy, 260, B.where(cards.get(pick)), { size = 0.85, colour = S.MUTED })
   end
   -- The hand of five you bring to the table
   local dy = 470
@@ -184,7 +246,11 @@ function B.draw(c)
   local sx = 2 + R.HAND_SIZE * (Art.W * hs + 12) + 10
   if m and m.shark then
     c:text(sx, dy + 34, "On the road", { size = 0.95, bold = true, colour = S.GOLD })
-    c:para(sx, dy + 54, B.W - sx, ("Shaali Nine-Lives, the travelling card shark, has her table in %s today, and goes to %s tomorrow. She plays Open, Plus and Elemental, with notorious monsters' cards."):format(m.shark.town, m.shark.next), { size = 0.82, colour = S.MUTED })
+    local ey = c:para(sx, dy + 54, B.W - sx, ("Shaali Nine-Lives, the travelling card shark, has her table in %s today, and goes to %s tomorrow. She plays Open, Plus and Elemental, with notorious monsters' cards."):format(m.shark.town, m.shark.next), { size = 0.82, colour = S.MUTED })
+    local binder = m.book.binder
+    c:para(sx, ey + 6, B.W - sx, binder and "You have a Card Binder: fight a monster down to 20% HP and the Card button by your target turns it into its card (no experience for it)."
+      or ("She sells a Card Binder (%d gil): it turns a weakened monster into its card, so you can hunt the card you want."):format(m.book.binder_price or 5000),
+      { size = 0.82, colour = binder and S.GOOD or S.MUTED })
   end
   local by = dy + 30 + Art.H * hs + 10
   c:button(0, by, 110, 26, "Save hand", { style = "primary", on = (st.edit and not why) and B.save or nil, enabled = st.edit ~= nil and not why, key = "save" })
@@ -223,6 +289,30 @@ function B.draw(c)
     if not close then c:text(370, cy + 5, "Stand closer to " .. t.name .. " to play.", { size = 0.8, colour = S.MUTED }) end
   else
     c:text(0, cy + 5, "To play another player: target them while you stand close by, then challenge them here.", { size = 0.8, colour = S.MUTED, w = B.W })
+  end
+end
+
+-- The Sets tab: each set, how much of it you have, and its crest (click a set to see its crest big)
+function B.draw_sets(c, x, y)
+  local st = B.state
+  local h = have()
+  local rh = 38
+  for i, set in ipairs(cards.SETS) do
+    local ry = y + (i - 1) * rh
+    local n, total = B.set_progress(set)
+    local done = (h[set.crest] or 0) > 0
+    local missing = {}
+    for _, id in ipairs(set.cards) do
+      if (h[id] or 0) == 0 then missing[#missing + 1] = cards.get(id).name end
+    end
+    local hot = c:region(x, ry, 580, rh - 4, { key = "set" .. i, on = function() st.pick = set.crest B.render() end,
+      title = set.name, tip = #missing == 0 and "Every card found." or ("Still to find: " .. table.concat(missing, ", ") .. ".") })
+    c:rect(x, ry, 580, rh - 4, (hot or st.pick == set.crest) and S.EDGE_HI or S.EDGE, { round = 5, line = 1 })
+    c:text(x + 10, ry + 4, (set.name:gsub("^%l", string.upper)), { size = 0.9, bold = true, colour = done and S.GOLD or S.TEXT })
+    c:text(x + 10, ry + 20, done and ("Complete: " .. cards.get(set.crest).name .. " is yours") or ("Crest: " .. cards.get(set.crest).name),
+      { size = 0.75, colour = done and S.GOOD or S.MUTED })
+    c:bar(x + 330, ry + 12, 170, 8, n / total, done and S.GOOD or S.GOLD)
+    c:text(x + 570, ry + 9, ("%d / %d"):format(n, total), { size = 0.85, colour = S.TEXT, align = "right" })
   end
 end
 
