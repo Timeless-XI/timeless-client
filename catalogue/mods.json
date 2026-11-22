@@ -3181,6 +3181,143 @@
       }
     },
     {
+      "id": "timeless-cardian",
+      "name": "Timeless Cardian",
+      "kind": "lua",
+      "version": "1.0.0",
+      "authors": [
+        "TimelessXI"
+      ],
+      "description": "Vana'diel's card game, after the old card games: four numbers a card, a 3x3 board over three real regions, capture by beating the touching number. Monsters drop their own cards, notorious monsters rare ones and Champions foils; keep them in the cardbook (/cardbook, or the Timeless menu), pick a hand of five, and play the Steaming Sheep's regulars after dark, Shaali the travelling card shark, or other players. The big cards show each monster's real model from your game files (TimelessXI client). Needs the server's cardian module.",
+      "files": [
+        {
+          "path": "init.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/init.lua",
+          "sha256": "8fcd7cbd1f7998a584e0ae3098e00d286397ad69f80b010bc054b3aa6a378936",
+          "size": 4424
+        },
+        {
+          "path": "lib/action.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/action.lua",
+          "sha256": "463b5f4a65be527f75211e0ea7ae51ca4119370703f006ada485d696796ca65e",
+          "size": 649
+        },
+        {
+          "path": "lib/art.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/art.lua",
+          "sha256": "440f0cd97101a0e4ab17d878e0eddecdebed1f970613ffe8489c86dee5b7eea6",
+          "size": 23477
+        },
+        {
+          "path": "lib/book.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/book.lua",
+          "sha256": "b2d5a094b1eedb90b318202dbcf2a71631a4655a801497c888614a30d57790b5",
+          "size": 11937
+        },
+        {
+          "path": "lib/canvas.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/canvas.lua",
+          "sha256": "644f8cf3d74340a1c4c6a92f73aa2d17d2aa3195e51b992948c73d93ee29384b",
+          "size": 11261
+        },
+        {
+          "path": "lib/cards.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/cards.lua",
+          "sha256": "ae9acbfc3b071e5ea5ec119165e1ae73470bbb6569a3cdc4a186ca4150f77352",
+          "size": 13291
+        },
+        {
+          "path": "lib/found.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/found.lua",
+          "sha256": "a7a5676bd4a0f8745e36b716d3f68b43b82be813157f76ca45bb537fe3b51b3a",
+          "size": 1886
+        },
+        {
+          "path": "lib/howto.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/howto.lua",
+          "sha256": "fde283e75bdf2b714bbbff5ea57b84d46241e6791aaf4c39b5543b97485cb0b2",
+          "size": 6112
+        },
+        {
+          "path": "lib/invite.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/invite.lua",
+          "sha256": "c0fe7a0f3e92e6fe902a835d85a2ca370edc0b2ec3c120f97f63c03db72a31b7",
+          "size": 2248
+        },
+        {
+          "path": "lib/protocol.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/protocol.lua",
+          "sha256": "a3e35020e9fa458a55dcd3abd9808df6bb7ec148dd10ad72cef08cfa3ea8b7e3",
+          "size": 6628
+        },
+        {
+          "path": "lib/rules.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/rules.lua",
+          "sha256": "5774007c0ccd502d62c0683939b61aa636b7555f829b5ba12149b049580db3dd",
+          "size": 883
+        },
+        {
+          "path": "lib/style.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/style.lua",
+          "sha256": "c906bac41070aed7af413fa07cb10bc308baf1ab1be99c9f5e4c24e2ff3961f2",
+          "size": 2753
+        },
+        {
+          "path": "lib/table.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/table.lua",
+          "sha256": "75ebc18ef665e82dd439b3cc981bb60147fa57f18d4306ca621050f23e681f87",
+          "size": 9998
+        },
+        {
+          "path": "mod.toml",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/mod.toml",
+          "sha256": "3ecb9fde31e17af771138f7eeaeccf8d16120390f94f46c8e58e2863961f1d9b",
+          "size": 1122
+        },
+        {
+          "path": "sounds/flip.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/sounds/flip.wav",
+          "sha256": "a71f469fd95e510042badccc5834f0c53a91eb24ce021a5c7c485d664d4f0eff",
+          "size": 22094
+        },
+        {
+          "path": "sounds/found.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/sounds/found.wav",
+          "sha256": "07ddde7a359fa6c165556e2680a6da4161b44371b576dbb75616c236dd9faed6",
+          "size": 61782
+        },
+        {
+          "path": "sounds/lose.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/sounds/lose.wav",
+          "sha256": "b9ed3f8cb9468192f2832173ef54970e6105783bff9f7e8894599d13953e66a0",
+          "size": 61782
+        },
+        {
+          "path": "sounds/shuffle.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/sounds/shuffle.wav",
+          "sha256": "8a685320a0d3dad499381f0514ea7d8d08e71671ff1b1e6549a589c2da93a3cc",
+          "size": 264644
+        },
+        {
+          "path": "sounds/win.wav",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/sounds/win.wav",
+          "sha256": "c4c7160823270fd3e8590cda285c594985ce1c8cf646dec02be8c7c6c768a09d",
+          "size": 70604
+        }
+      ],
+      "required": true,
+      "commands": {
+        "cardbook": {
+          "help": "Opens or closes your cardbook.",
+          "args": ""
+        },
+        "cardian": {
+          "help": "Opens the table while a game is on; otherwise the cardbook.",
+          "args": ""
+        }
+      }
+    },
+    {
       "id": "timeless-castbars",
       "name": "Timeless Cast Bars",
       "kind": "lua",
@@ -3574,143 +3711,6 @@
         },
         "timelessgauges": {
           "help": "The same as /gauges.",
-          "args": ""
-        }
-      }
-    },
-    {
-      "id": "timeless-ironhand",
-      "name": "Timeless Ironhand",
-      "kind": "lua",
-      "version": "1.1.0",
-      "authors": [
-        "TimelessXI"
-      ],
-      "description": "The Steaming Sheep's card game. Monsters drop their own cards, notorious monsters rare ones and Champions foils; keep them in the cardbook (/cardbook, or the Timeless menu), build a deck of fifteen, and play the regulars at the game table after dark. The big cards show each monster's real model from your game files, turning slowly (TimelessXI client). Needs the server's ironhand module.",
-      "files": [
-        {
-          "path": "init.lua",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/init.lua",
-          "sha256": "1a036808194e721272cf57945fef98355ebbb6669b3973f3c32fcead76f54532",
-          "size": 4319
-        },
-        {
-          "path": "lib/action.lua",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/action.lua",
-          "sha256": "b5d1d2c8620cfb9f1f511ad445a6ce379e785e3f1c9e240d2f3a7d36c8f5a8b2",
-          "size": 650
-        },
-        {
-          "path": "lib/art.lua",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/art.lua",
-          "sha256": "b58094154acde80eee909378f2a85acfe656bae85f0101edac8bcab55a5c6336",
-          "size": 23507
-        },
-        {
-          "path": "lib/book.lua",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/book.lua",
-          "sha256": "d33f7069028573611a50ef14595a5bb6e6081f89741e95b61632619305d0fd4a",
-          "size": 11376
-        },
-        {
-          "path": "lib/canvas.lua",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/canvas.lua",
-          "sha256": "644f8cf3d74340a1c4c6a92f73aa2d17d2aa3195e51b992948c73d93ee29384b",
-          "size": 11261
-        },
-        {
-          "path": "lib/cards.lua",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/cards.lua",
-          "sha256": "87c506261e38f790d0c262be03c1348a28e871ddd1ac75635b2e5910c2524b7f",
-          "size": 16543
-        },
-        {
-          "path": "lib/found.lua",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/found.lua",
-          "sha256": "3f697ae99f9a1bd775a546c417b48504d056804be7acef9e461e3d34ce00422e",
-          "size": 1905
-        },
-        {
-          "path": "lib/howto.lua",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/howto.lua",
-          "sha256": "edb1600b8c7c1a7b517a1832f2fcbdf24baddeacdeb7860c3512d6f07d58c686",
-          "size": 6738
-        },
-        {
-          "path": "lib/invite.lua",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/invite.lua",
-          "sha256": "244cc057594959221fa46995e92df37496d802ead7d396ce19aa8e3b9b125294",
-          "size": 2251
-        },
-        {
-          "path": "lib/protocol.lua",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/protocol.lua",
-          "sha256": "9ac2601762f811b8e0337357ed759eba7ff8956b2304425c4d9d89451cec38f8",
-          "size": 6062
-        },
-        {
-          "path": "lib/rules.lua",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/rules.lua",
-          "sha256": "774216714bc86e1d2ac871d955cf2187cbfcc09593896d495995fe39f9a2c73d",
-          "size": 2026
-        },
-        {
-          "path": "lib/style.lua",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/style.lua",
-          "sha256": "c906bac41070aed7af413fa07cb10bc308baf1ab1be99c9f5e4c24e2ff3961f2",
-          "size": 2753
-        },
-        {
-          "path": "lib/table.lua",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/lib/table.lua",
-          "sha256": "4c9e2d22d51e4fae0e528b598093838b5b19322693c71413bc8e552d9acaf9d0",
-          "size": 10401
-        },
-        {
-          "path": "mod.toml",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/mod.toml",
-          "sha256": "a1e2697316b66d380b30b3681d3cd3dff43cc6f20761d691ed97b4a84114264c",
-          "size": 983
-        },
-        {
-          "path": "sounds/flip.wav",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/sounds/flip.wav",
-          "sha256": "a71f469fd95e510042badccc5834f0c53a91eb24ce021a5c7c485d664d4f0eff",
-          "size": 22094
-        },
-        {
-          "path": "sounds/found.wav",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/sounds/found.wav",
-          "sha256": "07ddde7a359fa6c165556e2680a6da4161b44371b576dbb75616c236dd9faed6",
-          "size": 61782
-        },
-        {
-          "path": "sounds/lose.wav",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/sounds/lose.wav",
-          "sha256": "b9ed3f8cb9468192f2832173ef54970e6105783bff9f7e8894599d13953e66a0",
-          "size": 61782
-        },
-        {
-          "path": "sounds/shuffle.wav",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/sounds/shuffle.wav",
-          "sha256": "8a685320a0d3dad499381f0514ea7d8d08e71671ff1b1e6549a589c2da93a3cc",
-          "size": 264644
-        },
-        {
-          "path": "sounds/win.wav",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-ironhand/sounds/win.wav",
-          "sha256": "c4c7160823270fd3e8590cda285c594985ce1c8cf646dec02be8c7c6c768a09d",
-          "size": 70604
-        }
-      ],
-      "required": true,
-      "commands": {
-        "cardbook": {
-          "help": "Opens or closes your cardbook.",
-          "args": ""
-        },
-        "ironhand": {
-          "help": "Opens the table while a game is on; otherwise the cardbook.",
           "args": ""
         }
       }

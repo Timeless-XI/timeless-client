@@ -1,0 +1,25 @@
+name = "Timeless Cardian"
+version = "1.0.0"
+authors = ["TimelessXI"]
+description = "Vana'diel's card game, after the old card games: four numbers a card, a 3x3 board over three real regions, capture by beating the touching number. Monsters drop their own cards, notorious monsters rare ones and Champions foils; keep them in the cardbook (/cardbook, or the Timeless menu), pick a hand of five, and play the Steaming Sheep's regulars after dark, Shaali the travelling card shark, or other players. The big cards show each monster's real model from your game files (TimelessXI client). Needs the server's cardian module."
+permissions = ["packets.write"]
+
+[settings.popup]
+type = "bool"
+default = true
+label = "New Card Popup"
+help = "Shows a card you've just found, with its monster turning slowly."
+
+[settings.sounds]
+type = "bool"
+default = true
+label = "Card Sounds"
+help = "Shuffling, cards flipping, winning and losing, and a chime for a new card."
+
+[commands.cardbook]
+help = "Opens or closes your cardbook."
+args = ""
+
+[commands.cardian]
+help = "Opens the table while a game is on; otherwise the cardbook."
+args = ""

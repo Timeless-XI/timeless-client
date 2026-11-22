@@ -8,7 +8,7 @@ local Art = require("lib.art")
 
 local I = {}
 
-I.WIN = "ironhand_invite"
+I.WIN = "cardian_invite"
 I.W = 340
 I.SECONDS = 60
 I.state = { invite = nil, at = 0 }
@@ -18,7 +18,7 @@ function I.draw(c)
   local inv = I.state.invite
   if not inv then return end
   c:text(I.W / 2, 0, "A challenge!", { size = 1.2, bold = true, colour = S.GOLD, align = "center" })
-  local y = c:para(0, 28, I.W, ("%s challenges you to a game of Ironhand%s."):format(inv.from,
+  local y = c:para(0, 28, I.W, ("%s challenges you to a game of Cardian%s."):format(inv.from,
     inv.stakes == "ante" and ", for a card" or ""), { size = 0.9, colour = S.TEXT })
   if inv.stakes == "ante" and cards.get(inv.ante) then
     y = c:para(0, y + 4, I.W, "You'd put up this card. The winner takes the loser's:", { size = 0.8, colour = S.MUTED })
@@ -34,15 +34,15 @@ end
 function I.answer(yes)
   I.state.invite = nil
   ui.close(I.WIN)
-  I.send(yes and "ih accept" or "ih decline")
+  I.send(yes and "cd accept" or "cd decline")
 end
 
 function I.setup()
-  ui.window(I.WIN, { title = "Ironhand", width = I.W + 20, elements = { { type = "canvas", id = "invite", w = I.W, h = 190, draw = {} } } })
+  ui.window(I.WIN, { title = "Cardian", width = I.W + 20, elements = { { type = "canvas", id = "invite", w = I.W, h = 190, draw = {} } } })
   Canvas.add(I.WIN, "invite", I.W, I.draw)
   ui.on(I.WIN, function(win, e)
     if e.kind == "close" then
-      if I.state.invite then I.state.invite = nil I.send("ih decline") end
+      if I.state.invite then I.state.invite = nil I.send("cd decline") end
       return
     end
     Canvas.event(win, e)

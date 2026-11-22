@@ -1,5 +1,6 @@
 -- The cardbook (/cardbook, the Timeless menu): every card you have, the ones still to find as silhouettes, the
--- foils from Champions, a big card with the monster's model turning slowly, and your deck of fifteen to build and save.
+-- foils from Champions, a big card with the monster's model turning slowly, your hand of five to pick and save,
+-- where Shaali the card shark is today, and challenging another player.
 
 local S = require("lib.style")
 local Canvas = require("lib.canvas")
@@ -13,7 +14,7 @@ B.WIN = "cardbook"
 B.W = 900
 B.COLS, B.ROWS, B.S = 5, 2, 0.82
 B.state = { tab = 1, page = 1, pick = 1, edit = nil, note = nil }
-B.send = function() end -- "ih ..." to the server, set by init.lua
+B.send = function() end -- "cd ..." to the server, set by init.lua
 B.howto = function() end -- opens How to play, set by init.lua
 B.to_table = function() end -- opens the table, set by init.lua
 B.RANGE = 15 -- yalms: how close another player must be to challenge (the server's config.pvp.range)
@@ -22,11 +23,11 @@ local TABS = {
   { label = "All", tip = "Every card, the ones you have and the ones still to find." },
   { label = "Commons", tip = "Field monsters' cards." },
   { label = "Rares", tip = "Notorious monsters' cards." },
-  { label = "Legendaries", tip = "A great wyrm's, and the Steaming Sheep regulars' own (beat one three times)." },
+  { label = "Legendaries", tip = "A great wyrm's, and the card players' own (beat one three times)." },
   { label = "Foils", tip = "Champions' cards: Gilded, Nightborne, Rift-touched and Juggernaut. The ones you have." },
 }
 
-local REGULARS = { { "hrodgar", "Hrodgar" }, { "fenwick", "Fenwick" }, { "kipiko", "Kipiko" }, { "dagny", "Dagny" } }
+local REGULARS = { { "hrodgar", "Hrodgar" }, { "fenwick", "Fenwick" }, { "kipiko", "Kipiko" }, { "dagny", "Dagny" }, { "shaali", "Shaali" } }
 
 local function have() return B.model and B.model.book.have or {} end
 
@@ -47,27 +48,27 @@ function B.list()
   return out
 end
 
-function B.deck()
-  return B.state.edit or (B.model and B.model.book.deck) or {}
+function B.hand()
+  return B.state.edit or (B.model and B.model.book.hand) or {}
 end
 
-local function in_deck(id)
+local function in_hand(id)
   local n = 0
-  for _, d in ipairs(B.deck()) do if d == id then n = n + 1 end end
+  for _, d in ipairs(B.hand()) do if d == id then n = n + 1 end end
   return n
 end
 
 local function edit()
   if not B.state.edit then
     B.state.edit = {}
-    for i, id in ipairs(B.model and B.model.book.deck or {}) do B.state.edit[i] = id end
+    for i, id in ipairs(B.model and B.model.book.hand or {}) do B.state.edit[i] = id end
   end
   return B.state.edit
 end
 
 function B.add(id)
   local e = edit()
-  if #e >= R.DECK_SIZE then B.state.note = "Your deck has fifteen already: take one out first." return end
+  if #e >= R.HAND_SIZE then B.state.note = "Your hand has five already: take one out first." B.render() return end
   e[#e + 1] = id
   table.sort(e, function(a, b) return (a % 1000) < (b % 1000) or ((a % 1000) == (b % 1000) and a < b) end)
   B.state.note = nil
@@ -86,11 +87,11 @@ end
 function B.save()
   local e = B.state.edit
   if not e then return end
-  local why = R.deck_problem(e, have())
+  local why = R.hand_problem(e, have())
   if why then B.state.note = why B.render() return end
   local ids = {}
   for i, id in ipairs(e) do ids[i] = tostring(id) end
-  B.send("ih deck " .. table.concat(ids, ","))
+  B.send("cd hand " .. table.concat(ids, ","))
   B.state.note = "Saving..."
   B.render()
 end
@@ -144,51 +145,56 @@ function B.draw(c)
   Art.card(c, ix + 26, gy, bs, pick, { portrait = n > 0, missing = n == 0, detail = "big" })
   local iy = gy + Art.H * bs + 10
   if n > 0 then
-    c:text(ix + 26, iy, ("You have %d  ·  %d in your deck"):format(n, in_deck(pick)), { size = 0.85, colour = S.TEXT })
+    c:text(ix + 26, iy, ("You have %d  ·  %d in your hand"):format(n, in_hand(pick)), { size = 0.85, colour = S.TEXT })
     local card = cards.get(pick)
-    local can_add = in_deck(pick) < n
-    c:button(ix + 26, iy + 22, 110, 26, "Add to deck", { style = "primary", on = can_add and function() B.add(pick) end or nil,
-      enabled = can_add, key = "add", tip = can_add and "Puts it in the deck you're building." or "Every copy you have is in the deck." })
-    c:button(ix + 144, iy + 22, 110, 26, "Take out", { on = in_deck(pick) > 0 and function() B.remove(pick) end or nil,
-      enabled = in_deck(pick) > 0, key = "out" })
+    local can_add = in_hand(pick) < n
+    c:button(ix + 26, iy + 22, 110, 26, "Add to hand", { style = "primary", on = can_add and function() B.add(pick) end or nil,
+      enabled = can_add, key = "add", tip = can_add and "Puts it in the hand you're picking." or "Every copy you have is in your hand." })
+    c:button(ix + 144, iy + 22, 110, 26, "Take out", { on = in_hand(pick) > 0 and function() B.remove(pick) end or nil,
+      enabled = in_hand(pick) > 0, key = "out" })
     if card.rarity == 3 and card.fam == "Townsfolk" then
-      c:text(ix + 26, iy + 54, "Won at the Steaming Sheep's table.", { size = 0.8, colour = S.MUTED, w = 270 })
+      c:text(ix + 26, iy + 54, "Won from its owner at the table.", { size = 0.8, colour = S.MUTED, w = 270 })
     end
   else
     local card = cards.get(pick)
-    local how = card.nm and "A notorious monster's: hunt it." or (card.rarity == 3 and "Beat its owner three times at the Steaming Sheep."
+    local how = card.nm and "A notorious monster's: hunt it." or (card.key == "shaali" and "Beat Shaali, the travelling card shark, three times."
+      or card.rarity == 3 and "Beat its owner three times at the Steaming Sheep."
       or "Its monsters drop it now and then.")
     c:para(ix + 26, iy, 260, how, { size = 0.85, colour = S.MUTED })
   end
-  -- The deck
+  -- The hand of five you bring to the table
   local dy = 470
-  local deck = B.deck()
-  local why = R.deck_problem(deck, h)
-  c:heading(0, dy, B.W, ("Your deck (%d of %d)"):format(#deck, R.DECK_SIZE), st.edit and "Changed: save it to play with it" or "The deck you play at the table")
-  -- Fifteen strips in three columns, so the names can be read
-  local sw = (B.W - 4 - 2 * 12) / 3
-  for i = 1, R.DECK_SIZE do
-    local col, rowi = (i - 1) // 5, (i - 1) % 5
-    local x, y = 2 + col * (sw + 12), dy + 30 + rowi * (Art.STRIP + 4)
-    local id = deck[i]
+  local hand = B.hand()
+  local why = R.hand_problem(hand, h)
+  c:heading(0, dy, B.W, ("Your hand (%d of %d)"):format(#hand, R.HAND_SIZE), st.edit and "Changed: save it to play with it" or "The five cards you bring to the table")
+  local hs = 0.62
+  for i = 1, R.HAND_SIZE do
+    local x, y = 2 + (i - 1) * (Art.W * hs + 12), dy + 30
+    local id = hand[i]
     if id then
-      local hot = c:region(x, y, sw, Art.STRIP, { on = function() st.pick = id B.render() end, key = "deck" .. i,
+      local hot = c:region(x, y, Art.W * hs, Art.H * hs, { on = function() st.pick = id B.render() end, key = "hand" .. i,
         title = cards.get(id).name, tip = "Click to look at it; take it out from the big card." })
-      Art.strip(c, x, y, sw, id, { selected = hot or st.pick == id })
+      Art.card(c, x, y, hs, id, { selected = hot or st.pick == id, detail = "small" })
     else
-      c:rect(x, y, sw, Art.STRIP, S.SLOT, { round = 5 })
-      c:rect(x, y, sw, Art.STRIP, S.EDGE, { round = 5, line = 1 })
+      c:rect(x, y, Art.W * hs, Art.H * hs, S.SLOT, { round = 6 })
+      c:rect(x, y, Art.W * hs, Art.H * hs, S.EDGE, { round = 6, line = 1 })
     end
   end
-  local by = dy + 30 + 5 * (Art.STRIP + 4) + 8
-  c:button(0, by, 110, 26, "Save deck", { style = "primary", on = (st.edit and not why) and B.save or nil, enabled = st.edit ~= nil and not why, key = "save" })
+  -- Where the card shark is, beside the hand
+  local sx = 2 + R.HAND_SIZE * (Art.W * hs + 12) + 10
+  if m and m.shark then
+    c:text(sx, dy + 34, "On the road", { size = 0.95, bold = true, colour = S.GOLD })
+    c:para(sx, dy + 54, B.W - sx, ("Shaali Nine-Lives, the travelling card shark, has her table in %s today, and goes to %s tomorrow. She plays Open, Plus and Elemental, with notorious monsters' cards."):format(m.shark.town, m.shark.next), { size = 0.82, colour = S.MUTED })
+  end
+  local by = dy + 30 + Art.H * hs + 10
+  c:button(0, by, 110, 26, "Save hand", { style = "primary", on = (st.edit and not why) and B.save or nil, enabled = st.edit ~= nil and not why, key = "save" })
   local g = m and m.game
   if g and g.now and not g.now.over and not (m.result) then
     c:button(B.W - 270, by, 140, 26, "Back to the game", { style = "primary", on = function() B.to_table() end, key = "totable",
-      tip = "Your game at the Steaming Sheep is still on." })
+      tip = "Your game is still on." })
   end
   c:button(B.W - 120, by, 120, 26, "How to play", { on = function() B.howto() end, key = "howto",
-    tip = "The rules: fronts, crystals, the world's bonuses, and collecting cards." })
+    tip = "The rules: capturing, the fronts, house rules, the world's numbers, and collecting cards." })
   c:button(118, by, 110, 26, "Undo changes", { on = st.edit and function() st.edit, st.note = nil, nil B.render() end or nil, enabled = st.edit ~= nil, key = "undo" })
   local note = st.note or (st.edit and why) or (m and m.message and m.message.text)
   if note then c:text(240, by + 5, note, { size = 0.85, colour = (why and st.edit) and S.WARN or S.MUTED, w = B.W - 240 - 280 }) end
@@ -199,7 +205,7 @@ function B.draw(c)
     local wins = m and m.book.wins[r[1]] or 0
     parts[#parts + 1] = ("%s %d/3"):format(r[2], math.min(wins, 3))
   end
-  c:text(0, wy, "At the Steaming Sheep (after dark):  " .. table.concat(parts, "  ·  ") .. "  ·  three wins for their own card",
+  c:text(0, wy, "Wins (three for their own card):  " .. table.concat(parts, "  ·  "),
     { size = 0.8, colour = S.MUTED, w = B.W })
   -- Another player: target them (close by) and challenge them
   local cy = wy + 24
@@ -209,11 +215,11 @@ function B.draw(c)
     local close = (t.distance or 99) <= B.RANGE
     local on = close and not busy
     c:button(0, cy, 200, 26, "Challenge " .. t.name, { style = "primary", key = "challenge", enabled = on,
-      on = on and function() B.send(("ih challenge %d"):format(t.id)) end or nil,
+      on = on and function() B.send(("cd challenge %d"):format(t.id)) end or nil,
       tip = close and "A friendly game: nothing changes hands." or "Stand closer to them to play." })
     c:button(208, cy, 150, 26, "For a card", { key = "challenge_ante", enabled = on,
-      on = on and function() B.send(("ih challenge %d ante"):format(t.id)) end or nil,
-      tip = "You each put up a common you have two of; the winner takes the loser's." })
+      on = on and function() B.send(("cd challenge %d ante"):format(t.id)) end or nil,
+      tip = "You each put up the best card in your hand you have a spare of; the winner takes the loser's." })
     if not close then c:text(370, cy + 5, "Stand closer to " .. t.name .. " to play.", { size = 0.8, colour = S.MUTED }) end
   else
     c:text(0, cy + 5, "To play another player: target them while you stand close by, then challenge them here.", { size = 0.8, colour = S.MUTED, w = B.W })
@@ -225,8 +231,8 @@ function B.setup(model)
   ui.window(B.WIN, {
     title = "Cardbook",
     width = B.W + 20,
-    help = "Your Ironhand cards: the ones you have, the ones still to find, Champions' foils, and the deck you play at the Steaming Sheep's table.",
-    elements = { { type = "canvas", id = "book", w = B.W, h = 770, draw = {} } },
+    help = "Your Cardian cards: the ones you have, the ones still to find, Champions' foils, and the hand of five you bring to the table.",
+    elements = { { type = "canvas", id = "book", w = B.W, h = 790, draw = {} } },
   })
   Canvas.add(B.WIN, "book", B.W, B.draw)
   ui.on(B.WIN, function(win, e)
@@ -239,9 +245,9 @@ end
 function B.on_book()
   local st = B.state
   if st.edit and B.model then
-    local same = #st.edit == #B.model.book.deck
-    for i, id in ipairs(st.edit) do if B.model.book.deck[i] ~= id then same = false end end
-    if same then st.edit = nil st.note = "Deck saved." end
+    local same = #st.edit == #B.model.book.hand
+    for i, id in ipairs(st.edit) do if B.model.book.hand[i] ~= id then same = false end end
+    if same then st.edit = nil st.note = "Hand saved." end
   end
   if st.note == "Saving..." then st.note = nil end
   B.render()
@@ -256,7 +262,7 @@ function B.toggle()
     ui.close(B.WIN)
   else
     ui.open(B.WIN)
-    B.send("ih book")
+    B.send("cd book")
     B.render()
   end
 end

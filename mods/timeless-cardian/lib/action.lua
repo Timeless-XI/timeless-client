@@ -1,5 +1,5 @@
 -- Asks the server without chat: a 0x0B5 packet whose text starts with \x7F"CM|", the same packet Timeless Companions
--- and the Ashita addons send. The server's companions module takes it and hands "ih ..." to the ironhand module, so
+-- and the Ashita addons send. The server's companions module takes it and hands "cd ..." to the cardian module, so
 -- nothing shows in chat.
 
 local A = {}

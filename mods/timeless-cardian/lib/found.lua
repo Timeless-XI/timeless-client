@@ -8,14 +8,14 @@ local Art = require("lib.art")
 
 local F = {}
 
-F.WIN = "ironhand_found"
+F.WIN = "cardian_found"
 F.W = 300
 F.SECONDS = 14
 F.state = { id = nil, how = nil, at = 0 }
 F.open_book = function() end
 
 local HOW = { drop = "Dropped by a monster.", nm = "A notorious monster's own card!", champion = "A Champion's foil!",
-  won = "Won at the Steaming Sheep's table.", legend = "Given to you across the table: their own card!", gm = "A gift." }
+  won = "Won at the table.", legend = "Given to you across the table: their own card!", gm = "A gift." }
 
 function F.draw(c)
   local id = F.state.id
@@ -29,7 +29,7 @@ function F.draw(c)
 end
 
 function F.setup()
-  ui.window(F.WIN, { title = "Ironhand", width = F.W + 20, elements = { { type = "canvas", id = "found", w = F.W, h = 420, draw = {} } } })
+  ui.window(F.WIN, { title = "Cardian", width = F.W + 20, elements = { { type = "canvas", id = "found", w = F.W, h = 420, draw = {} } } })
   Canvas.add(F.WIN, "found", F.W, F.draw)
   ui.on(F.WIN, function(win, e)
     if e.kind == "close" then F.state.id = nil return end
