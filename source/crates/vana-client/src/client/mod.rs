@@ -18249,6 +18249,10 @@ impl App {
             let data = if self.tl_ring.wanted() != req.key() { self.game_data().ok() } else { None };
             self.tl_ring.want(req, || data);
             self.tl_ring.focus(self.select_ui.cursor);
+            // The log-in prompt up, or the log-in under way (the lobby taken): the camera moves in on them.
+            let logging_in = matches!(&self.phase, Phase::Characters { lobby: None, .. });
+            self.tl_ring
+                .confirm(logging_in || matches!(self.select_ui.focus, select::Focus::Prompt(select::Prompt::Login, _)));
         } else if !tl_select {
             for c in self.tl_ring.clear() {
                 let Some(a) = &mut self.audio else { break };

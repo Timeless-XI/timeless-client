@@ -48,6 +48,8 @@ pub struct State {
     pub on: bool,
     pub hover: bool,
     pub off: bool,
+    /// Timeless XI: no hourglass on the cursor's row (the Select screen's list, owner 2026-11-22).
+    pub bare: bool,
 }
 
 /// A left-to-right (`across`) or top-to-bottom gradient over `r`.
@@ -98,7 +100,9 @@ fn back(p: &Painter, m: &Modern, r: Rect, s: State, style: Style) {
                     ));
                 }
                 // In the row's left margin, clear of the icons every list draws from x + 10.
-                hourglass(p, pos2(r.min.x + 5.0, r.center().y), 13.0, gold, m.theme.color("tp"));
+                if !s.bare {
+                    hourglass(p, pos2(r.min.x + 5.0, r.center().y), 13.0, gold, m.theme.color("tp"));
+                }
             } else if s.hover {
                 p.rect_filled(r.shrink2(vec2(0.0, 1.0)), 0.0, gold.gamma_multiply(0.06));
             }
@@ -280,6 +284,11 @@ fn ink(m: &Modern, s: State, style: Style) -> Color32 {
 /// A row's background from its face in the pack's names ("controls/list_row_selected", "_hover", "_disabled",
 /// "_normal") in the current style: the framed art, else the style's look; a tint other than white dims it.
 pub fn face(p: &Painter, m: &Modern, r: Rect, face: &str, tint: Color32) {
+    face_with(p, m, r, face, tint, false)
+}
+
+/// `face` without the cursor row's mark (Dusk's hourglass) when `bare`.
+pub fn face_with(p: &Painter, m: &Modern, r: Rect, face: &str, tint: Color32, bare: bool) {
     let style = current(m);
     if style == Style::Framed || !face.starts_with("controls/list_row_") {
         if let Some(s) = m.art.sprite(face) {
@@ -287,8 +296,12 @@ pub fn face(p: &Painter, m: &Modern, r: Rect, face: &str, tint: Color32) {
         }
         return;
     }
-    let s =
-        State { on: face.ends_with("_selected"), hover: face.ends_with("_hover"), off: face.ends_with("_disabled") };
+    let s = State {
+        on: face.ends_with("_selected"),
+        hover: face.ends_with("_hover"),
+        off: face.ends_with("_disabled"),
+        bare,
+    };
     let mut q = p.clone();
     if tint != Color32::WHITE {
         q.multiply_opacity(0.55);
@@ -298,7 +311,7 @@ pub fn face(p: &Painter, m: &Modern, r: Rect, face: &str, tint: Color32) {
 
 /// The label colour of a row (gold on the cursor in the Hairline and Gilt styles).
 pub fn label_colour(m: &Modern, on: bool, off: bool) -> Color32 {
-    ink(m, State { on, off, hover: false }, current(m))
+    ink(m, State { on, off, ..Default::default() }, current(m))
 }
 
 /// The submenu mark at a row's right in the current style; the rect it takes (a click there opens the submenu).
@@ -322,7 +335,7 @@ pub fn menu_row(
 ) -> egui::Response {
     let style = current(m);
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
-    let s = State { on, off, hover: hover || resp.hovered() };
+    let s = State { on, off, hover: hover || resp.hovered(), ..Default::default() };
     let p = ui.painter();
     back(p, m, r, s, style);
     let face = super::menu_family();

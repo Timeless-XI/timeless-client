@@ -200,6 +200,9 @@ enum Cmd {
         /// Focus changes: seconds:index, comma-separated (the first is where it starts).
         #[arg(long, default_value = "0:0")]
         focus: String,
+        /// Seconds from which the log-in close-up is on (the prompt up).
+        #[arg(long)]
+        close_at: Option<f32>,
         /// Seconds to shoot at.
         #[arg(long, default_value = "2")]
         times: String,
@@ -2409,7 +2412,7 @@ fn main() -> Result<()> {
         Cmd::DialogueShot { out, zone, id, speaker, choice, frame, width, height } => {
             dialogshot::dialogue_shot(&out, zone, id, &speaker, choice, frame, width, height)
         }
-        Cmd::RingShot { out_dir, chars, focus, times, width, height } => {
+        Cmd::RingShot { out_dir, chars, focus, close_at, times, width, height } => {
             use client::tl_ring::{Member, Request, shot};
             let members = chars
                 .iter()
@@ -2443,7 +2446,7 @@ fn main() -> Result<()> {
                 })
                 .collect();
             let at: Vec<f32> = times.split(',').filter_map(|t| t.trim().parse().ok()).collect();
-            shot(&Request { members }, &moves, &at, &out_dir, [width, height])
+            shot(&Request { members }, &moves, close_at, &at, &out_dir, [width, height])
         }
         Cmd::ReelShot { shot, out_dir, steps, filter, no_logo, width, height } => {
             tlreel::reel_shot(&shot, &out_dir, steps, width, height, filter.as_deref(), !no_logo)

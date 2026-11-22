@@ -1070,7 +1070,8 @@ fn row(ui: &mut Ui, m: &Modern, r: &super::super::select::RowView, on: bool, foc
         _ if on || focused && resp.hovered() => "controls/list_row_hover",
         _ => "controls/list_row_normal",
     };
-    super::rows::face(ui.painter(), m, rect, face, Color32::WHITE);
+    // Timeless XI: no hourglass on the highlighted character (owner, 2026-11-22): the ring's aura marks them.
+    super::rows::face_with(ui.painter(), m, rect, face, Color32::WHITE, true);
     let [_, race, job, level, area] = &r.info;
     let top = rect.min.y + 18.0;
     let strong = FontId::new(m.theme.title * 1.15, FontFamily::Name(super::STRONG.into()));

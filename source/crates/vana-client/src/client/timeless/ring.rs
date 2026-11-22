@@ -52,6 +52,7 @@ const WEATHER: &str = "suny";
 /// The platform's floor, should the collision not answer.
 const FLOOR: f32 = -13.1;
 const GLOW: &str = "tl_ring_glow";
+const RING: &str = "tl_ring_ring";
 
 /// Where each character stands (degrees from +x toward +z), by how many there are.
 pub fn angles(n: usize) -> Vec<f32> {
@@ -200,6 +201,22 @@ fn glow_texture() -> (u32, u32, Vec<u8>) {
     (n, n, px)
 }
 
+/// A fine ring of light (white; the alpha a thin soft band near the edge) for the floor ring.
+fn ring_texture() -> (u32, u32, Vec<u8>) {
+    let n = 128u32;
+    let mut px = Vec::with_capacity((n * n * 4) as usize);
+    for y in 0..n {
+        for x in 0..n {
+            let dx = (x as f32 + 0.5) / n as f32 * 2.0 - 1.0;
+            let dy = (y as f32 + 0.5) / n as f32 * 2.0 - 1.0;
+            let r = (dx * dx + dy * dy).sqrt();
+            let a = 0.75 * (-((r - 0.84) / 0.05).powi(2)).exp() + 0.4 * (-((r - 0.8) / 0.14).powi(2)).exp();
+            px.extend_from_slice(&[255, 255, 255, (a.min(1.0) * 255.0) as u8]);
+        }
+    }
+    (n, n, px)
+}
+
 /// The ring as shown: the hall, the characters, the camera at the centre.
 pub struct RingScene {
     data: RingData,
@@ -216,6 +233,9 @@ pub struct RingScene {
     aura: Vec<f32>,
     /// The camera's heading (degrees, the way it looks from the centre).
     yaw: f32,
+    /// The close-up on the one chosen (the log-in prompt up): wanted, and 0..1 eased.
+    close_want: bool,
+    close: f32,
     time: f32,
     /// 0..1: fades in when it starts and out when another roster is wanted.
     pub alpha: f32,
@@ -250,6 +270,8 @@ impl RingScene {
             focus,
             aura,
             yaw,
+            close_want: false,
+            close: 0.0,
             time: 0.0,
             alpha: 0.0,
             leaving: false,
@@ -258,6 +280,11 @@ impl RingScene {
 
     pub fn key(&self) -> &str {
         &self.data.key
+    }
+
+    /// The character chosen and the log-in prompt up: the camera moves in to their chest.
+    pub fn set_close(&mut self, on: bool) {
+        self.close_want = on;
     }
 
     pub fn set_focus(&mut self, i: usize) {
@@ -285,6 +312,8 @@ impl RingScene {
             let secs = if want > *a { 0.45 } else { 0.25 };
             *a += (want - *a) * (1.0 - (-dt / secs).exp());
         }
+        let want = if self.close_want { 1.0 } else { 0.0 };
+        self.close += (want - self.close) * (1.0 - (-dt / 0.38).exp());
         for q in &mut self.queues {
             q.tick(dt * 60.0);
         }
@@ -296,9 +325,24 @@ impl RingScene {
         let f = framing();
         let yaw = self.yaw + (self.time * 0.21).sin() * 0.8;
         let lift = (self.time * 0.33).sin() * 0.04;
-        let eye = Vec3::new(0.0, floor - f.eye_up - lift, 0.0);
-        let target = dir_of(yaw) * 10.0 + Vec3::Y * (floor - f.target_up - lift);
-        Camera { eye, target, up: Vec3::NEG_Y, fov_y: crate::dat::title::fov_y(f.focal) }
+        let mut eye = Vec3::new(0.0, floor - f.eye_up - lift, 0.0);
+        let mut target = dir_of(yaw) * 10.0 + Vec3::Y * (floor - f.target_up - lift);
+        let mut focal = f.focal;
+        // The close-up: a dolly in from the centre to frame them from the waist up (a longer lens, about a third of
+        // their height above and below the chest), as the log-in prompt opens.
+        if let Some(b) = self.data.bodies.get(self.focus).filter(|_| self.close > 0.001) {
+            let k = self.close * self.close * (3.0 - 2.0 * self.close);
+            let h = b.height;
+            let (lens, span, mid) = (480.0, 0.8 * h, 0.7 * h);
+            let dist = (span * 0.5) / (192.0 / lens);
+            let d = dir_of(b.angle);
+            let eye_c = b.feet - d * dist - Vec3::Y * (0.8 * h + lift);
+            let target_c = b.feet - Vec3::Y * (mid + lift);
+            eye = eye.lerp(eye_c, k);
+            target = target.lerp(target_c, k);
+            focal += (lens - focal) * k;
+        }
+        Camera { eye, target, up: Vec3::NEG_Y, fov_y: crate::dat::title::fov_y(focal) }
     }
 
     pub fn take_sounds(&mut self) -> Vec<crate::fx::sound::SoundCmd> {
@@ -319,38 +363,87 @@ impl RingScene {
         }
     }
 
-    /// The aura over the highlighted character: a soft warm light about the body, a pool at the feet, a faint shaft
-    /// from above and a few motes rising (additive, under the filter so it blooms with it).
+    /// The aura over the highlighted character, in Timeless's own light (owner, 2026-11-22: the warm glow didn't feel
+    /// like Timeless): moonlit steel blue and silver, as the logo's glass. A faint breathing halo, a fine ring of
+    /// crystal light on the floor at their feet, a thin cool shaft from above, a few grains of the hourglass's pale
+    /// gold sand falling slowly past them, and silver glints that come and go (additive, under the filter).
     fn aura_batch(&self, cam: &Camera, size: [u32; 2], batch: &mut UiBatch) {
+        use std::f32::consts::{PI, TAU};
         let (w, h) = (size[0] as f32, size[1] as f32);
         let vp = cam.view_proj(w / h);
         let to_px = |p: Vec3| -> Option<(f32, f32)> {
             let c = vp * Vec4::new(p.x, p.y, p.z, 1.0);
             (c.w > 0.1).then(|| ((c.x / c.w * 0.5 + 0.5) * w, (0.5 - c.y / c.w * 0.5) * h))
         };
+        // The logo's colours: steel blue #9FBBE0, the deeper glow #3D5F94, silver #D6E1F0, the sand's pale gold.
+        const STEEL: [f32; 3] = [0.62, 0.73, 0.88];
+        const DEEP: [f32; 3] = [0.24, 0.37, 0.58];
+        const SILVER: [f32; 3] = [0.84, 0.88, 0.94];
+        const SAND: [f32; 3] = [0.93, 0.84, 0.64];
+        let rgba = |c: [f32; 3], k: f32| [c[0], c[1], c[2], k];
+        let breath = 0.8 + 0.2 * (self.time * TAU / 5.0).sin();
         for (i, (b, &a)) in self.data.bodies.iter().zip(&self.aura).enumerate() {
             if a < 0.01 {
                 continue;
             }
-            let height = b.height;
-            let (Some((fx, fy)), Some((_, hy))) = (to_px(b.feet), to_px(b.feet - Vec3::Y * height)) else { continue };
+            let (Some((fx, fy)), Some((_, hy))) = (to_px(b.feet), to_px(b.feet - Vec3::Y * b.height)) else { continue };
             let hp = (fy - hy).max(1.0);
-            let warm = |k: f32| [1.0, 0.82, 0.58, k * a];
-            // A soft halo about the body (faint: the body stays clear; the tint lights it).
-            batch.push_image_add(GLOW, fx - hp * 0.55, hy - hp * 0.3, hp * 1.1, hp * 1.5, warm(0.18));
-            // The pool at the feet.
-            batch.push_image_add(GLOW, fx - hp * 0.62, fy - hp * 0.09, hp * 1.24, hp * 0.18, warm(0.42));
-            // The shaft from above.
-            batch.push_image_add(GLOW, fx - hp * 0.3, fy - hp * 3.2, hp * 0.6, hp * 3.3, warm(0.07));
-            // Motes, rising and fading.
-            for k in 0..14 {
-                let seed = (i * 31 + k * 7) as f32;
-                let phase = (self.time * (0.10 + 0.03 * (seed * 1.7).sin().abs()) + seed * 0.618).fract();
-                let x = fx + (seed * 12.9898).sin() * hp * 0.32 + (self.time * 0.7 + seed).sin() * hp * 0.03;
-                let y = fy - phase * hp * 1.25;
-                let s = hp * (0.018 + 0.012 * (seed * 3.1).cos().abs());
-                let fade = (phase * std::f32::consts::PI).sin();
-                batch.push_image_add(GLOW, x - s, y - s, s * 2.0, s * 2.0, [1.0, 0.9, 0.7, 0.7 * a * fade]);
+            // The floor ring: projected on the floor about their feet (its own perspective).
+            let ring_r = 0.55_f32.max(b.height * 0.32);
+            let pts: Vec<(f32, f32)> =
+                (0..4).filter_map(|k| to_px(b.feet + dir_of(k as f32 * 90.0) * ring_r)).collect();
+            if pts.len() == 4 {
+                let (x0, x1) = (
+                    pts.iter().map(|p| p.0).fold(f32::MAX, f32::min),
+                    pts.iter().map(|p| p.0).fold(f32::MIN, f32::max),
+                );
+                let (y0, y1) = (
+                    pts.iter().map(|p| p.1).fold(f32::MAX, f32::min),
+                    pts.iter().map(|p| p.1).fold(f32::MIN, f32::max),
+                );
+                batch.push_image_add(RING, x0, y0, x1 - x0, y1 - y0, rgba(STEEL, 0.34 * a * breath));
+                // A faint fill of deep blue light inside it.
+                batch.push_image_add(GLOW, x0, y0, x1 - x0, y1 - y0, rgba(DEEP, 0.30 * a));
+            }
+            // The halo: deep blue, broad and faint; steel blue closer in.
+            batch.push_image_add(
+                GLOW,
+                fx - hp * 0.6,
+                hy - hp * 0.35,
+                hp * 1.2,
+                hp * 1.6,
+                rgba(DEEP, 0.22 * a * breath),
+            );
+            batch.push_image_add(
+                GLOW,
+                fx - hp * 0.36,
+                hy - hp * 0.12,
+                hp * 0.72,
+                hp * 1.2,
+                rgba(STEEL, 0.07 * a * breath),
+            );
+            // The shaft of cool light from above.
+            batch.push_image_add(GLOW, fx - hp * 0.22, fy - hp * 3.4, hp * 0.44, hp * 3.5, rgba(STEEL, 0.05 * a));
+            // Sand: fine grains falling slowly from above their head to the floor, as through the hourglass's neck.
+            let grain = (hp * 0.006).clamp(1.2, 3.0);
+            for k in 0..12 {
+                let seed = (i * 37 + k * 11) as f32;
+                let fall = (self.time * (0.085 + 0.02 * (seed * 1.3).sin().abs()) + seed * 0.618).fract();
+                let x = fx + (seed * 12.9898).sin() * hp * 0.34 + (self.time * 0.5 + seed).sin() * hp * 0.01;
+                let y = hy - hp * 0.25 + fall * fall * hp * 1.25;
+                let fade = (fall * PI).sin().powf(0.7);
+                batch.push_image_add(GLOW, x - grain, y - grain, grain * 2.0, grain * 2.0, rgba(SAND, 0.9 * a * fade));
+            }
+            // Glints: a silver spark that swells and fades here and there about them.
+            for k in 0..5 {
+                let seed = (i * 13 + k * 29) as f32;
+                let t = (self.time / 3.0 + seed * 0.37).fract();
+                let cycle = (self.time / 3.0 + seed * 0.37).floor();
+                let x = fx + ((seed + cycle * 7.1) * 4.7).sin() * hp * 0.4;
+                let y = hy + (((seed + cycle * 3.3) * 2.3).sin() * 0.5 + 0.5) * hp * 0.9;
+                let g = (t * PI).sin().powi(3);
+                let sz = (hp * 0.014).clamp(2.0, 7.0) * (0.6 + g);
+                batch.push_image_add(GLOW, x - sz, y - sz, sz * 2.0, sz * 2.0, rgba(SILVER, 0.6 * a * g));
             }
         }
     }
@@ -395,9 +488,9 @@ impl RingScene {
                 .collect();
             let mesh = crate::render::character::pose_character_layers(&b.model, &pl, over);
             zone.update_actor(gpu, actor, &mesh, placement(b.feet, b.facing, b.model.scale(b.size)));
-            // Warm and a little brighter in focus; the others in cool shadow.
+            // Moonlit silver in focus; the others in cool shadow.
             let a = self.aura[i];
-            let (dim, lit) = ([0.62, 0.66, 0.78], [1.3, 1.2, 1.04]);
+            let (dim, lit) = ([0.56, 0.6, 0.7], [1.14, 1.18, 1.26]);
             actor.tint = [0, 1, 2].map(|c| dim[c] + (lit[c] - dim[c]) * a);
         }
         // All the hall's scenery (list 0), as the title reel's `all_scenery`.
@@ -413,6 +506,8 @@ impl RingScene {
         if !self.glow_loaded {
             let (w, h, px) = glow_texture();
             ui.load_image(gpu, GLOW, w, h, &px);
+            let (w, h, px) = ring_texture();
+            ui.load_image(gpu, RING, w, h, &px);
             self.glow_loaded = true;
         }
         let dim = 1.0 - self.alpha.clamp(0.0, 1.0);
@@ -439,6 +534,7 @@ pub struct Ring {
     wanted: String,
     failed: String,
     focus: usize,
+    confirm: bool,
     sounds: Vec<crate::fx::sound::SoundCmd>,
 }
 
@@ -450,6 +546,14 @@ impl Ring {
 
     pub fn wanted(&self) -> &str {
         &self.wanted
+    }
+
+    /// The log-in prompt is up (or the log-in under way): the close-up on the one chosen.
+    pub fn confirm(&mut self, on: bool) {
+        self.confirm = on;
+        if let Some(c) = &mut self.current {
+            c.set_close(on);
+        }
     }
 
     /// The highlighted character (the Select screen's cursor).
@@ -490,7 +594,8 @@ impl Ring {
             self.loading = None;
             match res {
                 Ok(d) if d.key == self.wanted => {
-                    let s = RingScene::new(d, self.focus);
+                    let mut s = RingScene::new(d, self.focus);
+                    s.set_close(self.confirm);
                     if self.current.is_none() {
                         self.current = Some(s);
                     } else {
@@ -572,6 +677,7 @@ impl Ring {
 pub fn shot(
     req: &Request,
     moves: &[(f32, usize)],
+    close_at: Option<f32>,
     shots: &[f32],
     out_dir: &std::path::Path,
     size: [u32; 2],
@@ -613,6 +719,7 @@ pub fn shot(
             if let Some((_, f)) = moves.iter().rev().find(|(at, _)| *at <= t) {
                 s.set_focus(*f);
             }
+            s.set_close(close_at.is_some_and(|c| t >= c));
             s.advance(dt);
             t += dt;
         }
