@@ -1143,7 +1143,12 @@ fn list_panel(p: &mut Panels, gu: Option<&GameUi>, v: &View, out: &mut Pointer) 
             // Timeless XI: the character's card (client/modern/tlselect.rs).
             let at = from_bottom(m, "select details", 360.0, pos2(screen.min.x + gap, bottom), false);
             p.panel_at("select details", None, 360.0, at, |ui| {
-                super::tlselect::card(ui, m, r, &v.labels, tint(m, r.tint));
+                let style = super::tlselect::STYLE.with(|s| s.borrow().clone());
+                if style.card == super::tlselect::CardStyle::Plain {
+                    super::tlselect::card(ui, m, r, &v.labels, tint(m, r.tint));
+                } else {
+                    super::tlselect::card_marked(ui, m, r, &v.labels, tint(m, r.tint), &style);
+                }
             });
         } else {
             p.panel_at("select details", None, 340.0, at, |ui| {
@@ -1180,7 +1185,22 @@ fn list_panel(p: &mut Panels, gu: Option<&GameUi>, v: &View, out: &mut Pointer) 
                     for (k, r) in v.rows.iter().enumerate() {
                         let resp = if m.theme.timeless() {
                             let c = tint(m, r.tint);
-                            super::tlselect::row(ui, m, r, k == v.cursor, focused, W - 14.0, SELECT_ROW, c)
+                            let style = super::tlselect::STYLE.with(|s| s.borrow().clone());
+                            if style.right == super::tlselect::RowRight::Job {
+                                super::tlselect::row(ui, m, r, k == v.cursor, focused, W - 14.0, SELECT_ROW, c)
+                            } else {
+                                super::tlselect::row_plaque(
+                                    ui,
+                                    m,
+                                    r,
+                                    k == v.cursor,
+                                    focused,
+                                    W - 14.0,
+                                    SELECT_ROW,
+                                    c,
+                                    &style,
+                                )
+                            }
                         } else {
                             row(ui, m, r, k == v.cursor, focused)
                         };

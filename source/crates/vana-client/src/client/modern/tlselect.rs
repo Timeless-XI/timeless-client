@@ -207,3 +207,313 @@ pub fn prompt(ui: &mut Ui, m: &Modern, question: &str, labels: [&str; 2], yes: b
     ui.add_space(2.0);
     out
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Round 4 mock-ups (owner, 2026-11-22): the card with the character's face, the job plaque and their nation; the card
+// with a level medallion; the rows with the job plaque and something new at the right.
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Which card and row the Select screen draws (the mock-ups' variants).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CardStyle {
+    #[default]
+    Plain,
+    Portrait,
+    Medallion,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum RowRight {
+    /// The job and level (round 3).
+    #[default]
+    Job,
+    /// The nation and its rank.
+    Nation,
+    /// When the character last played on this computer.
+    Played,
+}
+
+#[derive(Clone, Default)]
+pub struct Style {
+    pub card: CardStyle,
+    pub right: RowRight,
+    /// Each character's face (by name), drawn by the ring's renderer.
+    pub portraits: std::collections::HashMap<String, egui::TextureId>,
+    /// Each character's last time played (by name), as shown ("Today", "3 days ago").
+    pub played: std::collections::HashMap<String, String>,
+}
+
+thread_local! {
+    pub static STYLE: std::cell::RefCell<Style> = std::cell::RefCell::new(Style::default());
+}
+
+pub fn nation_name(n: u8) -> &'static str {
+    match n {
+        0 => "San d'Oria",
+        1 => "Bastok",
+        _ => "Windurst",
+    }
+}
+
+fn job_code(j: u8) -> Option<&'static str> {
+    (1..=22).contains(&j).then(|| super::hud::job(j))
+}
+
+/// A texture in a circle (a fan with its UVs), `uv` the square of the texture to show.
+fn round_image(p: &egui::Painter, tex: egui::TextureId, c: Pos2, r: f32, uv: Rect, tint: Color32) {
+    let n = 48;
+    let mut mesh = egui::Mesh::with_texture(tex);
+    mesh.vertices.push(egui::epaint::Vertex { pos: c, uv: uv.center(), color: tint });
+    for k in 0..=n {
+        let a = k as f32 / n as f32 * std::f32::consts::TAU;
+        let (s, co) = a.sin_cos();
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos: c + vec2(co, s) * r,
+            uv: uv.center() + vec2(co * uv.width(), s * uv.height()) * 0.5,
+            color: tint,
+        });
+    }
+    for k in 0..n as u32 {
+        mesh.indices.extend_from_slice(&[0, k + 1, k + 2]);
+    }
+    p.add(mesh);
+}
+
+/// The frame about a round mark: a pewter ring, a hairline inside it and a small diamond at the top (the windows'
+/// ornament), with a soft steel-blue light behind.
+fn round_frame(p: &egui::Painter, m: &Modern, c: Pos2, r: f32, lit: f32) {
+    let t = p.ctx().input(|i| i.time) as f32;
+    let breath = 0.75 + 0.25 * (t * std::f32::consts::TAU / 5.0).sin();
+    for k in 0..6 {
+        let rr = r + 2.0 + k as f32 * 2.2;
+        p.circle_stroke(
+            c,
+            rr,
+            egui::Stroke::new(2.2, m.theme.color("focus").gamma_multiply(0.05 * lit * breath * (6 - k) as f32 / 6.0)),
+        );
+    }
+    p.circle_stroke(c, r, egui::Stroke::new(1.6, super::borders::lighter(m.theme.color("bronze"), 0.3)));
+    p.circle_stroke(c, r - 3.5, egui::Stroke::new(1.0, m.theme.color("gold").gamma_multiply(0.22)));
+    let d = 4.5;
+    let top = pos2(c.x, c.y - r);
+    p.add(egui::Shape::convex_polygon(
+        vec![top + vec2(0.0, -d), top + vec2(d, 0.0), top + vec2(0.0, d), top + vec2(-d, 0.0)],
+        m.theme.color("gold"),
+        egui::Stroke::NONE,
+    ));
+}
+
+/// The card with a round mark at its left (the character's face, or their level), the name with the job plaque beside
+/// it, their nation (and rank) under it, then the facts under a glinting rule.
+pub fn card_marked(ui: &mut Ui, m: &Modern, r: &RowView, labels: &[String; 5], name_colour: Color32, style: &Style) {
+    let k = appear(ui, "select card", hash(&r.name), 0.35);
+    ui.multiply_opacity(k);
+    ui.add_space((1.0 - k) * 8.0);
+    let [world, race, job, level, area] = &r.info;
+    let width = ui.available_width();
+    let (head, _) = ui.allocate_exact_size(vec2(width, 96.0), Sense::hover());
+    let p = ui.painter().clone();
+    let rad = 42.0;
+    let c = pos2(head.min.x + rad + 4.0, head.center().y + 2.0);
+    match style.card {
+        CardStyle::Portrait => {
+            p.circle_filled(c, rad, Color32::from_rgb(0x10, 0x13, 0x1b));
+            if let Some(tex) = style.portraits.get(&r.name) {
+                // The face fills the circle: the square about the head of a 1:1 head shot.
+                let uv = Rect::from_center_size(pos2(0.5, 0.43), vec2(0.46, 0.46));
+                round_image(&p, *tex, c, rad - 1.0, uv, Color32::WHITE);
+            }
+            round_frame(&p, m, c, rad, 1.0);
+        }
+        _ => {
+            // The level medallion: the level large in the serif, LEVEL small over it, a thin arc in the job's colour.
+            p.circle_filled(c, rad, Color32::from_rgb(0x10, 0x13, 0x1b).gamma_multiply(0.9));
+            let jc = job_code(r.job).map(|j| m.theme.color(&format!("job_{}", j.to_ascii_lowercase())));
+            if let Some(jc) = jc {
+                let n = 40;
+                let pts: Vec<Pos2> = (0..=n)
+                    .map(|i| {
+                        let a = std::f32::consts::PI * (0.75 + 1.5 * i as f32 / n as f32);
+                        c + vec2(a.cos(), a.sin()) * (rad - 6.0)
+                    })
+                    .collect();
+                p.add(egui::Shape::line(pts, egui::Stroke::new(2.0, jc.gamma_multiply(0.85))));
+            }
+            spaced(
+                ui,
+                pos2(c.x, c.y - 17.0),
+                Align2::CENTER_CENTER,
+                "Level",
+                m.theme.small * 0.72,
+                m.theme.color("muted"),
+                1.6,
+            );
+            p.text(
+                pos2(c.x, c.y + 6.0),
+                Align2::CENTER_CENTER,
+                level,
+                FontId::new(m.theme.title * 2.1, FontFamily::Name(super::SERIF.into())),
+                m.theme.color("gold"),
+            );
+            round_frame(&p, m, c, rad, 0.6);
+        }
+    }
+    let x = c.x + rad + 18.0;
+    let name_font = FontId::new(m.theme.title * 1.45, FontFamily::Name(super::STRONG.into()));
+    let name_y = head.min.y + 30.0;
+    let g = p.layout_no_wrap(r.name.clone(), name_font, name_colour);
+    let name_w = g.size().x;
+    p.galley(pos2(x, name_y - g.size().y / 2.0), g, name_colour);
+    match style.card {
+        CardStyle::Portrait => {
+            // The job plaque beside the name (the party list's: main over sub, the level at its corner).
+            if let Some(main) = job_code(r.job) {
+                let lv = level.parse().unwrap_or(0);
+                super::hud::tl_job_plaque(&p, m, x + name_w + 14.0, name_y, main, job_code(r.sub_job), lv, true);
+            }
+        }
+        _ => {
+            spaced(
+                ui,
+                pos2(x + name_w + 12.0, name_y + 2.0),
+                Align2::LEFT_CENTER,
+                job,
+                m.theme.ui * 0.95,
+                m.theme.color("focus"),
+                1.6,
+            );
+        }
+    }
+    let nation = match r.rank {
+        0 => nation_name(r.nation).to_string(),
+        k => format!("{}  ·  Rank {k}", nation_name(r.nation)),
+    };
+    spaced(
+        ui,
+        pos2(x + 1.0, name_y + 30.0),
+        Align2::LEFT_CENTER,
+        &nation,
+        m.theme.ui * 0.9,
+        m.theme.color("focus"),
+        1.6,
+    );
+    ui.add_space(4.0);
+    let y = ui.cursor().top();
+    glint_rule(ui, m, head.min.x - 4.0, head.max.x + 4.0, y, 0.0);
+    ui.add_space(10.0);
+    for (label, value) in [(&labels[1], race), (&labels[4], area), (&labels[0], world)] {
+        if value.is_empty() {
+            continue;
+        }
+        let (row, _) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
+        spaced(
+            ui,
+            pos2(row.min.x + 2.0, row.center().y),
+            Align2::LEFT_CENTER,
+            label,
+            m.theme.small * 0.92,
+            m.theme.color("muted"),
+            1.4,
+        );
+        ui.painter().text(
+            pos2(row.min.x + 92.0, row.center().y),
+            Align2::LEFT_CENTER,
+            value,
+            FontId::proportional(m.theme.ui * 1.02),
+            m.theme.color("text"),
+        );
+    }
+    ui.add_space(2.0);
+}
+
+/// A row with the job plaque at its left (job, sub job and level), the name, race · area under it, and at the right
+/// the nation and rank, or when they last played.
+#[allow(clippy::too_many_arguments)]
+pub fn row_plaque(
+    ui: &mut Ui,
+    m: &Modern,
+    r: &RowView,
+    on: bool,
+    focused: bool,
+    width: f32,
+    height: f32,
+    name_colour: Color32,
+    style: &Style,
+) -> egui::Response {
+    let (rect, resp) =
+        ui.allocate_exact_size(vec2(width, height), if focused { Sense::click() } else { Sense::hover() });
+    let face = match () {
+        _ if on && focused => "controls/list_row_selected",
+        _ if on || focused && resp.hovered() => "controls/list_row_hover",
+        _ => "controls/list_row_normal",
+    };
+    super::rows::face_with(ui.painter(), m, rect, face, Color32::WHITE, true);
+    let [_, race, _, level, area] = &r.info;
+    let p = ui.painter().clone();
+    let mut x = rect.min.x + 10.0;
+    if let Some(main) = job_code(r.job) {
+        x += super::hud::tl_job_plaque(
+            &p,
+            m,
+            x,
+            rect.center().y + 1.0,
+            main,
+            job_code(r.sub_job),
+            level.parse().unwrap_or(0),
+            on,
+        );
+    }
+    let top = rect.min.y + rect.height() * 0.36;
+    let low = rect.min.y + rect.height() * 0.72;
+    p.text(
+        pos2(x, top),
+        Align2::LEFT_CENTER,
+        &r.name,
+        FontId::new(m.theme.title * 1.12, FontFamily::Name(super::STRONG.into())),
+        name_colour.gamma_multiply(if on { 1.0 } else { 0.85 }),
+    );
+    let dim = if on { 1.0 } else { 0.72 };
+    // The race under the name (the area is on the card; the right side has its own news).
+    let _ = area;
+    p.text(
+        pos2(x, low),
+        Align2::LEFT_CENTER,
+        race,
+        FontId::proportional(m.theme.small),
+        m.theme.color("muted").gamma_multiply(dim),
+    );
+    let right = rect.max.x - 12.0;
+    let lit = if on { m.theme.color("focus") } else { m.theme.color("muted") };
+    match style.right {
+        RowRight::Nation => {
+            spaced(ui, pos2(right, top), Align2::RIGHT_CENTER, nation_name(r.nation), m.theme.small * 0.95, lit, 1.4);
+            if r.rank > 0 {
+                spaced(
+                    ui,
+                    pos2(right, low),
+                    Align2::RIGHT_CENTER,
+                    &format!("Rank {}", r.rank),
+                    m.theme.small * 0.9,
+                    m.theme.color("muted").gamma_multiply(dim),
+                    1.4,
+                );
+            }
+        }
+        RowRight::Played => {
+            if let Some(when) = style.played.get(&r.name) {
+                spaced(
+                    ui,
+                    pos2(right, top),
+                    Align2::RIGHT_CENTER,
+                    "Last played",
+                    m.theme.small * 0.8,
+                    m.theme.color("muted").gamma_multiply(dim),
+                    1.4,
+                );
+                p.text(pos2(right, low), Align2::RIGHT_CENTER, when, FontId::proportional(m.theme.small * 1.05), lit);
+            }
+        }
+        RowRight::Job => {}
+    }
+    resp
+}

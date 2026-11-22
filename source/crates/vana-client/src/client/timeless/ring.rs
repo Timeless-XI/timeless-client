@@ -333,10 +333,18 @@ impl RingScene {
         if let Some(b) = self.data.bodies.get(self.focus).filter(|_| self.close > 0.001) {
             let k = self.close * self.close * (3.0 - 2.0 * self.close);
             let h = b.height;
-            let (lens, span, mid) = (480.0, 0.8 * h, 0.7 * h);
+            // `VANA_RING_CLOSE=lens,span,mid,eye` (fractions of the height) tries others (a head portrait: 900, 0.3,
+            // 0.88, 0.88).
+            let v: Vec<f32> = std::env::var("VANA_RING_CLOSE")
+                .map(|s| s.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+                .unwrap_or_default();
+            let (lens, span, mid, up) = match v[..] {
+                [a, b, c, d] => (a, b * h, c * h, d * h),
+                _ => (480.0, 0.8 * h, 0.7 * h, 0.8 * h),
+            };
             let dist = (span * 0.5) / (192.0 / lens);
             let d = dir_of(b.angle);
-            let eye_c = b.feet - d * dist - Vec3::Y * (0.8 * h + lift);
+            let eye_c = b.feet - d * dist - Vec3::Y * (up + lift);
             let target_c = b.feet - Vec3::Y * (mid + lift);
             eye = eye.lerp(eye_c, k);
             target = target.lerp(target_c, k);

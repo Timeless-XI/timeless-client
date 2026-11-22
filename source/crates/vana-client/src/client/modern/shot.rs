@@ -479,19 +479,53 @@ fn titles_sample(p: &mut Panels) {
     );
 }
 
+/// The mock-ups' variants: `VANA_SELECT_MOCK=card=portrait|medallion,right=nation|played`, the faces from
+/// `VANA_SELECT_PORTRAITS=Name=path.png;...` (loaded once).
+fn mock_style(ctx: &egui::Context) {
+    use super::tlselect::{CardStyle, RowRight, STYLE};
+    STYLE.with(|s| {
+        let mut s = s.borrow_mut();
+        let spec = std::env::var("VANA_SELECT_MOCK").unwrap_or_default();
+        for kv in spec.split(',') {
+            match kv.trim() {
+                "card=portrait" => s.card = CardStyle::Portrait,
+                "card=medallion" => s.card = CardStyle::Medallion,
+                "right=nation" => s.right = RowRight::Nation,
+                "right=played" => s.right = RowRight::Played,
+                _ => {}
+            }
+        }
+        s.played.insert("Solinvictus".into(), "Today".into());
+        s.played.insert("Timeless".into(), "3 days ago".into());
+        if s.portraits.is_empty() {
+            for pair in std::env::var("VANA_SELECT_PORTRAITS").unwrap_or_default().split(';') {
+                let Some((name, path)) = pair.split_once('=') else { continue };
+                let Ok((size, rgba)) = load_png(Path::new(path)) else { continue };
+                let img = egui::ColorImage::from_rgba_unmultiplied(size, &rgba);
+                let t = ctx.load_texture(format!("portrait {name}"), img, egui::TextureOptions::LINEAR);
+                s.portraits.insert(name.to_string(), t.id());
+                std::mem::forget(t);
+            }
+        }
+    });
+}
+
 /// Two characters as on the owner's account (2026-11-22), the first highlighted.
 fn select_sample(prompt: bool) -> crate::client::select::View {
     use crate::client::select::{RowView, View};
-    let row = |name: &str, info: [&str; 5], job: u8| RowView {
+    let row = |name: &str, info: [&str; 5], job: u8, sub_job: u8, nation: u8, rank: u8| RowView {
         name: name.into(),
         tint: 0xffff_ffff,
         info: info.map(String::from),
         job,
+        sub_job,
+        nation,
+        rank,
     };
     View {
         rows: vec![
-            row("Solinvictus", ["Timeless", "Mithra Female", "Monk", "2", "Windurst Waters"], 2),
-            row("Timeless", ["Timeless", "Galka Male", "Warrior", "75", "Rolanberry Fields"], 1),
+            row("Solinvictus", ["Timeless", "Mithra Female", "Monk", "2", "Windurst Waters"], 2, 0, 2, 1),
+            row("Timeless", ["Timeless", "Galka Male", "Warrior", "75", "Rolanberry Fields"], 1, 13, 1, 10),
         ],
         labels: ["World", "Race", "Job", "Level", "Area"].map(String::from),
         cursor: 0,
@@ -946,6 +980,7 @@ pub fn shot(width: u32, height: u32, scale: u32, backdrop: Option<&Path>, out: &
                 );
             }
             if opts.select > 0 {
+                mock_style(ctx);
                 let v = select_sample(opts.select == 2);
                 m.select_screen(ctx, None, [width, height], scale, &v);
             } else {
