@@ -177,19 +177,21 @@ pub fn draw(
     let mut bx = x - text_w / 2.0 - 4.0 * scale[0];
     let cy = top + raster.baseline * k - 0.36 * EM * scale[1];
     for (i, b) in badges(prefix).into_iter().enumerate() {
-        let Some(key) = badge(gu, b) else { continue };
+        let Some((key, aspect)) = badge(gu, b) else { continue };
         let d = if i == 0 { size } else { size * 0.75 };
-        bx -= d;
+        // Timeless XI: the game's own pearl keeps its glyph's proportions (the Timeless hourglass art is drawn for them).
+        let dw = d * aspect;
+        bx -= dw;
         // The pearl takes its linkshell's colour (retail's icon tint for 0x92).
         let c = if b == 0x92 {
             [16, 8, 0].map(|sh| ((icon >> sh & 0xff) as f32 / 128.0).min(1.0))
         } else {
             shade.map(|k| k.min(1.0))
         };
-        gu.image_rect(&key, bx.round(), (cy - d / 2.0).round(), d, d, [c[0], c[1], c[2], pulse.clamp(0.0, 1.0)]);
+        gu.image_rect(&key, bx.round(), (cy - d / 2.0).round(), dw, d, [c[0], c[1], c[2], pulse.clamp(0.0, 1.0)]);
         bx -= 1.0 * scale[0];
     }
-    if stars && let Some(key) = badge(gu, 0xad) {
+    if stars && let Some((key, _)) = badge(gu, 0xad) {
         let d = size * 0.6;
         for (dx, big) in [(-1.0, false), (0.0, true), (1.0, false)] {
             let s = if big { d * 1.25 } else { d };
@@ -260,11 +262,41 @@ fn badges(prefix: &[u8]) -> Vec<u8> {
     out
 }
 
-/// A badge's image in the UI pass, uploaded once; None for a byte without one.
-fn badge(gu: &mut GameUi, b: u8) -> Option<String> {
+/// Timeless XI: the linkpearl badge (0x92) is the game's own: the name-plate font's glyph, as the classic plates draw
+/// it, so the Timeless linkshell's hourglass pearl (the patched status sheet it points into; the shell's colour is white
+/// so the icon keeps its own colours) shows here too, and any other shell's pearl takes its colour as in retail. The
+/// pack's badge (a plain silhouette, white under the Timeless shell's white) only when the game's glyph is missing.
+/// At its texture's own resolution (drawn about its size; an upscale would only be shrunk again); its width over its
+/// height on screen kept, as the classic plate draws it (PEARL_ASPECT, as f32 bits).
+static PEARL_ASPECT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+fn game_pearl(gu: &mut GameUi) -> Option<(String, f32)> {
+    use std::sync::atomic::Ordering::Relaxed;
+    const KEY: &str = "badge 92 game";
+    if gu.has_image(KEY) {
+        let a = f32::from_bits(PEARL_ASPECT.load(Relaxed));
+        return Some((KEY.to_string(), if a > 0.0 { a } else { 1.0 }));
+    }
+    let (w, h, rgba, aspect) = gu.cell_rgba("font    fontshp", 0x92 - 0x20)?;
+    // A glyph with nothing in it (no game data) is no pearl.
+    if w < 4 || h < 4 || !rgba.chunks_exact(4).any(|p| p[3] > 16) {
+        return None;
+    }
+    gu.image(KEY, w, h, rgba);
+    PEARL_ASPECT.store(aspect.to_bits(), Relaxed);
+    Some((KEY.to_string(), aspect))
+}
+
+/// A badge's image in the UI pass, uploaded once, and its width over its height; None for a byte without one.
+fn badge(gu: &mut GameUi, b: u8) -> Option<(String, f32)> {
+    if b == 0x92
+        && let Some(pearl) = game_pearl(gu)
+    {
+        return Some(pearl);
+    }
     let key = format!("badge {b:02x}");
     if gu.has_image(&key) {
-        return Some(key);
+        return Some((key, 1.0));
     }
     let png = BADGES.iter().find(|(k, _)| *k == b)?.1;
     let mut d = png::Decoder::new(std::io::Cursor::new(png));
@@ -274,5 +306,5 @@ fn badge(gu: &mut GameUi, b: u8) -> Option<String> {
     let info = r.next_frame(&mut buf).ok()?;
     buf.truncate(info.buffer_size());
     gu.image(&key, info.width, info.height, buf);
-    Some(key)
+    Some((key, 1.0))
 }

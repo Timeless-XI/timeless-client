@@ -2247,6 +2247,11 @@ impl GameUi {
         self.data.lobby.sprite_rgba(lib, index)
     }
 
+    /// Timeless XI: a one-cell menu sprite at its texture's own resolution, and its on-screen width over height.
+    pub fn cell_rgba(&self, lib: &str, index: usize) -> Option<(u32, u32, Vec<u8>, f32)> {
+        self.data.lobby.cell_rgba(lib, index)
+    }
+
     /// A status icon's pixels (the modern layer's copy).
     pub fn status_rgba(&self, small: bool, id: u16) -> Option<(u32, u32, Vec<u8>)> {
         crate::dat::statusinfo::icon(self.data.status[small as usize].as_deref()?, id)

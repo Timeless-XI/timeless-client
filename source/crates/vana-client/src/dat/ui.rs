@@ -293,6 +293,33 @@ impl UiFile {
 
     /// A sprite as straight RGBA over its cells' bounds (each cell's texture area stretched to its corners, its first
     /// corner colour applied, 0x80 = 1.0).
+    /// Timeless XI: a one-cell sprite's texture region at its own resolution (not resampled to the sprite's size on
+    /// screen), its corner colours applied, and its on-screen width over its height: (w, h, rgba, aspect).
+    pub fn cell_rgba(&self, lib: &str, index: usize) -> Option<(u32, u32, Vec<u8>, f32)> {
+        let c = self.lib(lib)?.sprites.get(index)?.cells.first()?;
+        let img = self.images.get(&c.texture)?;
+        let (w, h) = (c.size[0].max(1) as usize, c.size[1].max(1) as usize);
+        let k = c.colors[0].map(|v| v as f32 / 128.0);
+        let mut out = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let u = if c.flip & 1 != 0 { w - 1 - x } else { x } + c.uv[0] as usize;
+                let v = if c.flip & 2 != 0 { h - 1 - y } else { y } + c.uv[1] as usize;
+                if u >= img.width as usize || v >= img.height as usize {
+                    continue;
+                }
+                let si = (v * img.width as usize + u) * 4;
+                let di = (y * w + x) * 4;
+                for i in 0..4 {
+                    out[di + i] = (img.rgba[si + i] as f32 * k[i]).min(255.0) as u8;
+                }
+            }
+        }
+        let cw = (c.corners[3][0] - c.corners[0][0]).max(1) as f32;
+        let ch = (c.corners[3][1] - c.corners[0][1]).max(1) as f32;
+        Some((w as u32, h as u32, out, cw / ch))
+    }
+
     pub fn sprite_rgba(&self, lib: &str, index: usize) -> Option<(u32, u32, Vec<u8>)> {
         let s = self.lib(lib)?.sprites.get(index)?;
         let xs = s.cells.iter().flat_map(|c| c.corners.iter().map(|p| p[0] as i32));
@@ -353,6 +380,42 @@ mod tests {
         assert_eq!(cell_color([0x7f, 0x40, 0, 0x7f]), [0x80, 0x41, 1, 192]);
         assert_eq!(cell_color([0xff, 0xfe, 0x7f, 0x20]), [0xff, 0xff, 0x80, 49]);
         assert_eq!([0, 8, 0x40, 0x70, 0xa9, 0xff].map(|a| cell_color([0, 0, 0, a])[3]), [0, 13, 97, 169, 255, 255]);
+    }
+
+    #[test]
+    fn cell_rgba_reads_the_texture_at_its_own_resolution() {
+        // A 4 x 4 texture, the cell's region its right 2 x 2 (red over blue), shown 6 x 3 on screen, mirrored in U.
+        let mut rgba = vec![0u8; 4 * 4 * 4];
+        for y in 0..4 {
+            for x in 0..4 {
+                let i = (y * 4 + x) * 4;
+                rgba[i..i + 4].copy_from_slice(&if y < 2 { [200, 0, 0, 255] } else { [0, 0, 200, 255] });
+                if x == 3 {
+                    rgba[i + 1] = 100;
+                }
+            }
+        }
+        let cell = Cell {
+            corners: [[0, 0], [6, 0], [0, 3], [6, 3]],
+            size: [2, 4],
+            uv: [2, 0],
+            flip: 1,
+            colors: [[0x80, 0x80, 0x80, 0x80]; 4],
+            blend: [0; 4],
+            texture: "t".into(),
+        };
+        let ui = UiFile {
+            images: [("t".to_string(), UiImage { width: 4, height: 4, rgba })].into(),
+            libs: vec![SpriteLib { name: "font    fontshp".into(), textures: vec![], sprites: vec![Sprite { cells: vec![cell] }] }],
+            ..Default::default()
+        };
+        let (w, h, out, aspect) = ui.cell_rgba("font    fontshp", 0).unwrap();
+        assert_eq!((w, h), (2, 4));
+        assert_eq!(aspect, 2.0);
+        // Mirrored: the column with green (texture x 3) comes first.
+        assert_eq!(&out[0..4], &[200, 100, 0, 255]);
+        assert_eq!(&out[4..8], &[200, 0, 0, 255]);
+        assert_eq!(&out[(3 * 2) * 4..(3 * 2) * 4 + 4], &[0, 100, 200, 255]);
     }
 
     /// Needs the installed game; skipped without it.
