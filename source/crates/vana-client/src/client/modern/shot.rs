@@ -479,6 +479,35 @@ fn titles_sample(p: &mut Panels) {
     );
 }
 
+/// Two characters as on the owner's account (2026-11-22), the first highlighted.
+fn select_sample(prompt: bool) -> crate::client::select::View {
+    use crate::client::select::{RowView, View};
+    let row = |name: &str, info: [&str; 5], job: u8| RowView {
+        name: name.into(),
+        tint: 0xffff_ffff,
+        info: info.map(String::from),
+        job,
+    };
+    View {
+        rows: vec![
+            row("Solinvictus", ["Timeless", "Mithra Female", "Monk", "2", "Windurst Waters"], 2),
+            row("Timeless", ["Timeless", "Galka Male", "Warrior", "75", "Rolanberry Fields"], 1),
+        ],
+        labels: ["World", "Race", "Job", "Level", "Area"].map(String::from),
+        cursor: 0,
+        list_focus: !prompt,
+        deleting: false,
+        help: "Select a character to play.".into(),
+        counts: ["Characters: 2".into(), "".into(), "".into()],
+        options: None,
+        slots: None,
+        prompt: prompt.then(|| ("Log in with \"Solinvictus\"?".to_string(), false)),
+        ok: None,
+        rename: None,
+        button: false,
+    }
+}
+
 fn sample(m: &Modern, ctx: &egui::Context, layout: &mut Layout, opts: &Opts) {
     let top = crate::client::hudtop::TopView {
         title: "Status".into(),
@@ -837,6 +866,9 @@ pub struct Opts {
     pub alliance: bool,
     /// Title rows with long notes.
     pub titles: bool,
+    /// Timeless XI: the Select Character screen's panels with two sample characters (needs the game's data for the
+    /// lobby's texts); 1 = the list, 2 = with the log-in prompt up.
+    pub select: u8,
     /// Timeless XI: drawn in the Timeless interface (Timeless View).
     pub timeless: bool,
 }
@@ -861,8 +893,9 @@ pub fn shot(width: u32, height: u32, scale: u32, backdrop: Option<&Path>, out: &
     let mut warm = ctx.run_ui(egui::RawInput { max_texture_side: side, ..Default::default() }, |_| {});
     let mut deltas: Vec<_> = warm.textures_delta.set.drain().collect();
     warm.textures_delta.clear();
-    let m = Modern::new(&ctx);
+    let mut m = Modern::new(&ctx);
     m.set_opacity(opts.opacity);
+
     // Timeless XI: the Timeless interface, as Modern::ui sets it each frame.
     if opts.timeless {
         m.theme.set_timeless(true);
@@ -912,7 +945,12 @@ pub fn shot(width: u32, height: u32, scale: u32, backdrop: Option<&Path>, out: &
                     Color32::WHITE,
                 );
             }
-            sample(&m, ctx, &mut layout, opts);
+            if opts.select > 0 {
+                let v = select_sample(opts.select == 2);
+                m.select_screen(ctx, None, [width, height], scale, &v);
+            } else {
+                sample(&m, ctx, &mut layout, opts);
+            }
         });
         // Taken as they come (a TexturesDelta dropped unapplied is an error in debug builds).
         deltas.extend(output.textures_delta.set.drain());

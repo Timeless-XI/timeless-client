@@ -701,6 +701,9 @@ enum Cmd {
         /// Timeless XI: in the Timeless interface (Timeless View: its palette, frames, rows, fonts and icons).
         #[arg(long)]
         timeless: bool,
+        /// Timeless XI: the Select Character panels (1), with the log-in prompt (2).
+        #[arg(long, default_value_t = 0)]
+        select: u8,
     },
     /// Disassemble a zone's event scripts (event DAT), with dialogue text inlined.
     EventDump {
@@ -1471,6 +1474,7 @@ fn main() -> Result<()> {
             gm,
             controller,
             mods,
+            select,
         } => {
             let list = font.is_some();
             client::modern_shot(
@@ -1497,6 +1501,7 @@ fn main() -> Result<()> {
                     gm,
                     controller,
                     mods,
+                    select,
                 },
             )
         }

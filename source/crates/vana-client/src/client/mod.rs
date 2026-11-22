@@ -16787,7 +16787,7 @@ impl App {
                             }
                             let m = self.modern.get_or_insert_with(|| modern::Modern::new(ctx));
                             let ptr =
-                                m.select_screen(ctx, gu, [screen_size[0], screen_size[1]], self.cfg.modern_scale, &v);
+                                m.select_screen(ctx, Some(gu), [screen_size[0], screen_size[1]], self.cfg.modern_scale, &v);
                             let more = self.select_ui.pointer(gu, ptr, &list, chars, deleting, busy);
                             out.sounds.extend(more.sounds);
                             out.action = out.action.or(more.action);

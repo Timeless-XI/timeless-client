@@ -550,6 +550,8 @@ pub struct RowView {
     pub name: String,
     pub tint: u32,
     pub info: [String; 5],
+    /// Timeless XI: the main job (1..22), for the panels' job marks.
+    pub job: u8,
 }
 
 /// The select (or delete) screen as the modern layer draws it.
@@ -982,7 +984,7 @@ impl SelectUi {
                     c.main_level.max(1).to_string(),
                     sjis(gu.area_name(c.zone)),
                 ];
-                RowView { name: c.name.clone(), tint: name_tint(c), info }
+                RowView { name: c.name.clone(), tint: name_tint(c), info, job: c.main_job }
             })
             .collect();
         let labels = std::array::from_fn(|k| {

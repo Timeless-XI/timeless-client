@@ -687,14 +687,21 @@ impl Modern {
     }
 
     /// The select (or delete) screen: what the mouse did, for SelectUi::pointer.
-    pub fn select_screen(&mut self, ctx: &Context, gu: &GameUi, window: [u32; 2], scale: u32, v: &View) -> Pointer {
+    pub fn select_screen(
+        &mut self,
+        ctx: &Context,
+        gu: Option<&GameUi>,
+        window: [u32; 2],
+        scale: u32,
+        v: &View,
+    ) -> Pointer {
         self.zoom_to(ctx, window, scale);
         let mut layout = Default::default();
         let (mut changed, mut font) = (false, 15.0);
         let mut p = Panels {
             m: self,
             ctx,
-            gu: Some(gu),
+            gu,
             layout: &mut layout,
             vis: Default::default(),
             changed: &mut changed,
@@ -1109,10 +1116,14 @@ fn from_bottom(m: &Modern, id: &str, width: f32, corner: egui::Pos2, right: bool
 
 /// As retail's screen: the list at the bottom right (its name list), the cursor's details at the bottom left (its
 /// info panel), the counts at the top right; the help line under the list.
-fn list_panel(p: &mut Panels, gu: &GameUi, v: &View, out: &mut Pointer) {
+fn list_panel(p: &mut Panels, gu: Option<&GameUi>, v: &View, out: &mut Pointer) {
     let m = p.m;
     let screen = p.ctx.content_rect();
-    let title = if v.deleting { gu.lobby_msg(8, 0x6a, "Delete Character") } else { "Select Character".to_string() };
+    let title = match gu {
+        Some(gu) if v.deleting => gu.lobby_msg(8, 0x6a, "Delete Character"),
+        None if v.deleting => "Delete Character".to_string(),
+        _ => "Select Character".to_string(),
+    };
     let title = title.lines().next().unwrap_or_default().to_string();
     let (gap, width) = (screen.width() * 0.0121, W + 44.0);
     let bottom = screen.max.y - screen.height() * 0.05;
@@ -1128,23 +1139,31 @@ fn list_panel(p: &mut Panels, gu: &GameUi, v: &View, out: &mut Pointer) {
     // The cursor's details, bottom left.
     if let Some(r) = v.rows.get(v.cursor) {
         let at = from_bottom(m, "select details", 340.0, pos2(screen.min.x + gap, bottom), false);
-        p.panel_at("select details", None, 340.0, at, |ui| {
-            ui.label(
-                egui::RichText::new(&r.name)
-                    .size(m.theme.title * 1.35)
-                    .family(FontFamily::Name(super::STRONG.into()))
-                    .color(tint(m, r.tint)),
-            );
-            ui.add_space(4.0);
-            for (label, value) in v.labels.iter().zip(&r.info) {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(label).size(m.theme.ui).color(m.theme.color("muted")));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new(value).size(m.theme.ui * 1.05).color(m.theme.color("text")));
+        if m.theme.timeless() {
+            // Timeless XI: the character's card (client/modern/tlselect.rs).
+            let at = from_bottom(m, "select details", 360.0, pos2(screen.min.x + gap, bottom), false);
+            p.panel_at("select details", None, 360.0, at, |ui| {
+                super::tlselect::card(ui, m, r, &v.labels, tint(m, r.tint));
+            });
+        } else {
+            p.panel_at("select details", None, 340.0, at, |ui| {
+                ui.label(
+                    egui::RichText::new(&r.name)
+                        .size(m.theme.title * 1.35)
+                        .family(FontFamily::Name(super::STRONG.into()))
+                        .color(tint(m, r.tint)),
+                );
+                ui.add_space(4.0);
+                for (label, value) in v.labels.iter().zip(&r.info) {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(label).size(m.theme.ui).color(m.theme.color("muted")));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new(value).size(m.theme.ui * 1.05).color(m.theme.color("text")));
+                        });
                     });
-                });
-            }
-        });
+                }
+            });
+        }
     }
     let at = from_bottom(m, "select", width, pos2(screen.max.x - gap, bottom), true);
     p.panel_at(
@@ -1159,7 +1178,12 @@ fn list_panel(p: &mut Panels, gu: &GameUi, v: &View, out: &mut Pointer) {
                 ui,
                 |ui| {
                     for (k, r) in v.rows.iter().enumerate() {
-                        let resp = row(ui, m, r, k == v.cursor, focused);
+                        let resp = if m.theme.timeless() {
+                            let c = tint(m, r.tint);
+                            super::tlselect::row(ui, m, r, k == v.cursor, focused, W - 14.0, SELECT_ROW, c)
+                        } else {
+                            row(ui, m, r, k == v.cursor, focused)
+                        };
                         if focused && resp.clicked() {
                             out.row.1 = Some(k);
                         }
@@ -1174,22 +1198,38 @@ fn list_panel(p: &mut Panels, gu: &GameUi, v: &View, out: &mut Pointer) {
             // The Settings button, a stop under the list for the keys; lit while its options are open.
             if !v.deleting {
                 ui.add_space(6.0);
-                let label = gu.focus_text("menu    chfwin", 0)[1].clone().unwrap_or_else(|| "Settings".into());
+                let label = settings_label(gu);
                 let s = kit::Btn { lit: v.options.is_some(), cursor: v.button, off: v.rows.is_empty() };
-                if kit::clicked(&kit::button(ui, m, &label, 200.0, s), s) && (focused || v.button) {
+                // Timeless XI: the button and the help line centred under the list.
+                let pressed = if m.theme.timeless() {
+                    ui.vertical_centered(|ui| kit::clicked(&kit::button(ui, m, &label, 160.0, s), s)).inner
+                } else {
+                    kit::clicked(&kit::button(ui, m, &label, 200.0, s), s)
+                };
+                if pressed && (focused || v.button) {
                     out.options = true;
                 }
             }
             if !v.help.is_empty() {
                 ui.add_space(6.0);
-                ui.label(egui::RichText::new(&v.help).size(m.theme.ui).color(m.theme.color("muted")));
+                let help = egui::RichText::new(&v.help).size(m.theme.ui).color(m.theme.color("muted"));
+                if m.theme.timeless() {
+                    ui.vertical_centered(|ui| ui.label(help.italics()));
+                } else {
+                    ui.label(help);
+                }
             }
         },
     );
 }
 
+/// chfwin's title (the Settings button's label).
+fn settings_label(gu: Option<&GameUi>) -> String {
+    gu.and_then(|gu| gu.focus_text("menu    chfwin", 0)[1].clone()).unwrap_or_else(|| "Settings".into())
+}
+
 /// The windows over the list: chfwin and chswin beside it, the prompt, the ok window and the rename field under it.
-fn windows(p: &mut Panels, gu: &GameUi, v: &View, out: &mut Pointer) {
+fn windows(p: &mut Panels, gu: Option<&GameUi>, v: &View, out: &mut Pointer) {
     let m = p.m;
     let screen = p.ctx.content_rect();
     // Left of the list (bottom right), level with its top.
@@ -1227,7 +1267,7 @@ fn windows(p: &mut Panels, gu: &GameUi, v: &View, out: &mut Pointer) {
         }
     };
     if let Some((rows, cur)) = &v.options {
-        let title = gu.focus_text("menu    chfwin", 0)[1].clone().unwrap_or_else(|| "Settings".into());
+        let title = settings_label(gu);
         let active = v.slots.is_none() && v.prompt.is_none() && v.ok.is_none();
         let mut got = Pointer::default();
         p.panel_at(
@@ -1253,13 +1293,19 @@ fn windows(p: &mut Panels, gu: &GameUi, v: &View, out: &mut Pointer) {
     let low = pos2(screen.center().x - 230.0, screen.height() * 0.62);
     if let Some((text, yes)) = &v.prompt {
         let caption = |k: u16, d: &str| {
-            gu.child_caption("menu    ptc6yesn", k).filter(|c| !c.is_empty()).unwrap_or_else(|| d.to_string())
+            gu.and_then(|gu| gu.child_caption("menu    ptc6yesn", k))
+                .filter(|c| !c.is_empty())
+                .unwrap_or_else(|| d.to_string())
         };
         let (y, n) = (caption(1, "Yes"), caption(2, "No"));
-        let at = pos2(screen.center().x - 340.0, low.y);
-        p.panel_at("select prompt", None, 680.0, at, |ui| {
-            ui.add_space(6.0);
-            if let Some(a) = kit::yes_no(ui, m, text, [&y, &n], *yes, m.theme.title * 1.2) {
+        // Timeless XI: a compact box, everything centred (owner, 2026-11-22); retail's width otherwise.
+        let tl = m.theme.timeless();
+        let width = if tl { 420.0 } else { 680.0 };
+        let at = pos2(screen.center().x - width * 0.5, low.y);
+        p.panel_at("select prompt", None, width, at, |ui| {
+            ui.add_space(if tl { 10.0 } else { 6.0 });
+            let ask = if tl { super::tlselect::prompt } else { kit::yes_no };
+            if let Some(a) = ask(ui, m, text, [&y, &n], *yes, m.theme.title * 1.2) {
                 out.child.1 = Some(if a { 1 } else { 2 });
             }
             ui.add_space(4.0);
