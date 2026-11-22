@@ -2,7 +2,7 @@
 -- Cardian: the cards. One list read by the server (drops, the game) and copied as-is into the timeless-cardian
 -- client mod (lib/cards.lua), so both sides agree on every number.
 --
--- A card: id (1-99 commons, 101-199 rares, 201-299 legendaries), key, name, sides { top, right, bottom, left }
+-- A card: id (1-99 commons, 101-199 rares, 201-299 legendaries, 301-311 crests, 401-405 lost, 501-522 jobs, 601-606 club), key, name, sides { top, right, bottom, left }
 -- (1-10; 10 shows as A), el (element), level (1-10: 1-5 field monsters, 6-7 notorious monsters, 8-10 legends),
 -- fam (family: the world's bonuses read it), species (shown), rarity (1 common, 2 rare, 3 legendary), model (the
 -- monster's model id, for the client's live 3D portrait; nil for townsfolk, who get a drawn picture), theme (the
@@ -11,6 +11,10 @@
 -- when: the world's own cards drop only { night = true } (20:00-6:00), in { weather = element }, where
 -- { beastHeld = true } (the beastmen hold the region) or in one { region = xi.region name }.
 -- crest = true: a set's reward (cards.SETS), never dropped.
+-- job = 'WAR'..: a job card (501-522), won from that job's master while you're on the job; at the table its ability
+--   (cards.ABILITIES) works only for someone on that job. One in a hand. Never put up, broken or taken.
+-- club = true: the Card Club's own (601-606), won from each member in turn. lost = true: a lost card (401-405),
+--   one on the whole server, found by solving its riddle (cardian_config.lost) and won from whoever holds it.
 --
 -- Foils (Champion kills): id + 1000 x variant: 1 Gilded, 2 Nightborne, 3 Rift-touched, 4 Juggernaut.
 -----------------------------------
@@ -24,6 +28,90 @@ cards.VARIANTS =
     [2] = { key = 'nightborne', name = 'Nightborne', text = 'Every side +1 from 20:00 to 6:00.' },
     [3] = { key = 'rift', name = 'Rift-touched', text = 'Elemental squares, the day, conquest and the moon don\'t touch it.' },
     [4] = { key = 'juggernaut', name = 'Juggernaut', text = 'Its highest side +2 (to A at most).' },
+}
+
+-- What each job card's ability does (cardian_engine.lua does it)
+cards.ABILITIES =
+{
+    berserk = { name = 'Berserk', text = 'Berserk: every side +1 when placed.' },
+    counter = { name = 'Counterstance', text = 'Counterstance: plain captures can\'t flip it (only Same, Plus and Combo).' },
+    cure = { name = 'Cure', text = 'Cure: your cards beside it get +1 on every side when it\'s placed.' },
+    burst = { name = 'Magic Burst', text = 'Magic Burst: every side +2 when placed on a marked square.' },
+    enspell = { name = 'Enspell', text = 'Enspell: when placed, it also captures cards whose touching number equals its own.' },
+    steal = { name = 'Steal', text = 'Steal: its weakest side takes the highest number of an enemy card beside it.' },
+    sentinel = { name = 'Sentinel', text = 'Sentinel: nothing can flip it during your opponent\'s next turn.' },
+    souleater = { name = 'Souleater', text = 'Souleater: every side +2 when placed, but its weakest side drops to 1.' },
+    charm = { name = 'Charm', text = 'Charm: after it captures, the enemy beside it with the lowest touching number comes over too.' },
+    march = { name = 'March', text = 'March: your other cards in its column get +1 on every side.' },
+    barrage = { name = 'Barrage', text = 'Barrage: it also captures across one empty square, in a straight line.' },
+    meditate = { name = 'Meditate', text = 'Meditate: every side +1 for each enemy card beside it when placed.' },
+    utsusemi = { name = 'Utsusemi', text = 'Utsusemi: the first time it would be flipped, a shadow takes it instead.' },
+    jump = { name = 'Jump', text = 'Jump: the side facing the strongest enemy beside it gets +3 when placed.' },
+    avatar = { name = 'Avatar', text = 'Avatar: any marked square counts as its own element.' },
+    azure = { name = 'Azure Lore', text = 'Azure Lore: when placed, it learns the numbers of the strongest card beside it, if they\'re better.' },
+    roll = { name = 'Phantom Roll', text = 'Phantom Roll: each side gets +0 to +2 when placed, as the dice fall.' },
+    automaton = { name = 'Automaton', text = 'Automaton: the next card you play gets +1 on every side.' },
+    step = { name = 'Box Step', text = 'Box Step: enemy cards beside it lose 1 on every side when it\'s placed.' },
+    arts = { name = 'Addendum', text = 'Addendum: it plays Same and Plus, whatever the table\'s rules.' },
+    geocolure = { name = 'Geocolure', text = 'Geocolure: your other cards in its row get +1 on every side.' },
+    lunge = { name = 'Lunge', text = 'Lunge: every side +1 for each marked square on the board (3 at most).' },
+}
+
+cards.JOBS = { 'WAR', 'MNK', 'WHM', 'BLM', 'RDM', 'THF', 'PLD', 'DRK', 'BST', 'BRD', 'RNG', 'SAM', 'NIN', 'DRG', 'SMN', 'BLU', 'COR', 'PUP', 'DNC', 'SCH', 'GEO', 'RUN' }
+
+-- The quests' words (the server's cardian_config.lua and the client's cardbook both read them)
+-- The Card Club, rank by rank: who, where, and what you hear about them
+cards.CLUB =
+{
+    { rank = 1, card = 601, name = 'Harmodios', npc = 'Harmodios', zone = 235, place = 'Bastok Markets', title = 'Jack',
+      hint = 'They say the Card Club\'s Jack sells instruments in Bastok Markets, and plays a mean hand between customers.' },
+    { rank = 2, card = 602, name = 'Legata', npc = 'Legata', zone = 230, place = 'Southern San d\'Oria', title = 'Queen of Clubs',
+      hint = 'The Queen of Clubs keeps to Southern San d\'Oria. An Elvaan who never smiles at the table.' },
+    { rank = 3, card = 603, name = 'Kohlo-Lakolo', npc = 'Kohlo-Lakolo', zone = 240, place = 'Port Windurst', title = 'Queen of Diamonds',
+      hint = 'In Port Windurst, the Queen of Diamonds hides among the Tarutaru who love a good story.' },
+    { rank = 4, card = 604, name = 'Squintrox Dryeyes', npc = 'Squintrox_Dryeyes', zone = 246, place = 'Port Jeuno', title = 'Queen of Spades',
+      hint = 'The Queen of Spades is a Goblin in Port Jeuno, they say, who\'ll deal with anyone.' },
+    { rank = 5, card = 605, name = 'Ghebi Damomohe', npc = 'Ghebi_Damomohe', zone = 245, place = 'Lower Jeuno', title = 'Queen of Hearts',
+      hint = 'The Queen of Hearts deals for the Tenshodo in Lower Jeuno, and never shows her hand.' },
+    { rank = 6, card = 606, name = 'Maat', npc = 'Maat', zone = 243, place = 'Ru\'Lude Gardens', title = 'King',
+      hint = 'Every card player in Jeuno whispers it: the King of the Card Club is an old master in Ru\'Lude Gardens.' },
+}
+
+-- The jobs' masters: { job, job name, the NPC's name, zone, place }; their job card is 500 + their place here
+cards.MASTERS =
+{
+    { 'WAR', 'Warrior', 'Phara', 234, 'Bastok Mines' },
+    { 'MNK', 'Monk', 'Oggbi', 236, 'Port Bastok' },
+    { 'WHM', 'White Mage', 'Narcheral', 231, 'Northern San d\'Oria' },
+    { 'BLM', 'Black Mage', 'Shantotto', 239, 'Windurst Walls' },
+    { 'RDM', 'Red Mage', 'Sharzalion', 230, 'Southern San d\'Oria' },
+    { 'THF', 'Thief', 'Nanaa_Mihgo', 241, 'Windurst Woods' },
+    { 'PLD', 'Paladin', 'Balasiel', 230, 'Southern San d\'Oria' },
+    { 'DRK', 'Dark Knight', 'Raibaht', 237, 'Metalworks' },
+    { 'BST', 'Beastmaster', 'Brutus', 244, 'Upper Jeuno' },
+    { 'BRD', 'Bard', 'Mertaire', 245, 'Lower Jeuno' },
+    { 'RNG', 'Ranger', 'Perih_Vashai', 241, 'Windurst Woods' },
+    { 'SAM', 'Samurai', 'Jaucribaix', 252, 'Norg' },
+    { 'NIN', 'Ninja', 'Romualdo', 237, 'Metalworks' },
+    { 'DRG', 'Dragoon', 'Rahal', 233, 'Chateau d\'Oraguille' },
+    { 'SMN', 'Summoner', 'Koru-Moru', 239, 'Windurst Walls' },
+    { 'BLU', 'Blue Mage', 'Waoud', 50, 'Aht Urhgan Whitegate' },
+    { 'COR', 'Corsair', 'Ratihb', 50, 'Aht Urhgan Whitegate' },
+    { 'PUP', 'Puppetmaster', 'Iruki-Waraki', 50, 'Aht Urhgan Whitegate' },
+    { 'DNC', 'Dancer', 'Laila', 244, 'Upper Jeuno' },
+    { 'SCH', 'Scholar', 'Erlene', 175, 'the Eldieme Necropolis (past)' },
+    { 'GEO', 'Geomancer', 'Sylvie', 256, 'Western Adoulin' },
+    { 'RUN', 'Rune Fencer', 'Octavien', 257, 'Eastern Adoulin' },
+}
+
+-- The lost cards' riddles
+cards.RIDDLES =
+{
+    [401] = 'Where the sands of Altepa burn under a burning sky, on the day of flame, the great wyrm\'s kin calls its king.',
+    [402] = 'When no moon rises over Lufaise, in the deepest hours of night, bring darkness in your hand.',
+    [403] = 'At the stroke of midnight in the Shadow Lord\'s keep, his captains kneel: bring three of them in your hand.',
+    [404] = 'When thunder rolls over Qufim, a hand of storms, and nothing else, wakes the dark rider.',
+    [405] = 'On the day of light under a full moon, in the Empire\'s white city, four of its own in your hand call judgment.',
 }
 
 -- Ten commons for anyone new to the game, and the hand of five they start with
@@ -168,6 +256,39 @@ cards.list =
     { id = 309, key = 'crest_urhgan', name = 'Aht Urhgan Crest', sides = { 7, 5, 6, 7 }, el = 'water', level = 7, fam = 'Crest', species = 'Set reward', rarity = 2, crest = true, theme = 'guild', say = 'Every card of Aht Urhgan, in one book.' },
     { id = 310, key = 'crest_elshimo', name = 'Elshimo Crest', sides = { 6, 7, 5, 7 }, el = 'earth', level = 7, fam = 'Crest', species = 'Set reward', rarity = 2, crest = true, theme = 'guild', say = 'Every card of Elshimo, in one book.' },
     { id = 311, key = 'crest_arcana', name = 'Crest of the Arcana', sides = { 7, 6, 7, 5 }, el = 'light', level = 7, fam = 'Crest', species = 'Set reward', rarity = 2, crest = true, theme = 'guild', say = 'Every card of the Arcana, in one book.' },
+    { id = 501, key = 'job_war', name = 'The Warrior', sides = { 8, 6, 6, 5 }, el = 'fire', level = 7, fam = 'Job', species = 'Warrior', rarity = 2, job = 'WAR', ability = 'berserk', theme = 'guild', say = 'A warrior\'s card: won from Phara.' },
+    { id = 502, key = 'job_mnk', name = 'The Monk', sides = { 6, 7, 6, 6 }, el = 'earth', level = 7, fam = 'Job', species = 'Monk', rarity = 2, job = 'MNK', ability = 'counter', theme = 'guild', say = 'A monk\'s card: won from Oggbi.' },
+    { id = 503, key = 'job_whm', name = 'The White Mage', sides = { 7, 6, 5, 7 }, el = 'light', level = 7, fam = 'Job', species = 'White Mage', rarity = 2, job = 'WHM', ability = 'cure', theme = 'guild', say = 'A white mage\'s card: won from Narcheral.' },
+    { id = 504, key = 'job_blm', name = 'The Black Mage', sides = { 5, 8, 7, 5 }, el = 'dark', level = 7, fam = 'Job', species = 'Black Mage', rarity = 2, job = 'BLM', ability = 'burst', theme = 'guild', say = 'A black mage\'s card: won from Shantotto.' },
+    { id = 505, key = 'job_rdm', name = 'The Red Mage', sides = { 6, 7, 6, 6 }, el = 'fire', level = 7, fam = 'Job', species = 'Red Mage', rarity = 2, job = 'RDM', ability = 'enspell', theme = 'guild', say = 'A red mage\'s card: won from Sharzalion.' },
+    { id = 506, key = 'job_thf', name = 'The Thief', sides = { 7, 5, 6, 7 }, el = 'wind', level = 7, fam = 'Job', species = 'Thief', rarity = 2, job = 'THF', ability = 'steal', theme = 'guild', say = 'A thief\'s card: won from Nanaa Mihgo.' },
+    { id = 507, key = 'job_pld', name = 'The Paladin', sides = { 6, 6, 7, 6 }, el = 'light', level = 7, fam = 'Job', species = 'Paladin', rarity = 2, job = 'PLD', ability = 'sentinel', theme = 'guild', say = 'A paladin\'s card: won from Balasiel.' },
+    { id = 508, key = 'job_drk', name = 'The Dark Knight', sides = { 7, 6, 7, 5 }, el = 'dark', level = 7, fam = 'Job', species = 'Dark Knight', rarity = 2, job = 'DRK', ability = 'souleater', theme = 'guild', say = 'A dark knight\'s card: won from Raibaht.' },
+    { id = 509, key = 'job_bst', name = 'The Beastmaster', sides = { 6, 6, 6, 7 }, el = 'earth', level = 7, fam = 'Job', species = 'Beastmaster', rarity = 2, job = 'BST', ability = 'charm', theme = 'guild', say = 'A beastmaster\'s card: won from Brutus.' },
+    { id = 510, key = 'job_brd', name = 'The Bard', sides = { 5, 7, 7, 6 }, el = 'wind', level = 7, fam = 'Job', species = 'Bard', rarity = 2, job = 'BRD', ability = 'march', theme = 'guild', say = 'A bard\'s card: won from Mertaire.' },
+    { id = 511, key = 'job_rng', name = 'The Ranger', sides = { 7, 6, 5, 7 }, el = 'wind', level = 7, fam = 'Job', species = 'Ranger', rarity = 2, job = 'RNG', ability = 'barrage', theme = 'guild', say = 'A ranger\'s card: won from Perih Vashai.' },
+    { id = 512, key = 'job_sam', name = 'The Samurai', sides = { 7, 6, 6, 6 }, el = 'fire', level = 7, fam = 'Job', species = 'Samurai', rarity = 2, job = 'SAM', ability = 'meditate', theme = 'guild', say = 'A samurai\'s card: won from Jaucribaix.' },
+    { id = 513, key = 'job_nin', name = 'The Ninja', sides = { 6, 7, 5, 7 }, el = 'water', level = 7, fam = 'Job', species = 'Ninja', rarity = 2, job = 'NIN', ability = 'utsusemi', theme = 'guild', say = 'A ninja\'s card: won from Romualdo.' },
+    { id = 514, key = 'job_drg', name = 'The Dragoon', sides = { 8, 5, 6, 6 }, el = 'thunder', level = 7, fam = 'Job', species = 'Dragoon', rarity = 2, job = 'DRG', ability = 'jump', theme = 'guild', say = 'A dragoon\'s card: won from Rahal.' },
+    { id = 515, key = 'job_smn', name = 'The Summoner', sides = { 6, 6, 6, 7 }, el = 'light', level = 7, fam = 'Job', species = 'Summoner', rarity = 2, job = 'SMN', ability = 'avatar', theme = 'guild', say = 'A summoner\'s card: won from Koru-Moru.' },
+    { id = 516, key = 'job_blu', name = 'The Blue Mage', sides = { 6, 6, 7, 6 }, el = 'water', level = 7, fam = 'Job', species = 'Blue Mage', rarity = 2, job = 'BLU', ability = 'azure', theme = 'guild', say = 'A blue mage\'s card: won from Waoud.' },
+    { id = 517, key = 'job_cor', name = 'The Corsair', sides = { 6, 6, 6, 7 }, el = 'water', level = 7, fam = 'Job', species = 'Corsair', rarity = 2, job = 'COR', ability = 'roll', theme = 'guild', say = 'A corsair\'s card: won from Ratihb.' },
+    { id = 518, key = 'job_pup', name = 'The Puppetmaster', sides = { 7, 6, 6, 6 }, el = 'thunder', level = 7, fam = 'Job', species = 'Puppetmaster', rarity = 2, job = 'PUP', ability = 'automaton', theme = 'guild', say = 'A puppetmaster\'s card: won from Iruki-Waraki.' },
+    { id = 519, key = 'job_dnc', name = 'The Dancer', sides = { 6, 7, 6, 6 }, el = 'wind', level = 7, fam = 'Job', species = 'Dancer', rarity = 2, job = 'DNC', ability = 'step', theme = 'guild', say = 'A dancer\'s card: won from Laila.' },
+    { id = 520, key = 'job_sch', name = 'The Scholar', sides = { 6, 6, 7, 6 }, el = 'light', level = 7, fam = 'Job', species = 'Scholar', rarity = 2, job = 'SCH', ability = 'arts', theme = 'guild', say = 'A scholar\'s card: won from Erlene.' },
+    { id = 521, key = 'job_geo', name = 'The Geomancer', sides = { 6, 7, 6, 6 }, el = 'earth', level = 7, fam = 'Job', species = 'Geomancer', rarity = 2, job = 'GEO', ability = 'geocolure', theme = 'guild', say = 'A geomancer\'s card: won from Sylvie.' },
+    { id = 522, key = 'job_run', name = 'The Rune Fencer', sides = { 7, 6, 6, 6 }, el = 'ice', level = 7, fam = 'Job', species = 'Rune Fencer', rarity = 2, job = 'RUN', ability = 'lunge', theme = 'guild', say = 'A rune fencer\'s card: won from Octavien.' },
+    { id = 601, key = 'club_jack', name = 'Harmodios, Jack of the Club', sides = { 8, 7, 6, 6 }, el = 'wind', level = 8, fam = 'Townsfolk', species = 'Card Club (Hume)', rarity = 3, club = true, theme = 'hume', say = 'The Club? Never heard of it. ...Fine. One game.' },
+    { id = 602, key = 'club_clubs', name = 'Legata, Queen of Clubs', sides = { 6, 8, 7, 6 }, el = 'earth', level = 8, fam = 'Townsfolk', species = 'Card Club (Elvaan)', rarity = 3, club = true, theme = 'elvaan', say = 'The Club has rules. Rule one: you don\'t win.' },
+    { id = 603, key = 'club_diamonds', name = 'Kohlo-Lakolo, Queen of Diamonds', sides = { 7, 7, 8, 7 }, el = 'water', level = 9, fam = 'Townsfolk', species = 'Card Club (Tarutaru)', rarity = 3, club = true, theme = 'tarutaru', say = 'Sparkly, isn\'t it? So are my cards!' },
+    { id = 604, key = 'club_spades', name = 'Squintrox, Queen of Spades', sides = { 9, 6, 7, 7 }, el = 'dark', level = 9, fam = 'Townsfolk', species = 'Card Club (Goblin)', rarity = 3, club = true, theme = 'goblin', say = 'Shovel, spade, same thing. Dig in!' },
+    { id = 605, key = 'club_hearts', name = 'Ghebi, Queen of Hearts', sides = { 7, 8, 6, 8 }, el = 'fire', level = 9, fam = 'Townsfolk', species = 'Card Club (Hume)', rarity = 3, club = true, theme = 'hume', say = 'The Tenshodo deals cards too, friend.' },
+    { id = 606, key = 'club_king', name = 'Maat, King of the Card Club', sides = { 9, 8, 7, 7 }, el = 'light', level = 10, fam = 'Townsfolk', species = 'Card Club (Hume)', rarity = 3, club = true, theme = 'hume', say = 'You came all this way to play an old man? Good.' },
+    { id = 401, key = 'lost_bahamut', name = 'Bahamut, King of Wyrms', sides = { 10, 8, 8, 7 }, el = 'fire', level = 10, fam = 'Legend', species = 'Wyrmking', rarity = 3, lost = true, model = 1307, theme = 'dragon', say = 'The sky remembers.' },
+    { id = 402, key = 'lost_promathia', name = 'Promathia', sides = { 9, 7, 9, 8 }, el = 'dark', level = 10, fam = 'Legend', species = 'Twilight God', rarity = 3, lost = true, model = 1072, theme = 'grave', say = 'All things return to the void.' },
+    { id = 403, key = 'lost_shadowlord', name = 'The Shadow Lord', sides = { 10, 7, 7, 9 }, el = 'ice', level = 10, fam = 'Legend', species = 'Shadow Lord', rarity = 3, lost = true, model = 789, theme = 'orc', say = 'Kneel, and be spared... or play.' },
+    { id = 404, key = 'lost_odin', name = 'Odin', sides = { 8, 10, 7, 8 }, el = 'thunder', level = 10, fam = 'Legend', species = 'Dark Rider', rarity = 3, lost = true, model = 1829, theme = 'grave', say = 'Zantetsuken.' },
+    { id = 405, key = 'lost_alexander', name = 'Alexander', sides = { 8, 8, 10, 7 }, el = 'light', level = 10, fam = 'Legend', species = 'Holy Machine', rarity = 3, lost = true, model = 1834, theme = 'guild', say = 'Judgment, in nine squares.' },
 }
 
 -- The sets: every card of one, and its crest is yours

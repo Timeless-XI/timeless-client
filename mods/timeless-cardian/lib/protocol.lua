@@ -5,6 +5,10 @@
 --   CD1|W|<opponent>:<wins>,...             wins against each opponent
 --   CD1|L|<town>|<next town>                where Shaali the card shark is today, and tomorrow
 --   CD1|V|<binder 1/0>|<binder price>|<Card Mod here 1/0>   your Card Binder, and whether Card Mod works where you are
+--   CD1|U|club|<rank, 0 none yet>|<next, beaten, locked>     the Card Club (its words are in lib/cards.lua)
+--   CD1|U|masters|<job>,...                 the job cards you have
+--   CD1|U|lost|<card id>|<holder, '' hidden, ? away>|<1 yours>   the lost cards
+--   CD1|U|job|<your main job>
 --   CD1|B                                   the end of the cardbook
 --   CD1|M|<text>                            a word from the server (a hand it won't take, and why)
 --   CD1|G|<opponent>|<friendly or ante>|<key>|<rules: open,same,plus,elemental>   a game starts (key "pvp": a player)
@@ -83,6 +87,22 @@ function P.feed(m, line, now)
     local b = m.pending_book or m.book
     b.binder, b.binder_price, b.mod_here = f[1] == "1", tonumber(f[2]) or 0, f[3] == "1"
     return true
+  elseif kind == "U" then
+    local b = m.pending_book or m.book
+    b.club = b.club or {}
+    b.lost = b.lost or {}
+    if f[1] == "club" then
+      local r = tonumber(f[2]) or 0
+      if r == 0 then b.club_locked = true else b.club[r] = f[3] end
+    elseif f[1] == "masters" then
+      b.job_cards = {}
+      for j in (f[2] or ""):gmatch("%u+") do b.job_cards[j] = true end
+    elseif f[1] == "lost" then
+      b.lost[tonumber(f[2]) or 0] = { holder = f[3] or "", mine = f[4] == "1" }
+    elseif f[1] == "job" then
+      b.job = (f[2] or "") ~= "" and f[2] or nil
+    end
+    return true
   elseif kind == "B" then
     local b = m.pending_book or m.book
     b.version = (m.book.version or 0) + 1
@@ -152,7 +172,7 @@ function P.feed(m, line, now)
     m.found[#m.found + 1] = { id = tonumber(f[1]), how = f[2] or "drop", at = now }
     return "found"
   elseif kind == "Q" then
-    m.invite = { from = f[1] or "?", stakes = f[2] == "ante" and "ante" or "friendly", ante = tonumber(f[3]) or 0, at = now }
+    m.invite = { from = f[1] or "?", stakes = (f[2] == "ante" or f[2] == "lost") and f[2] or "friendly", ante = tonumber(f[3]) or 0, at = now }
     return "invite"
   end
   return true

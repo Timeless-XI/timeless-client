@@ -15,7 +15,7 @@ F.state = { id = nil, how = nil, at = 0 }
 F.open_book = function() end
 
 local HOW = { drop = "Dropped by a monster.", nm = "A notorious monster's own card!", champion = "A Champion's foil!",
-  won = "Won at the table.", bound = "Bound with your Card Binder.", set = "A whole set: its crest is yours!", legend = "Given to you across the table: their own card!", gm = "A gift." }
+  won = "Won at the table.", bound = "Bound with your Card Binder.", job = "Your job's own card, from its master!", club = "A Card Club member's own card!", lost = "A lost card! The whole server knows you hold it now.", set = "A whole set: its crest is yours!", legend = "Given to you across the table: their own card!", gm = "A gift." }
 
 function F.draw(c)
   local id = F.state.id

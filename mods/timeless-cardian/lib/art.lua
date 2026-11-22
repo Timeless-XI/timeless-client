@@ -319,7 +319,7 @@ function Art.card(c, x, y, s, id, o)
   local nameSize = detail == "mini" and math.max(0.52 * s, 0.5) or ts(0.62, 0.64)
   c:text(bx + 14 * s, by + (detail == "mini" and 4 or 3) * s, Canvas.fit(card.name, nameW, nameSize, true), { size = nameSize, bold = true, colour = th.title, outline = SHADOW })
   if detail ~= "mini" then
-    c:text(bx + 14 * s, by + 16 * s, Canvas.fit((card.crest and "Set crest" or th.label or "") .. "  ·  " .. (Art.ELEMENT_NAME[card.el] or ""), nameW, ts(0.45, 0.5)), { size = ts(0.45, 0.5), colour = th.muted })
+    c:text(bx + 14 * s, by + 16 * s, Canvas.fit((card.crest and "Set crest" or (card.job and "Job card") or (card.lost and "Lost card") or (card.club and "Card Club") or th.label or "") .. "  ·  " .. (Art.ELEMENT_NAME[card.el] or ""), nameW, ts(0.45, 0.5)), { size = ts(0.45, 0.5), colour = th.muted })
   end
   local cy = by + hb + 4 * s
   -- The voice, under the header (big cards)

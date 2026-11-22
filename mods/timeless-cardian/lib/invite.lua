@@ -19,8 +19,12 @@ function I.draw(c)
   if not inv then return end
   c:text(I.W / 2, 0, "A challenge!", { size = 1.2, bold = true, colour = S.GOLD, align = "center" })
   local y = c:para(0, 28, I.W, ("%s challenges you to a game of Cardian%s."):format(inv.from,
-    inv.stakes == "ante" and ", for a card" or ""), { size = 0.9, colour = S.TEXT })
-  if inv.stakes == "ante" and cards.get(inv.ante) then
+    inv.stakes == "ante" and ", for a card" or (inv.stakes == "lost" and ", for your lost card" or "")), { size = 0.9, colour = S.TEXT })
+  if inv.stakes == "lost" and cards.get(inv.ante) then
+    y = c:para(0, y + 4, I.W, "Win and you keep it, and take their best spare. Lose and it's theirs. Turn down three in a row and it hides again.", { size = 0.8, colour = S.MUTED })
+    Art.strip(c, 2, y + 4, I.W - 4, inv.ante, {})
+    y = y + 4 + Art.STRIP + 6
+  elseif inv.stakes == "ante" and cards.get(inv.ante) then
     y = c:para(0, y + 4, I.W, "You'd put up this card. The winner takes the loser's:", { size = 0.8, colour = S.MUTED })
     Art.strip(c, 2, y + 4, I.W - 4, inv.ante, {})
     y = y + 4 + Art.STRIP + 6

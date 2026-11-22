@@ -6,6 +6,7 @@
 --   How to play: a button on the table and in the cardbook (and it opens by itself with your first game)
 --   Card: with a Card Binder (Shaali sells it), a button above the screen's middle while the monster you're fighting
 --         is at 20% HP or less: it becomes its card (no experience for it)
+--   Play cards: a button by a Card Club member or your job's master when you target them, close by
 --
 -- Cards wear the game's own window with a header dressed for their family, as the shop windows dress for their
 -- shopkeeper; the big card shows the monster's real model from your game files, turning slowly (TimelessXI client).
@@ -21,6 +22,9 @@ local invite = require("lib.invite")
 
 local BEAT = 20
 local CARD_BTN = "cardian_bind"
+local NPC_BTN = "cardian_npc"
+local NPC_RANGE = 6
+local cards = require("lib.cards")
 
 local model = protocol.new_model()
 local st = { next_beat = os.clock() + 2, queue = {}, version = 0 }
@@ -97,6 +101,8 @@ events.on("unload", function()
   pcall(action.send, "cd off")
   pcall(hud.remove, CARD_BTN)
   pcall(hud.remove, CARD_BTN .. "_t")
+  pcall(hud.remove, NPC_BTN)
+  pcall(hud.remove, NPC_BTN .. "_t")
 end)
 events.on("target_change", function() if ui.is_open(book.WIN) then book.render() end end)
 
@@ -115,7 +121,7 @@ mods.provide("timeless_menu", function()
     order = 18,
     open = "//cardbook",
     command = "/cardbook",
-    desc = "Your Cardian cards, sets and hand. Monsters drop their cards (some only at night, in a weather or under the beastmen); bind one with a Card Binder; play the Steaming Sheep's regulars after dark, Shaali the card shark, or other players.",
+    desc = "Your Cardian cards, sets, quests (the Card Club, job masters, lost cards) and hand. Monsters drop their cards (some only at night, in a weather or under the beastmen); bind one with a Card Binder; play the Steaming Sheep's regulars after dark, Shaali the card shark, or other players.",
   }
 end)
 
@@ -154,6 +160,47 @@ function st.card_button()
   st.card_shown = true
 end
 
+-- The Play cards button: your target is a club member you've met (or are about to), or your job's master
+local function norm(name) return (name or ""):gsub("[%s_]", ""):lower() end
+local function npc_target()
+  local b = model.book
+  local ok, t = pcall(game.target)
+  if not ok or not t or t.kind ~= "npc" or (t.distance or 99) > NPC_RANGE then return nil end
+  local n = norm(t.name)
+  for r, cl in ipairs(cards.CLUB) do
+    local state = (b.club or {})[r]
+    if (state == "next" or state == "beaten") and norm(cl.npc) == n then return t, cl.title .. ": " .. cl.name end
+  end
+  for _, m in ipairs(cards.MASTERS) do
+    if m[1] == b.job and norm(m[3]) == n then return t, ("%s master: %s"):format(m[2], (m[3]:gsub("_", " "))) end
+  end
+end
+st.npc_shown = false
+function st.npc_button()
+  local t, who = npc_target()
+  if not t or (model.game and not model.game.over) then
+    if st.npc_shown then pcall(hud.remove, NPC_BTN) pcall(hud.remove, NPC_BTN .. "_t") st.npc_shown = false end
+    return
+  end
+  local s = hud.screen()
+  local k = s.ui_scale or 1
+  local w, h = math.floor(150 * k), math.floor(34 * k)
+  local x, y = math.floor((s.width - w) / 2), math.floor(s.height * 0.62)
+  hud.rect(NPC_BTN, { x = x, y = y, w = w, h = h, colour = { 60, 80, 130, 220 }, layer = 5,
+    tip = { title = "Play cards", text = who .. ". A game of Cardian." } })
+  hud.text(NPC_BTN .. "_t", { x = x + w / 2, y = y + math.floor(8 * k), text = "Play cards", size = 1.1 * k, colour = { 230, 238, 255, 255 },
+    align = "center", layer = 6 })
+  if not st.npc_shown then
+    hud.on(NPC_BTN, function(_, e)
+      if e.kind == "click" and e.button == "left" then
+        local tt = npc_target()
+        if tt then ask("cd npc " .. tt.id) end
+      end
+    end)
+  end
+  st.npc_shown = true
+end
+
 timer.every(0.1, function()
   local t = os.clock()
   if t >= st.next_beat then ask("cd on") end
@@ -161,4 +208,5 @@ timer.every(0.1, function()
   found.tick(t)
   invite.tick(t)
   pcall(st.card_button)
+  pcall(st.npc_button)
 end)

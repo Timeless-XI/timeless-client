@@ -1,5 +1,5 @@
--- How to play: Cardian's rules in a window of four pages (the game, house rules and the world, collecting, where to
--- play), opened from the table and the cardbook. What it says is what the server's rules do
+-- How to play: Cardian's rules in a window of five pages (the game, house rules and the world, collecting, where to
+-- play, quests), opened from the table and the cardbook. What it says is what the server's rules do
 -- (modules/cardian/lua/cardian_engine.lua and cardian.lua).
 
 local S = require("lib.style")
@@ -10,7 +10,7 @@ local H = {}
 
 H.WIN = "cardian_rules"
 H.W = 640
-H.H = 600
+H.H = 660
 H.state = { page = 1 }
 
 local PAGES = {
@@ -18,6 +18,7 @@ local PAGES = {
   { label = "Rules & world" },
   { label = "Collecting" },
   { label = "Where to play" },
+  { label = "Quests" },
 }
 
 -- Each page: a list of { heading, text } blocks
@@ -66,13 +67,23 @@ local TEXT = {
       "Target a player standing close by, open your cardbook and challenge them. They accept or decline. Each turn waits 60 seconds, then a card is played for whoever is slow. Folding, leaving the zone or logging out loses the game." },
     { "Leaving", "Closing the table doesn't end the game: Back to the game in the cardbook opens it again. Fold gives up the game (and the card you put up)." },
   },
+  {
+    { "The Card Club",
+      "Some townsfolk are secretly card players. Win a game anywhere and you'll hear of the club's Jack; beat each member in turn (Jack, Clubs, Diamonds, Spades, Hearts) and you hear where the next one is, up to the King. Target a member and press Play cards. Each gives you their own card." },
+    { "Job cards",
+      "Every job has a master (the Quests tab says who and where). On that job, target them and press Play cards: beat them once and their job card is yours. One job card in a hand; its ability works only while you're on that job (the card says what it does). Masters play their own." },
+    { "Lost cards",
+      "Five cards, one of each on the whole server. Each has a riddle: stand where it says, when it says, with the hand it asks for, and press Search here. The whole server hears who found it." },
+    { "Holding a lost card",
+      "Anyone can challenge you for it (your lost card against their best spare). Turn down three in a row, or stay away for two weeks, and it hides again." },
+  },
 }
 
 function H.draw(c)
   local st = H.state
   c:text(0, 2, "How to play Cardian", { size = 1.25, bold = true, colour = S.GOLD })
-  c:switch(H.W - 430, 0, 26, PAGES, st.page, { on = function(i) st.page = i H.render() end, key = "page" })
-  local y = 44
+  c:switch(0, 34, 26, PAGES, st.page, { on = function(i) st.page = i H.render() end, key = "page" })
+  local y = 76
   for _, block in ipairs(TEXT[st.page] or {}) do
     c:text(0, y, block[1], { size = 0.95, bold = true, colour = S.TEXT })
     y = c:para(0, y + 20, H.W - 4, block[2], { size = 0.85, colour = S.MUTED }) + 8
