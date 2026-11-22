@@ -167,6 +167,8 @@ mod tilt;
 mod timeless;
 // Timeless XI: the title reel, for main.rs's reel-shot (tlreel.rs).
 pub(crate) use timeless::title as tl_title;
+// Timeless XI: the Select screen's ring, for main.rs's ring-shot.
+pub(crate) use timeless::ring as tl_ring;
 mod timers;
 mod trade;
 mod treasure;
@@ -9065,6 +9067,8 @@ pub struct App {
     flyover_next: Vec<String>,
     /// Timeless XI: the Timeless title's logo and match-cut state (client/timeless/title.rs).
     tl_title: timeless::title::TitleLook,
+    /// Timeless XI: the Select screen's ring of characters in the Hall of the Gods (client/timeless/ring.rs).
+    tl_ring: timeless::ring::Ring,
     /// The character select scene, its loading state and the character list it was built for.
     select: Option<select::SelectScene>,
     select_state: LoadState,
@@ -9368,6 +9372,7 @@ impl App {
             flyover_state: LoadState::Idle,
             flyover_next: Vec::new(),
             tl_title: Default::default(),
+            tl_ring: Default::default(),
             select: None,
             select_state: LoadState::Idle,
             select_key: String::new(),
@@ -18208,7 +18213,49 @@ impl App {
         }
         let in_select =
             matches!(&self.phase, Phase::Characters { screen: LobbyScreen::Select | LobbyScreen::Delete, .. });
-        if let (true, Phase::Characters { chars, .. }) = (in_select, &self.phase) {
+        // Timeless XI: on the Select screen, the account's characters in a ring in the Hall of the Gods in place of
+        // retail's ring (client/timeless/ring.rs).
+        let tl_select = in_select && self.timeless_title();
+        let tl_req = match (&self.phase, tl_select) {
+            (Phase::Characters { chars, .. }, true) => {
+                let list = select::List::new(chars);
+                let members = (0..list.entries.len())
+                    .filter_map(|i| list.get(chars, i))
+                    .map(|c| {
+                        let l = &c.looks;
+                        timeless::ring::Member {
+                            name: c.name.clone(),
+                            look: Look {
+                                race: c.race as u8,
+                                face: c.face,
+                                head: l[1],
+                                body: l[2],
+                                hands: l[3],
+                                legs: l[4],
+                                feet: l[5],
+                                main: l[6],
+                                sub: l[7],
+                                range: 0,
+                            },
+                            size: c.size,
+                        }
+                    })
+                    .collect();
+                Some(timeless::ring::Request { members })
+            }
+            _ => None,
+        };
+        if let Some(req) = tl_req {
+            let data = if self.tl_ring.wanted() != req.key() { self.game_data().ok() } else { None };
+            self.tl_ring.want(req, || data);
+            self.tl_ring.focus(self.select_ui.cursor);
+        } else if !tl_select {
+            for c in self.tl_ring.clear() {
+                let Some(a) = &mut self.audio else { break };
+                play_fx_sound(a, c);
+            }
+        }
+        if let (true, false, Phase::Characters { chars, .. }) = (in_select, tl_select, &self.phase) {
             let key: String = chars.iter().map(|c| format!("{}:{:?};", c.name, c.looks)).collect();
             if key != self.select_key
                 && self.select_state != LoadState::Loading
@@ -18432,7 +18479,12 @@ impl App {
         if matches!(&self.phase, Phase::Characters { screen: LobbyScreen::Select | LobbyScreen::Delete, .. })
             && self.lobby_fade.next.is_none()
         {
-            let up = if self.select.is_some() || self.select_state == LoadState::Failed { 1.0 } else { 0.0 };
+            let ready = if self.timeless_title() {
+                self.tl_ring.ready()
+            } else {
+                self.select.is_some() || self.select_state == LoadState::Failed
+            };
+            let up = if ready { 1.0 } else { 0.0 };
             (self.lobby_fade.ui_to, self.lobby_fade.scene_to) = (up, up);
         }
         if let Some(next) = self.lobby_fade.step(dt * 60.0) {
@@ -18986,6 +19038,9 @@ impl App {
         if !select_ticks && let Some(fx) = self.select.as_mut().and_then(|s| s.effects()) {
             paused.extend(fx.pause_sounds());
         }
+        if !select_ticks {
+            paused.extend(self.tl_ring.pause_sounds());
+        }
         // The movies' voices too, while their screen is not up.
         if !self.title_backdrop()
             && let Some(f) = self.flyover.as_mut()
@@ -19074,7 +19129,29 @@ impl App {
             }
             g.drew_world = true;
         }
+        // Timeless XI: the ring of characters in the Hall of the Gods (client/timeless/ring.rs) in place of retail's.
+        if select_ticks && self.timeless_title() {
+            self.tl_ring.advance(dt);
+            let alive = self.audio.as_ref().map(|a| a.alive());
+            if self.tl_ring.render(
+                &gfx.gpu,
+                gfx.config.format,
+                encoder,
+                (&scene_view, Some(&scene_tex), bg),
+                &scene_depth,
+                aspect,
+                alive,
+                self.cfg.draw_distance,
+            ) {
+                g.drew_world = true;
+            }
+            for c in self.tl_ring.take_sounds() {
+                let Some(a) = &mut self.audio else { break };
+                play_fx_sound(a, c);
+            }
+        }
         if matches!(&self.phase, Phase::Characters { screen: LobbyScreen::Select | LobbyScreen::Delete, .. })
+            && !self.timeless_title()
             && let Some(sel) = &mut self.select
         {
             sel.advance(dt, self.select_ui.cursor);
@@ -19396,6 +19473,7 @@ impl App {
         if let Some(fx) = self.select.as_mut().and_then(|s| s.effects()) {
             fx.after_submit(&gfx.gpu);
         }
+        self.tl_ring.after_submit(&gfx.gpu);
         if let Some(fx) = self.creator.as_mut().and_then(|c| c.effects.as_mut()) {
             fx.after_submit(&gfx.gpu);
         }

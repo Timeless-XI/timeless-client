@@ -820,6 +820,17 @@ impl UiBatch {
         );
     }
 
+    /// `push_image` blended additively (Timeless XI: the Select ring's aura, client/timeless/ring.rs).
+    pub fn push_image_add(&mut self, texture: &str, x: f32, y: f32, w: f32, h: f32, rgba: [f32; 4]) {
+        self.push_quad(
+            Some(texture),
+            Blend::Add,
+            [[x, y], [x + w, y], [x, y + h], [x + w, y + h]],
+            [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+            [rgba; 4],
+        );
+    }
+
     /// Game-font quads; `atlas` is the texture name the font atlas was loaded under.
     pub fn push_text(&mut self, quads: &[crate::dat::font::Quad], atlas: &str) {
         self.push_text_as(quads, atlas, false);
