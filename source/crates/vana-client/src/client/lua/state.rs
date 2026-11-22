@@ -50,6 +50,14 @@ pub(super) struct FrameInfo {
     pub models_ver: u64,
     /// The portraits drawn this frame (client/portrait.rs): entity -> (game UI image, modern UI texture).
     pub portraits: std::collections::HashMap<u32, (String, egui::TextureId)>,
+    /// Lights mods put in the world (render.light, Night Lighting Modern): (mod, id) -> the light.
+    pub lights: std::collections::BTreeMap<(String, String), crate::client::night::ModLight>,
+    /// Lamps mods set to a level (render.lamp_zone): (mod, id) -> the zone.
+    pub lamp_zones: std::collections::BTreeMap<(String, String), crate::client::night::LampZone>,
+    /// The night as the client last drew it (render.night): Modern, how far into the night, Night Darkness; and the
+    /// zone's lamp glows with their levels (render.lamps).
+    pub night: (bool, f32, f32),
+    pub glows: Vec<[f32; 4]>,
     /// The mods' canvases as the modern UI last drew them (ui.bounds): (mod, window, canvas) -> its origin in window
     /// pixels and pixels per canvas unit.
     pub canvas_rects: std::collections::HashMap<(String, String, String), [f32; 3]>,

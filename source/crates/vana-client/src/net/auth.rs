@@ -12,6 +12,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 pub const LOADER_VERSION: [u8; 3] = [3, 0, 0];
+/// TimelessXI: the name every request carries, so the server can tell its own client from xiloader and others.
+pub const TIMELESS_CLIENT: &str = "timelessxi";
+/// TimelessXI: this build's number, raised with each release. The server can turn away builds below its minimum
+/// (TIMELESS_CLIENT_MIN_BUILD), which is how a required update is enforced. The crate's version ends in
+/// "-timeless.<this>" (Cargo.toml), so the release tag and the updater agree with it.
+pub const TIMELESS_BUILD: u32 = 9;
 /// The most of a login reply taken before giving up: xi_connect's replies are a few hundred bytes of JSON.
 const MAX_REPLY: usize = 64 * 1024;
 
@@ -213,6 +219,8 @@ pub fn send(host: &str, port: u16, command: Command, req: &Request) -> Result<Re
         "password": req.password,
         "otp": req.otp,
         "new_password": req.new_password,
+        "client": TIMELESS_CLIENT,
+        "client_build": TIMELESS_BUILD,
     });
     if command == Command::Login {
         body["trust_token"] = json!(req.trust_token);
@@ -298,6 +306,22 @@ mod reply_tests {
         // A remembered 2.2 that the server has since moved on from.
         let moved = "Unsupported xiloader version 2.2.0.\nThis server requires version 3.0.x.";
         assert_eq!(asked_version(moved, [2, 2, 0]), Some([3, 0, 0]));
+    }
+
+    /// TimelessXI's refusals (wrong client, build too old) name no loader version, so they are shown, not retried.
+    #[test]
+    fn timeless_refusals_ask_for_no_version() {
+        let v3 = LOADER_VERSION;
+        let wrong = "TimelessXI is played with the Timeless client.\nDownload it at https://timelessxi.gg";
+        let old = "Your Timeless client is out of date (build 1, this server needs build 2).\nGet the new one at https://timelessxi.gg";
+        assert_eq!((asked_version(wrong, v3), asked_version(old, v3)), (None, None));
+    }
+
+    /// The crate's version names this build: "<upstream version>-timeless.<TIMELESS_BUILD>".
+    #[test]
+    fn version_names_the_timeless_build() {
+        let v = env!("CARGO_PKG_VERSION");
+        assert!(v.ends_with(&format!("-timeless.{TIMELESS_BUILD}")), "Cargo.toml's version {v} is not -timeless.{TIMELESS_BUILD}");
     }
 
     /// A taken version is kept per server, and a store that can't be read or written only means none.

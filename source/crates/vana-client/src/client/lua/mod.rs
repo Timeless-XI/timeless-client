@@ -827,6 +827,8 @@ impl Host {
         info.item_tints.retain(|_, t| t.0 != vm.manifest.id);
         info.trimmed.retain(|k, _| k.0 != vm.manifest.id);
         info.shaders.retain(|s| s.0 != vm.manifest.id);
+        info.lights.retain(|k, _| k.0 != vm.manifest.id);
+        info.lamp_zones.retain(|k, _| k.0 != vm.manifest.id);
         drop(info);
         self.filters_dirty = true;
         lend_opt(&vm, w, |vm| vm.emit("unload", ()));
@@ -1800,6 +1802,21 @@ pub(super) fn draw_hud(gu: &mut super::game_ui::GameUi, w: &World) {
 }
 
 impl Host {
+    /// The mods' lights (render.light) and lamp zones (render.lamp_zone), for client/night.rs.
+    pub(in crate::client) fn night_wants(
+        &self,
+    ) -> (Vec<crate::client::night::ModLight>, Vec<crate::client::night::LampZone>) {
+        let f = self.info.borrow();
+        (f.lights.values().copied().collect(), f.lamp_zones.values().copied().collect())
+    }
+
+    /// What render.night and render.lamps answer this frame.
+    pub(in crate::client) fn set_night(&self, night: (bool, f32, f32), glows: Vec<[f32; 4]>) {
+        let mut f = self.info.borrow_mut();
+        f.night = night;
+        f.glows = glows;
+    }
+
     /// This frame's view-projection (world_hud), for draw.to_screen.
     pub(in crate::client) fn set_view_proj(&self, m: glam::Mat4) {
         self.info.borrow_mut().view_proj = m;
@@ -1917,9 +1934,32 @@ impl Host {
         // Read in place (every element was copied for this every frame), in the draw order elements() gives.
         let mut all: Vec<(i32, hud::Wanted)> = Vec::new();
         for vm in self.vms.iter().filter(|v| v.suspended.is_none()) {
-            for e in vm.st.borrow().hud.iter().filter(|e| e.visible) {
-                if let hud::Kind::Portrait { entity, w, h, look, .. } = e.kind {
-                    all.push((e.layer, hud::Wanted { entity, size: [w, h], look }));
+            let st = vm.st.borrow();
+            for e in st.hud.iter().filter(|e| e.visible) {
+                if let hud::Kind::Portrait { entity, w, h, look, body, turn, spin, .. } = e.kind {
+                    all.push((e.layer, hud::Wanted { entity, size: [w, h], look, body, turn, spin }));
+                }
+            }
+            // A canvas's portraits in an open window (TimelessXI), over the HUD's.
+            for win in st.windows.iter().filter(|w| w.open) {
+                for el in &win.elems {
+                    if let window::Elem::Canvas { cmds, .. } = el {
+                        for c in cmds {
+                            if let window::Cmd::Portrait { r, entity, look, body, turn, spin, .. } = c {
+                                all.push((
+                                    i32::MAX,
+                                    hud::Wanted {
+                                        entity: *entity,
+                                        size: [r[2], r[3]],
+                                        look: *look,
+                                        body: *body,
+                                        turn: *turn,
+                                        spin: *spin,
+                                    },
+                                ));
+                            }
+                        }
+                    }
                 }
             }
         }

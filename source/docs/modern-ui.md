@@ -186,6 +186,9 @@ Milestone 1:
   [--backdrop PNG] --out PNG`: the panels with sample values and every frame, offscreen).
 - egui's zoom follows the window height against 1080, times Settings > Client > Interface Size (config modern_scale,
   50 .. 150% in 5% steps, default 60%).
+- TimelessXI: Settings > Interface > Mod Interface Size, a slider (config `modern_mod_scale`, 100-250 % in 5 % steps), draws
+  mods' canvases and the windows that hold them that much bigger on top of the Interface Size, and HUD mods' text with
+  them (hud.screen's `ui_scale` takes it in too), for mods whose print is too small to read.
 - Party: the members' rows, then retail's pet and fellow rows (by the classic party window: name, HP gauge, the
   pet's TP), a click targets them (2026-11-07).
 - Panels: Status, Party, Target, Location (zone, grid, time, day, weather, and the compass: retail's disk turned so

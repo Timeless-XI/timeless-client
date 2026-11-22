@@ -5,6 +5,7 @@ pub mod atrac3;
 pub mod format;
 pub mod mixer;
 pub mod output;
+pub mod wind;
 
 use mixer::{Cmd, Mixer, Status};
 use std::collections::HashMap;
@@ -82,6 +83,8 @@ struct Task {
 const AMBIENT: u32 = 0xffff_ff00;
 /// The chat call's voice (FUN_100380f0's task keeps its handle at +0x38).
 const CALL: u32 = 0xffff_ff02;
+/// Ours (client/storm.rs): the storm's wind loop.
+const WIND: u32 = 0xffff_fe00;
 
 /// FUN_1024a1b0: a replaced flag-0x20 loop fades out over 0x96 sound steps (~2.5 s), in 60 Hz ticks for SeStop.
 const AMBIENT_FADE: i32 = 0x96 * 0x3c / 0x32;
@@ -129,6 +132,9 @@ pub struct Audio {
     /// The last op 0x5c 0xb1 restart sent: another waits until the mixer has the track or 2 s pass (the loader reads
     /// the whole file per request, and the scripts ask every frame).
     restarted: Option<std::time::Instant>,
+    /// Ours: the storm's wind loop (audio/wind.rs), made once, and whether it plays.
+    wind_loop: Option<Arc<[u8]>>,
+    wind_on: bool,
 }
 
 impl Audio {
@@ -173,6 +179,8 @@ impl Audio {
                     max_se: 12,
                     pending: Default::default(),
                     restarted: None,
+                    wind_loop: None,
+                    wind_on: false,
                 })
             }
             Err(e) => {
@@ -355,6 +363,38 @@ impl Audio {
 
     pub fn voice_pan(&mut self, handle: u32, pan: u8) {
         self.send(Cmd::SePan { handle, pan: pan & 0x7f });
+    }
+
+    /// Ours (Settings' Weather Modern, client/storm.rs): the storm's howling wind at `level` (0..127 before the
+    /// effects factor), started the first time and faded out over 2 s at None.
+    pub fn wind(&mut self, level: Option<i32>) {
+        match level {
+            Some(l) if l > 0 => {
+                if !self.wind_on || !self.alive().contains(&WIND) {
+                    let bytes = self.wind_loop.get_or_insert_with(wind::sewave).clone();
+                    let Some(dec) = decoder(bytes, "wind", 0) else { return };
+                    let lv = self.se_level(l);
+                    self.pending.borrow_mut().insert(WIND);
+                    let _ = self.tx.send(Req::Cmd(Cmd::PlaySe {
+                        dec,
+                        level: lv,
+                        pan: 0x40,
+                        priority: 0,
+                        handle: WIND,
+                        limit: 0,
+                    }));
+                    self.wind_on = true;
+                }
+                self.voice_level(WIND, l.min(127));
+            }
+            _ => {
+                if self.wind_on {
+                    self.voice_stop(WIND, 120);
+                    self.raw_levels.remove(&WIND);
+                    self.wind_on = false;
+                }
+            }
+        }
     }
 
     /// Stop now (0) or fade out over 60 Hz ticks.

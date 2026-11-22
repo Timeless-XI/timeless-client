@@ -8,3 +8,7 @@ pub mod hdicon;
 pub mod hotbar;
 pub mod icons;
 pub mod title;
+// TimelessXI: the standalone build's server side (Timeless DAT patches, the allowed game version, the required
+// mods at first start), reached as client::timeless::<fn> as before it moved in here.
+mod server;
+pub use server::*;

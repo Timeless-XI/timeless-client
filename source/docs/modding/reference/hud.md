@@ -387,11 +387,15 @@ drawn once, as the first of them (by layer) asks.
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `x`, `y`, `visible`, `layer` | | | As for [every element](#places-sizes-and-layers). |
-| `entity` | `integer` | (required) | The actor's server id, as `game.entity` and `game.target` give it. |
+| `entity` | `integer` | (required, or `model`) | The actor's server id, as `game.entity` and `game.target` give it. |
+| `model` | `integer` | none | *TimelessXI fork (`mod.model_portraits`).* A monster's or an NPC's model id (1..4095) instead of `entity`: that model is loaded from the game's files and drawn standing in its idle motion, with no entity in the zone. |
+| `body` | `boolean` | `false` (`true` with `model`) | The whole actor, from a little to its right, instead of its face. |
+| `turn` | `number` | `0` | *With `model`:* its facing, in degrees round from front on. |
+| `spin` | `number` | `0` | *With `model`:* degrees it turns a second (a slow turntable: 20 to 40). |
 | `size` | `number` | | Sets `w` and `h` at once. |
 | `w`, `h` | `number` | `96`, `96` | Its width and height in window pixels; the view widens or narrows with them. |
 | `shape` | `string` | `"oval"` | `"oval"` (the oval filling `w` by `h`) or `"square"`. |
-| `bg` | `{r, g, b, a}` or `false` | none (clear) | The backing behind the actor, in its shape. |
+| `bg` | `{r, g, b, a}` or `false` | none (clear) | The backing behind the actor, in its shape. Without one the backdrop is clear: only the model shows, over whatever is drawn under it (a window's panel, a card), its edges smooth. |
 | `frame` | `{r, g, b, a}` or `false` | none | A frame ring round its edge, lit from above. |
 | `frame_w` | `number` | `3` | The frame's width in window pixels. |
 | `colour` | `{r, g, b, a}` | white | A tint its colours are multiplied by; `a` fades it. |
@@ -399,7 +403,8 @@ drawn once, as the first of them (by layer) asks.
 **Returns** nothing.
 
 **Errors**
-- No `entity`: `a portrait needs entity (a server id)`.
+- Neither `entity` nor `model`: `a portrait needs entity (a server id) or model (a model id)`.
+- A `model` outside 1..4095: `model N: a model id 1..4095`.
 - A `shape` other than those two: `shape "...": oval or square`.
 - A `colour`, `bg` or `frame` that is not a table or `false`: `a colour is {r, g, b, a} (0..255), or false for none`.
 
@@ -418,6 +423,14 @@ end)
 ```
 
 `hud.set(id, {entity = other})` moves the portrait to another actor.
+
+```lua
+-- TimelessXI: a monster's model on a slow turntable, whether or not one is nearby
+if mod.model_portraits then
+  hud.portrait("nm", {x = 40, y = 200, model = 328, w = 160, h = 160, shape = "square", spin = 30,
+    bg = {14, 16, 26, 220}})
+end
+```
 
 ## `hud.icon`
 
@@ -685,7 +698,7 @@ edges or centre, and to size them in step with the UI.
 | --- | --- | --- |
 | `width` | `integer` | The game window's width in pixels. |
 | `height` | `integer` | The game window's height in pixels. |
-| `ui_scale` | `number` | Pixels per UI unit: multiply a size in UI units by it to get window pixels. |
+| `ui_scale` | `number` | Pixels per UI unit: multiply a size in UI units by it to get window pixels. *TimelessXI fork:* times the player's Mod Interface Size, which also scales HUD text. |
 
 **Example**
 

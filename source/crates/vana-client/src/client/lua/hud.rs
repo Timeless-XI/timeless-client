@@ -58,13 +58,18 @@ pub(in crate::client) enum Kind {
         alpha: Option<f32>,
         me: bool,
     },
-    /// An actor's face drawn live (client/portrait.rs): its server id, size, tint and finish.
+    /// An actor's face drawn live (client/portrait.rs): its server id, size, tint and finish. `body`: the whole
+    /// actor instead of its face. A model preview (client/preview.rs) has a preview id as its entity, faces `turn`
+    /// degrees and turns `spin` degrees a second.
     Portrait {
         entity: u32,
         w: f32,
         h: f32,
         tint: [u8; 4],
         look: Look,
+        body: bool,
+        turn: f32,
+        spin: f32,
     },
     /// A speech bubble: a rounded rect, its outline (colour, width) and a tail aimed at a point.
     Bubble {
@@ -250,12 +255,16 @@ pub(in crate::client) struct Look {
     pub frame_w: f32,
 }
 
-/// What a portrait element asks of client/portrait.rs: its actor, shown size in window pixels and finish.
+/// What a portrait element asks of client/portrait.rs: its actor, shown size in window pixels and finish; the whole
+/// body or the face; a preview's facing and turn (degrees, degrees a second).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(in crate::client) struct Wanted {
     pub entity: u32,
     pub size: [f32; 2],
     pub look: Look,
+    pub body: bool,
+    pub turn: f32,
+    pub spin: f32,
 }
 
 #[derive(Clone)]
@@ -459,9 +468,26 @@ fn apply(e: &mut Elem, t: &Table) -> mlua::Result<()> {
                 *tint = v;
             }
         }
-        Kind::Portrait { entity, w, h, tint, look } => {
+        Kind::Portrait { entity, w, h, tint, look, body, turn, spin } => {
             if let Some(v) = t.get::<Option<u32>>("entity")? {
                 *entity = v;
+            }
+            // A model by its id (a monster's or an NPC's look model), drawn from the game's files (client/preview.rs).
+            if let Some(v) = t.get::<Option<u32>>("model")? {
+                if v == 0 || v > 0x0fff {
+                    return Err(mlua::Error::runtime(format!("model {v}: a model id 1..4095")));
+                }
+                *entity = crate::client::preview::id_of(v as u16);
+                *body = true;
+            }
+            if let Some(v) = t.get::<Option<bool>>("body")? {
+                *body = v;
+            }
+            if let Some(v) = t.get::<Option<f32>>("turn")? {
+                *turn = v;
+            }
+            if let Some(v) = t.get::<Option<f32>>("spin")? {
+                *spin = v;
             }
             if let Some(v) = t.get::<Option<f32>>("size")? {
                 (*w, *h) = (v.max(1.0), v.max(1.0));
@@ -707,8 +733,8 @@ pub(super) fn install(lua: &Lua, g: &Table, vm: &super::vm::Vm) -> mlua::Result<
     t.set(
         "portrait",
         lua.create_function(|lua, (id, spec): (String, Table)| {
-            if spec.get::<Option<u32>>("entity")?.is_none() {
-                return Err(mlua::Error::runtime("a portrait needs entity (a server id)"));
+            if spec.get::<Option<u32>>("entity")?.is_none() && spec.get::<Option<u32>>("model")?.is_none() {
+                return Err(mlua::Error::runtime("a portrait needs entity (a server id) or model (a model id)"));
             }
             put(
                 lua,
@@ -719,6 +745,9 @@ pub(super) fn install(lua: &Lua, g: &Table, vm: &super::vm::Vm) -> mlua::Result<
                     h: 96.0,
                     tint: [255; 4],
                     look: Look { bg: None, oval: true, frame: None, frame_w: 3.0 },
+                    body: false,
+                    turn: 0.0,
+                    spin: 0.0,
                 },
                 spec,
             )
@@ -1042,7 +1071,7 @@ pub(super) fn draw(gu: &mut super::super::game_ui::GameUi, w: &World) {
             Kind::Portrait { entity, w: iw, h: ih, tint, .. } => {
                 let (pw, ph) = (iw * k.0, ih * k.1);
                 if let Some((key, _)) = host.portrait(*entity) {
-                    gu.image_rect(&key, x, y, pw, ph, tint.map(|c| c as f32 / 255.0));
+                    gu.portrait_rect(&key, x, y, pw, ph, tint.map(|c| c as f32 / 255.0));
                 }
                 [x, y, pw, ph]
             }

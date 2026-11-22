@@ -74,6 +74,9 @@ mod mapmark;
 mod modsui;
 mod myroom;
 pub mod net;
+mod night;
+mod storm;
+pub(crate) use storm::{fall as storm_fall, lighter as storm_lighter};
 mod notes;
 mod padcfg;
 pub(crate) mod perf;
@@ -142,6 +145,7 @@ mod partyreq;
 mod plate;
 mod post;
 mod preload;
+mod preview;
 mod primer;
 mod pupset;
 mod quests;
@@ -2515,7 +2519,7 @@ fn name_plates(gu: &mut GameUi, world: &World, sw: f32, sh: f32, view_proj: glam
     hidden.extend(looks.iter().filter(|(_, l)| l.hidden).map(|(id, _)| *id));
     // Retail draws plates into the scene target before the op 0x0f multiply (FUN_10010d20, MODLOG "Name plates under
     // the screen fade"); ours scale their colour by it, which is the same for an alpha-blended plate.
-    let m = world.screen.multiply().map(|c| c * (1.0 - world.fade));
+    let m = world.screen.multiply().map(|c| c * world.zone_level());
     let faded = |tint: u32| -> u32 {
         let ch = |sh: u32, k: usize| (((tint >> sh & 0xff) as f32 * m[k]).round().min(255.0) as u32) << sh;
         tint & 0xff00_0000 | ch(16, 0) | ch(8, 1) | ch(0, 2)
@@ -5147,7 +5151,18 @@ fn world_hud(
                     let max = rect.map_or(100.0, |r| r[2] - 13.0);
                     let tid = world.target.unwrap_or(0);
                     let tint = name_colour(tid, e, world, |i| gu.ncol(i));
-                    gu.wrapped_name(monstrosity::name(e), max, t.x, t.y, tint, true, e.no_gauge);
+                    // Ours: a mod's name for it (render.entity, e.g. a Champion's whole name, longer than the game's
+                    // packet allows) shows here too, as on its plate.
+                    let renamed = world.lua.looks().get(&tid).and_then(|l| l.name.clone());
+                    gu.wrapped_name(
+                        renamed.as_deref().unwrap_or(monstrosity::name(e)),
+                        max,
+                        t.x,
+                        t.y,
+                        tint,
+                        true,
+                        e.no_gauge,
+                    );
                     // The mods' slots (the bundled Target Info's): the distance left of the HP gauge, the HP percent at the
                     // window's right, on the gauge's row.
                     if !e.no_gauge {
@@ -6323,6 +6338,13 @@ struct Actor {
     scale: f32,
     /// Set once the rest-pose top is known.
     top_key: String,
+    /// Breathing in the cold (client/storm.rs Rhythm): what the idle motion's breathing was read as, and where the
+    /// actor is in it this frame.
+    rhythm: Option<storm::Rhythm>,
+    breath_sync: Option<(f32, f32)>,
+    /// Snow settled on it (client/storm.rs settle) and where it stood last frame (how fast it moves shakes it off).
+    snow: f32,
+    snow_at: Option<Vec3>,
     /// Motion name lookups (actmotion::find) by name.
     find_cache: actmotion::FindCache,
     /// The model failed to load (the event actor wait takes it as loaded).
@@ -6502,6 +6524,10 @@ impl Actor {
             anchor_at: [None; 2],
             scale: 1.0,
             top_key: String::new(),
+            rhythm: None,
+            breath_sync: None,
+            snow: 0.0,
+            snow_at: None,
             find_cache: Default::default(),
             failed: false,
             motion_names: None,
@@ -6930,6 +6956,10 @@ fn turn_rate(a: &Actor, in_event: bool) -> f32 {
 /// An actor's place; a riding animal stands at its rider's (FUN_100c8ed0), a rider on a mount moves by its offset and
 /// yaw (FUN_100c9330; zero on a chocobo).
 fn actor_place(w: &World, id: u32, my_dir: u8) -> Option<Place> {
+    // A mod's model preview stands out of sight (client/preview.rs).
+    if preview::is(id) {
+        return preview::place(w, id);
+    }
     // A CMoSkeletonElem's model at its element (FUN_10047590: +0x34 / +0x5fc the position, +0x61c the rotation).
     if let Some(&(pos, rot)) = w.fx_models.get(&id) {
         return Some(Place {
@@ -7733,6 +7763,8 @@ struct World {
     event_voices: bool,
     /// Looks set by event op 0xb6 (and the riding animals, ride.rs), for the model loader.
     event_looks: Vec<(u32, Source)>,
+    /// Model previews for the mods' portraits (client/preview.rs).
+    previews: preview::State,
     /// CMoSkeletonElem models (fx MODEL_IDS): each one's place, from its element (position, rotation x / y / z).
     fx_models: HashMap<u32, (Vec3, Vec3)>,
     /// Other characters' costumes (0x00D @0x30), and the look each actor in costume would have without it.
@@ -7827,6 +7859,10 @@ struct World {
     /// A zone line touched in an event, asked for once it ends (DAT_1048098e = 1).
     zone_touch: Option<zone::Region>,
     zone_hold: Option<zonefade::Hold>,
+    /// The zone fade heads back to clear (the new zone is ready): a soft hold crossfades out (client/zonefade.rs).
+    fading_in: bool,
+    /// Settings' Zone Changes Soft, as of this frame.
+    soft_zoning: bool,
     /// FUN_100fc3c0's last admitted time per c2s id, for the ids gated where they are sent (chat, tells).
     call_gate: HashMap<u16, Instant>,
     /// The zone behind a near zone line, loading or loaded ahead.
@@ -8259,6 +8295,14 @@ struct World {
     skillchain: skillchain::Tracker,
     /// The lamps' lights (client/lamps.rs, Settings' Lamp Lights).
     lamps: lamps::Lamps,
+    /// Settings' Night Lighting (client/night.rs): the night's grade, levels, placed lights and halos.
+    night: night::State,
+    night_halos: Option<crate::render::halo::Halos>,
+    /// Settings' Weather Modern (client/storm.rs): the storm, and its falling snow and frost (render/snow.rs).
+    storm: storm::State,
+    snow: Option<crate::render::snow::Snow>,
+    /// The storm's wind sound's level this frame (audio/wind.rs), None silent.
+    wind_level: Option<i32>,
     /// The actor shadows' light-state slots (client/shadows.rs).
     shadow_slots: shadows::Slots,
     key_items: Vec<u32>,
@@ -8742,6 +8786,11 @@ enum Confirm {
 
 impl World {
     /// The entity with target index `index`, and its id.
+    /// The zone fade's level for the scene's multiply: 1 - fade, or 1 while a soft hold is the screen (client/zonefade.rs).
+    fn zone_level(&self) -> f32 {
+        if self.soft_zoning && self.zone_hold.is_some_and(|h| h.captured) { 1.0 } else { 1.0 - self.fade }
+    }
+
     fn entity_at(&self, index: u16) -> Option<(u32, &Entity)> {
         let id = *self.entity_index.get(&index)?;
         self.entities.get(&id).filter(|e| e.index == index).map(|e| (id, e))
@@ -9143,6 +9192,8 @@ pub struct App {
     update_ui: Option<updater::UpdateUi>,
     /// The Update window opened by itself for an out-of-date PlayOnline Viewer (once a run).
     viewer_asked: bool,
+    /// TimelessXI: a newer client release was started by itself this run (updater::UpdateUi::open_client_only).
+    client_update_started: bool,
     /// The change notes the last update left for this version, shown over the title once (client/notes.rs), and their
     /// window while open.
     whats_new: Option<notes::Saved>,
@@ -9413,6 +9464,7 @@ impl App {
             first_run: None,
             update_ui: None,
             viewer_asked: false,
+            client_update_started: false,
             whats_new,
             notes_ui: None,
             notes_fetch,
@@ -9935,6 +9987,8 @@ impl App {
         // The zone's ambient loop, only in the world (world+0x20 is 0 elsewhere).
         let (se, scene) = if let Phase::World(w) = &self.phase { (w.ambient, w.scene) } else { (None, None) };
         a.ambient(se, scene);
+        // Settings' Weather Modern: the storm's wind (client/storm.rs, audio/wind.rs).
+        a.wind(if let Phase::World(w) = &self.phase { w.wind_level } else { None });
         if let Phase::World(w) = &mut self.phase {
             for (mask, level, ticks) in w.audio_cmds.drain(..) {
                 a.event_volume(mask, level, ticks);
@@ -10566,6 +10620,8 @@ impl App {
                             zoning_since: None,
                             zone_touch: None,
                             zone_hold: None,
+                            fading_in: false,
+                            soft_zoning: false,
                             call_gate: HashMap::new(),
                             preload: None,
                             roe_timed: 0,
@@ -10659,6 +10715,11 @@ impl App {
                             stamp_all_lines: false,
                             skillchain: Default::default(),
                             lamps: Default::default(),
+                            night: Default::default(),
+                            night_halos: None,
+                            storm: Default::default(),
+                            snow: None,
+                            wind_level: None,
                             shadow_slots: Default::default(),
                             target_since: Instant::now(),
                             cam_turn: (0.0, 0.0),
@@ -10833,6 +10894,7 @@ impl App {
                             carriers: Default::default(),
                             event_voices: false,
                             event_looks: Vec::new(),
+                            previews: Default::default(),
                             fx_models: HashMap::new(),
                             costumes: HashMap::new(),
                             costume_base: HashMap::new(),
@@ -13285,7 +13347,7 @@ impl App {
             self.zone_loaded(zone_id, map_no, Ok(r.data), Some(r.gpu));
         }
         let want = match &mut self.phase {
-            Phase::World(w) => preload::step(w),
+            Phase::World(w) => preload::step(w, self.cfg.zone_preload),
             _ => None,
         };
         if let Some((zone_id, map_no)) = want {
@@ -14087,13 +14149,27 @@ impl App {
             && world.zone_uploading.is_none()
             && !lift_wait;
         // A zone change's fade to black runs to the end before the new zone fades in.
-        let target = if ready && !world.unsettled && world.zone_hold.is_none() { 0.0 } else { 1.0 };
+        // Soft (Settings' Zone Changes, ours): the held frame is the screen meanwhile, so the fade runs on under it.
+        let soft = self.cfg.soft_zoning;
+        world.soft_zoning = soft;
+        // Settings' Weather Modern (client/storm.rs): a weather the zone has no effects for takes its kin's.
+        world.effects.weather_kin = self.cfg.modern_weather;
+        let held = world.zone_hold.is_some() && !soft;
+        let target = if ready && !world.unsettled && !held { 0.0 } else { 1.0 };
+        world.fading_in = target == 0.0;
         if target > world.fade {
             world.fade = (world.fade + dt / 0.4).min(1.0);
         } else if target < world.fade {
             world.fade = (world.fade - dt / 0.6).max(0.0);
         }
-        zonefade::step(&mut world.zone_hold, world.zoning_since.is_some(), world.last_camera.is_some(), world.fade);
+        zonefade::step(
+            &mut world.zone_hold,
+            world.zoning_since.is_some(),
+            world.last_camera.is_some(),
+            world.fade,
+            soft,
+            world.fading_in,
+        );
         if world.unsettled && world.in_scene() {
             if let Some(y) = world.ground.as_ref().and_then(|g| g.settle(world.pos.x, world.pos.z, world.pos.y)) {
                 log::info!("settled from y {:.2} to {:.2}", world.pos.y, y);
@@ -15611,6 +15687,7 @@ impl App {
         if let Some(m) = &self.modern {
             m.set_opacity(self.cfg.modern_opacity);
             m.theme.set_timeless(self.cfg.modern_ui && self.cfg.timeless_ui);
+            m.set_mod_zoom(self.cfg.modern_mod_scale);
         }
         let tl = self.timeless_title();
         if let Some(gu) = self.game_ui.as_mut() {
@@ -15695,6 +15772,8 @@ impl App {
                     self.game_ui_state = LoadState::Idle;
                     self.flyover_state = LoadState::Idle;
                     self.cfg.installed = true;
+                    // TimelessXI: the new game gets the Timeless patches (and the required mods) before it is read.
+                    timeless::start(&mut self.cfg);
                     // From the fixed first-start window to the configured one.
                     self.window_dirty = true;
                     if let Err(e) = self.cfg.save() {
@@ -16167,6 +16246,22 @@ impl App {
                     {
                         self.viewer_asked = true;
                         self.update_ui = Some(updater::UpdateUi::open(s, self.cfg.ffxi_dir()));
+                    }
+                    // TimelessXI: a newer TimelessXI client installs itself on the title screen (signed with
+                    // TimelessXI's key, as by the Update button) and the client restarts into it, once a run, so an
+                    // out-of-date build never reaches the login. Game files still wait for the Update button.
+                    let client_newer = self
+                        .updates
+                        .as_ref()
+                        .is_some_and(|s| matches!(s.lock().unwrap().client, updater::Client::Available(_)));
+                    if client_newer
+                        && !self.client_update_started
+                        && self.update_ui.is_none()
+                        && let Some(s) = self.updates.clone()
+                    {
+                        self.client_update_started = true;
+                        log::info!("update: a newer TimelessXI client is out; installing it");
+                        self.update_ui = Some(updater::UpdateUi::open_client_only(s, self.cfg.ffxi_dir()));
                     }
                     match chosen.filter(|_| self.login_error.is_none()) {
                         Some(LoginChoice::Exit) => self.exit_requested = true,
@@ -19551,6 +19646,7 @@ fn world_frame(cx: &mut WorldDraw, gfx: &mut Gfx, g: &mut FrameGpu, w: &mut Worl
     if let Some(mut r) = w.renderer.take() {
         world_uploads(gfx, g, w, &mut r, &wf);
         world_lighting(cx, w, &mut r, &wf);
+        night_frame(cx, gfx, w, &mut r, &wf);
         cross_capture(cx, gfx, g, w, &mut r, &wf);
         pose_actors(gfx, g, w, &mut r, &mut wf);
         let shadow_modes = shadow_setup(cx, gfx, g, w, &mut r, &mut wf);
@@ -19558,6 +19654,12 @@ fn world_frame(cx: &mut WorldDraw, gfx: &mut Gfx, g: &mut FrameGpu, w: &mut Worl
         draw_effects(cx, gfx, g, w, &mut r, &wf);
         world_overlays(cx, gfx, g, w, &mut r, &wf);
         w.renderer = Some(r);
+    } else if let (Some(zonefade::Soft::Alone(level)), Some(fx)) =
+        (zonefade::soft(w.zone_hold, w.soft_zoning, w.fade, w.fading_in), &cx.screen_fx_zone)
+    {
+        // Soft zone changes (ours): no renderer while the next zone loads, so the held frame is all there is.
+        fx.draw_held_dim(&gfx.gpu, &mut g.encoder, &g.scene_raw, level);
+        g.drew_world = true;
     }
     w.frame = wf;
 }
@@ -19687,6 +19789,10 @@ fn world_prepare(cx: &mut WorldDraw, gfx: &Gfx, fg: &mut FrameGpu, w: &mut World
     if let Some(l) = &w.event {
         idles.clone_from(&l.st.idle);
     }
+    // The mods' model previews: new ones asked for, old ones dropped (client/preview.rs).
+    let previews: Vec<(u32, f32, f32)> =
+        w.lua.portraits_wanted().iter().filter(|p| preview::is(p.entity)).map(|p| (p.entity, p.turn, p.spin)).collect();
+    preview::update(w, &previews);
     // Placements first (look targets read other actors), then each actor's motion and pose.
     let my_dir = w.net.me.lock().map(|m| m.dir).unwrap_or(0);
     places.extend(w.actors.keys().filter_map(|id| actor_place(w, *id, my_dir).map(|p| (*id, p))));
@@ -19797,23 +19903,21 @@ fn world_prepare(cx: &mut WorldDraw, gfx: &Gfx, fg: &mut FrameGpu, w: &mut World
         None
     };
     let ev_clock = event::clock(w);
-    // The Lua HUD's portraits: each wanted actor's face camera (client/portrait.rs).
-    portrait_cams.extend(
-        w.lua
-            .portraits_wanted()
-            .into_iter()
-            .take(portrait::SLOTS)
-            .filter_map(|p| Some((p, portrait::camera(w, places, p.entity, p.look.oval)?))),
-    );
+    // The Lua HUD's portraits: each wanted actor's face camera, or its whole body (client/portrait.rs).
+    portrait_cams.extend(w.lua.portraits_wanted().into_iter().take(portrait::SLOTS).filter_map(|p| {
+        let cam = if p.body || preview::is(p.entity) {
+            portrait::camera_body(w, places, p.entity, p.look.oval)
+        } else {
+            portrait::camera(w, places, p.entity, p.look.oval)
+        };
+        Some((p, cam?))
+    }));
     (wf.dt, wf.camera, wf.new_lamps, wf.ev_clock) = (dt, camera, new_lamps, ev_clock);
 }
 
 /// This frame's uploads: the zone and the models actors wait for, under the frame's budget.
 fn world_uploads(gfx: &Gfx, fg: &mut FrameGpu, w: &mut World, r: &mut ZoneRenderer, wf: &WorldFrame) {
-    let WorldFrame { new_lamps, .. } = wf;
-    if let Some(l) = &new_lamps {
-        r.set_lamps(&gfx.gpu, &l.iter().map(|l| (l.pos, l.slot)).collect::<Vec<_>>());
-    }
+    let _ = wf;
     // This frame's copies: a zone going up (more while its indicator hides the world), then the models
     // actors are waiting for.
     use crate::render::upload::{FRAME_MS, LOADING_MS};
@@ -19831,6 +19935,79 @@ fn world_uploads(gfx: &Gfx, fg: &mut FrameGpu, w: &mut World, r: &mut ZoneRender
         w.zone_uploading = None;
         w.downloading = None;
     }
+}
+
+/// Breaths drawn at most at once (the nearest).
+const MOUTHS: usize = 40;
+
+/// The idle motions that breathe: standing, at ease, and the battle stance.
+const BREATHING: [&str; 6] = ["idl", "id1", "dft", "df1", "btl", "bt1"];
+
+/// Where `a` is in its breathing this frame (client/storm.rs Rhythm): while its body plays an idle, read once per
+/// motion off the skeleton posed at 32 frames of the cycle (the head bone, the highest at rest), then followed by
+/// the motion's frame. None while it walks, fights a swing, or its idle doesn't rise and fall.
+fn breath_sync(ch: &crate::dat::character::Character, a: &mut Actor) -> Option<(f32, f32)> {
+    let e = a.q.regions[0].last().filter(|e| e.count == 0 && e.weight > 0.99)?;
+    let anim = e.anim.anim(ch)?;
+    if !BREATHING.iter().any(|n| anim.name.starts_with(n)) {
+        return None;
+    }
+    let frames = if e.end > 0.0 { e.end } else { e.frames };
+    let key = std::sync::Arc::as_ptr(&anim.tracks) as *const u8 as usize;
+    if a.rhythm.is_none_or(|r| r.key != key) {
+        let rest = crate::dat::character::pose(&ch.skeleton, &[]);
+        let head = rest.iter().enumerate().min_by(|x, y| x.1.t.y.total_cmp(&y.1.t.y)).map(|(i, _)| i)?;
+        // The other body regions' idle chunks pose with it, at the same point of their cycles.
+        let others: Vec<(&crate::dat::character::Animation, f32)> = a.q.regions[1..3]
+            .iter()
+            .filter_map(|l| l.last())
+            .filter_map(|o| o.anim.anim(ch).map(|x| (x, o.frames)))
+            .filter(|(x, _)| BREATHING.iter().any(|n| x.name.starts_with(n)))
+            .collect();
+        let heights: Vec<f32> = (0..32)
+            .map(|i| {
+                let f = frames * i as f32 / 32.0;
+                let mut set = vec![(anim, f)];
+                set.extend(others.iter().map(|&(x, n)| (x, n * i as f32 / 32.0)));
+                crate::dat::character::pose(&ch.skeleton, &set).get(head).map_or(0.0, |b| b.t.y)
+            })
+            .collect();
+        a.rhythm = Some(storm::Rhythm::read(key, &heights, frames));
+    }
+    a.rhythm?.now(e.frame, frames, 30.0 * e.speed * e.rate)
+}
+
+/// Who breathes where it is cold (client/storm.rs breath): our character and every character-looking entity
+/// (players, companions, trusts, townsfolk) within 25 yalms of the camera, nearest first; their mouths just below
+/// the top of their posed model, a little forward.
+fn breathers(w: &World, eye: Vec3) -> Vec<storm::Mouth> {
+    let mouth = |id: u32, pos: Vec3, yaw: f32, hard: bool| -> Option<storm::Mouth> {
+        let top = w.actors.get(&id).map(|a| a.top).filter(|t| *t < -0.2)?;
+        let fwd = Vec3::new(yaw.cos(), 0.0, -yaw.sin());
+        let sync = w.actors.get(&id).and_then(|a| a.breath_sync);
+        Some(storm::Mouth { id, pos: pos + Vec3::new(0.0, top * 0.9, 0.0) + fwd * 0.12, yaw, hard, sync })
+    };
+    let mut out: Vec<(f32, storm::Mouth)> = Vec::new();
+    let me_yaw = event::rad_of(w.net.me.lock().map_or(0, |m| m.dir));
+    if w.zone.is_some()
+        && let Some(m) = mouth(w.my_id, w.pos, me_yaw, w.my_motion.status == 1)
+    {
+        out.push((w.pos.distance(eye), m));
+    }
+    for (&id, e) in &w.entities {
+        if e.appearance.is_none() || e.flags & 2 != 0 || id == w.my_id {
+            continue;
+        }
+        let d = e.pos.distance(eye);
+        if d > 25.0 {
+            continue;
+        }
+        if let Some(m) = mouth(id, e.pos, e.yaw, e.motion.status == 1) {
+            out.push((d, m));
+        }
+    }
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    out.into_iter().take(MOUTHS).map(|(_, m)| m).collect()
 }
 
 /// The zone's lighting for the hour and weather: the eased env, the shadows' level, the draw distance and the
@@ -19868,6 +20045,15 @@ fn world_lighting(cx: &WorldDraw, w: &mut World, r: &mut ZoneRenderer, wf: &Worl
                 })
                 .collect(),
         };
+        // Settings' Weather Modern (client/storm.rs): a weather the zone's file has no light for takes its kin's.
+        let modern = cx.cfg.modern_weather;
+        let pick = |t: &'static str| -> &'static str {
+            match storm::lighter(t) {
+                Some(k) if modern && !zw.has(t) && zw.has(k) => k,
+                _ => t,
+            }
+        };
+        let chain: Vec<(&'static str, f32)> = chain.into_iter().map(|(t, k)| (pick(t), k)).collect();
         let mix = |a: &dyn Fn(&str) -> Option<crate::dat::weather::Env>| -> Option<crate::dat::weather::Env> {
             let mut env = a(chain[0].0)?;
             for &(tag, t) in &chain[1..] {
@@ -19941,7 +20127,121 @@ fn world_lighting(cx: &WorldDraw, w: &mut World, r: &mut ZoneRenderer, wf: &Worl
             let e = sub.or_else(|| zw.areas.get(&k)).and_then(|a| mix(&|t| a.at(t, minute)));
             lights.push(e.map(|e| step(w.area_ease.entry((sub.is_some(), k)).or_default(), &e)));
         }
+        // Settings' Night Lighting Modern (client/night.rs): the night's grade over the zone's and the areas' light.
+        let (outdoor, fixed) = r.lighting.map_or((false, false), |l| (l.sky.is_some(), l.fixed));
+        let amount = night::amount(minute);
+        let k = night::strength(amount, cx.cfg.night_darkness as f32 / 100.0, outdoor, fixed);
+        w.night.sky = night::Sky { amount, outdoor, fixed, lit: r.lighting.is_some() };
+        if cx.cfg.night_lighting && k > 0.0 {
+            let moon = night::moon(w.clock.map_or(6, |(t, at)| night::moon_phase(t, at.elapsed().as_secs_f32())));
+            if let Some(l) = r.lighting.as_mut() {
+                night::grade(l, k, moon);
+            }
+            for l in lights.iter_mut().flatten() {
+                night::grade(l, k, moon);
+            }
+        }
+        // Settings' Weather Modern (client/storm.rs): the storm eased, and its whiteout over the light.
+        let on = cx.cfg.modern_weather;
+        w.storm.frame(&storm::Frame {
+            on,
+            dt,
+            weather: ev_weather.unwrap_or(w.weather),
+            zone: w.zone,
+            outdoor: outdoor && !fixed,
+            covered: w.effects.covered(),
+        });
+        if on && w.storm.level > 0.0 {
+            if let Some(l) = r.lighting.as_mut() {
+                w.storm.grade(l);
+            }
+            for l in lights.iter_mut().flatten() {
+                w.storm.grade(l);
+            }
+        }
+        r.weather = w.storm.uniform(on);
+        w.wind_level = w.storm.wind_level(on);
         r.set_area_lights(lights);
+    } else {
+        w.night.sky = night::Sky::default();
+        r.weather = [0.0; 4];
+        w.wind_level = None;
+    }
+}
+
+/// Settings' Night Lighting (client/night.rs), after the zone's light: the placed lights (the mods', the player's own,
+/// fire furniture), the lamps' levels and halos, the slots' scale, and the lamps and lights for the scenery.
+fn night_frame(cx: &WorldDraw, gfx: &Gfx, w: &mut World, r: &mut ZoneRenderer, wf: &WorldFrame) {
+    let on = cx.cfg.night_lighting;
+    let (mods, zones) = if on && w.lua.started() { w.lua.night_wants() } else { (Vec::new(), Vec::new()) };
+    let me = w.zone.is_some().then_some(w.pos);
+    // The mods' lights at their points: an entity by server id or target index (as game.entity), the player too.
+    let mod_lights: Vec<(night::Light, bool)> = mods
+        .iter()
+        .filter_map(|m| {
+            let base = match m.at {
+                night::Where::Point(p) => p,
+                night::Where::Entity(key) if key == w.my_id || key == u32::from(w.my_index) => me?,
+                night::Where::Entity(key) => {
+                    w.entities
+                        .get(&key)
+                        .or_else(|| u16::try_from(key).ok().and_then(|i| w.entity_at(i)).map(|(_, e)| e))?
+                        .pos
+                }
+            };
+            let light = night::Light {
+                pos: base + Vec3::new(0.0, -m.height, 0.0),
+                colour: m.colour,
+                range: m.range,
+                intensity: m.intensity,
+                halo: m.halo,
+            };
+            Some((light, m.night_only))
+        })
+        .collect();
+    // The Mog House's fire furniture (campfires, hearths, lamps): each piece's item from the inventory.
+    let fires: Vec<(Vec3, u16, f32)> = if on {
+        w.furniture
+            .drawn_items()
+            .filter_map(|(key, matrix, height)| {
+                let item = w.inv.slots.get(&(key.1, key.0)).map(|s| s.0)?;
+                night::furniture_light(item)?;
+                Some((matrix.w_axis.truncate(), item, height))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let new_lamps = wf.new_lamps.is_some();
+    let scenery = w.night.frame(&night::Frame {
+        on,
+        own_light: cx.cfg.own_light,
+        dt: wf.dt,
+        lamps: &w.lamps.list,
+        glows: &w.lamps.glows,
+        first: w.effects.reg.light_keys.len() as u32,
+        new_lamps,
+        mod_lights: &mod_lights,
+        zones: &zones,
+        me,
+        fires: &fires,
+    });
+    if let Some((all, quiet)) = scenery {
+        r.set_lamps(&gfx.gpu, &all, quiet);
+    }
+    r.night = w.night.uniform(on);
+    for (k, v) in w.night.scale.iter().enumerate().take(crate::render::LIGHTS) {
+        r.slot_scale[k] = *v;
+    }
+    // What render.night and render.lamps answer.
+    if w.lua.started() {
+        let levels: Vec<[f32; 4]> = w
+            .lamps
+            .glows
+            .iter()
+            .map(|g| [g.pos.x, g.pos.y, g.pos.z, g.slot.map_or(1.0, |s| w.night.level(s))])
+            .collect();
+        w.lua.set_night((on, w.night.sky.amount, cx.cfg.night_darkness as f32 / 100.0), levels);
     }
 }
 
@@ -20368,6 +20668,7 @@ fn pose_actors(gfx: &Gfx, fg: &mut FrameGpu, w: &mut World, r: &mut ZoneRenderer
             a.top = crate::render::character::skinned_top(&ch, &a.rest) * a.scale;
             a.top_key = "rest".into();
         }
+        a.breath_sync = if w.storm.cold > 0.0 { breath_sync(&ch, a) } else { None };
         // CPU bones only where they are read: the locked camera (player bone 13, target bone 5), first
         // person, and the attach points of actors with live effects.
         // FUN_10029320: a drawn weapon's carry bone rides its grip; during the draw, once the motions that
@@ -20642,9 +20943,16 @@ fn pose_actors(gfx: &Gfx, fg: &mut FrameGpu, w: &mut World, r: &mut ZoneRenderer
         g.refract = refracts.get(id).filter(|_| r8 > 0.0).map(|&level| crate::render::Refract { level, r: r8 });
         // The flash runs only while the actor is drawn, in 60 Hz ticks whatever the frame rate.
         g.flash = if drawn { a.flash.step(w.target == Some(*id), dt * 60.0) } else { flash::NONE };
+        // Snow settles on it while it stands in the snow, and comes off as it moves, swings or casts.
+        let moved = a.snow_at.map_or(0.0, |p| (p - pos).with_y(0.0).length());
+        // A jump across the map (a warp, a zone) is no running.
+        let speed = if dt > 0.0 && moved < 10.0 { moved / dt } else { 0.0 };
+        a.snow = w.storm.settle(w.storm.on, a.snow, dt, speed, a.oneshot.is_some() || a.play.is_some());
+        a.snow_at = Some(pos);
+        g.snow = a.snow;
         // The floor's lights (retail copies them at the ground probe, every 121 updates).
         g.lights = w.ground.as_ref().map_or([0; 4], |gr| gr.lights(pos));
-        lamps::offer(&w.lamps.list, pos, &mut g.lights);
+        lamps::offer(&w.night.offer, pos, &mut g.lights);
         g.area = actor_area(w.entities.get(id), w.ground.as_ref().and_then(|gr| gr.area(pos))).unwrap_or(0);
         g.bg_lit = a.bg_lit;
         // The cloth (stepped on the GPU from the pose, render/cloth.rs; client/cloth.rs the reference): a step
@@ -20877,18 +21185,23 @@ fn draw_scene(
     // with +0xb2 bit 0 set (FUN_100c63d0's tests and the occlusion, not in `visible`) is not drawn either;
     // ours is never culled by them, nor are actors without a skeleton (props, ships).
     let culled = |id: &u32, a: &Actor| a.character.is_some() && *id != w.my_id && !w.visible.contains(id);
+    // A model preview (client/preview.rs) is posed for its portrait only: never culled, never in the scene.
     let mut drawn: Vec<(u32, &crate::render::ActorGpu)> = w
         .actors
         .iter()
-        .filter(|(id, a)| !a.vanished() && !hidden.contains(id) && !far_out.contains(id) && !culled(id, a))
+        .filter(|(id, a)| {
+            !a.vanished() && (preview::is(**id) || (!hidden.contains(id) && !far_out.contains(id) && !culled(id, a)))
+        })
         .filter_map(|(id, a)| Some((*id, a.gpu.as_ref()?)))
         .filter(|(_, g)| g.alpha >= 1e-4)
         .collect();
     // One order every frame (a map's order changes with each new map): which overlapping edges blend over
     // which, and which actors take the 64 shine and fade slots, stay put.
     drawn.sort_unstable_by_key(|d| d.0);
-    let actors: Vec<&crate::render::ActorGpu> = drawn.iter().map(|d| d.1).collect();
+    let actors: Vec<&crate::render::ActorGpu> = drawn.iter().filter(|d| !preview::is(d.0)).map(|d| d.1).collect();
     let drawn_map: HashMap<u32, &crate::render::ActorGpu> = drawn.into_iter().collect();
+    let scene_map: HashMap<u32, &crate::render::ActorGpu> =
+        drawn_map.iter().filter(|(id, _)| !preview::is(**id)).map(|(id, g)| (*id, *g)).collect();
     fg.counts = perf::Counts {
         entities: w.entities.len(),
         actors: w.actors.len(),
@@ -20960,7 +21273,7 @@ fn draw_scene(
         r.set_shadow_texture(&gfx.gpu, &t, scene_fmt);
     }
     if let Some(g) = w.ground.as_ref() {
-        let casters = shadows::casters(&mut w.shadow_slots, g, shadow_modes, &drawn_map);
+        let casters = shadows::casters(&mut w.shadow_slots, g, shadow_modes, &scene_map);
         let sun = r.lighting.map_or([0.0; 4], |l| [l.actor_dir.x, l.actor_dir.y, l.actor_dir.z, 1.0]);
         perf::timed(
             || "shadows".into(),
@@ -21004,13 +21317,13 @@ fn draw_effects(
     let (bg, aspect, scene_fmt) = (fg.bg, fg.aspect, fg.scene_fmt);
     let (scene_depth, scene_tex, scene_raw) = (fg.scene_depth.clone(), fg.scene_tex.clone(), fg.scene_raw.clone());
     let (dt, ev_clock) = (wf.dt, wf.ev_clock);
-    let WorldFrame { camera, model_hidden, places, drops, new_lamps, .. } = wf;
+    let WorldFrame { camera, model_hidden, places, drops, .. } = wf;
     // Effect generators: CPU emission, the GPU update pass, then the elements over the scene.
     // Its pipelines are made while the zone still goes up (behind the loading indicator), not on the
     // first shown frame.
     let eg = cx.effects_gpu.get_or_insert_with(|| crate::render::effects::EffectsGpu::new(&gfx.gpu, scene_fmt));
-    if let Some(l) = &new_lamps {
-        eg.set_lamps(&gfx.gpu, &l.iter().map(|l| (l.pos, l.slot, l.template, l.colour)).collect::<Vec<_>>());
+    if let Some((lamps, placed)) = w.night.upload.take() {
+        eg.set_lamps(&gfx.gpu, &lamps, &placed);
     }
     if !eg.has_dmgnum()
         && let Some((lib, image)) = cx.game_ui.as_ref().and_then(|g| g.dmgnum())
@@ -21183,6 +21496,65 @@ fn draw_effects(
         late_one(&mut *r, &mut fg.encoder, l);
     }
     r.defer_faded = false;
+    // Settings' Weather Modern: breath in the cold, the falling snow, then the frost at the screen's edges
+    // (render/snow.rs).
+    let flakes = w.storm.flakes();
+    let frost = if cx.cfg.screen_frost { w.storm.frost } else { 0.0 };
+    let puffs = if cx.cfg.modern_weather && w.storm.cold > 0.0 {
+        w.storm.breath(&breathers(w, camera.eye))
+    } else {
+        Vec::new()
+    };
+    if cx.cfg.modern_weather && (flakes > 0.0 || frost > 0.0 || !puffs.is_empty()) && r.ready(&gfx.gpu) {
+        if w.snow.as_ref().is_none_or(|s| s.format() != scene_fmt) {
+            w.snow = Some(crate::render::snow::Snow::new(&gfx.gpu, scene_fmt));
+        }
+        if let Some(s) = w.snow.as_ref() {
+            // The flakes take the storm's air, brighter so they stand out against it (still dim at night).
+            let colour = r.lighting.map_or(Vec3::splat(0.9), |l| (l.fog * 1.35 + Vec3::splat(0.12)).min(Vec3::ONE));
+            let fall = crate::render::snow::Fall {
+                amount: flakes,
+                wind: w.storm.wind(),
+                drift: w.storm.drift,
+                gust: w.storm.gust,
+                seconds: w.storm.clock,
+                colour,
+                breath: (colour * 0.8 + Vec3::splat(0.26)).min(Vec3::ONE),
+            };
+            s.draw(
+                &gfx.gpu,
+                &mut fg.encoder,
+                &scene_raw,
+                &scene_depth,
+                (camera.view(), camera.view_proj(aspect)),
+                camera.eye,
+                &fall,
+                &puffs,
+                frost,
+                aspect,
+            );
+        }
+    }
+    // Settings' Night Lighting Modern: the lamps' halos over it all (render/halo.rs).
+    if cx.cfg.night_lighting && !w.night.halos.is_empty() && r.ready(&gfx.gpu) {
+        if w.night_halos.as_ref().is_none_or(|h| h.format() != scene_fmt) {
+            w.night_halos = Some(crate::render::halo::Halos::new(&gfx.gpu, scene_fmt));
+        }
+        if let Some(h) = w.night_halos.as_mut() {
+            h.draw(
+                &gfx.gpu,
+                &mut fg.encoder,
+                &scene_raw,
+                &scene_depth,
+                &r.lights,
+                camera.view(),
+                camera.view_proj(aspect),
+                w.night.sky.amount,
+                w.night.clock,
+                &w.night.halos,
+            );
+        }
+    }
 }
 
 /// An actor draw_effects draws among the effects, with its uniform slot.
@@ -21224,13 +21596,18 @@ fn world_overlays(
             &want,
         );
     }
-    // A zone change's held frame under the fade to black (the camera has moved on).
+    // A zone change's held frame under the fade to black (the camera has moved on); soft (ours): the held frame alone,
+    // dimmed almost to black, while the new zone loads, then (still that dark) over it as the new zone fades in.
     if let (Some(_), Some(fx)) = (w.zone_hold.filter(|h| h.captured), &cx.screen_fx_zone) {
-        fx.draw_held(&gfx.gpu, &mut fg.encoder, &scene_raw, 1.0);
+        match zonefade::soft(w.zone_hold, w.soft_zoning, w.fade, w.fading_in) {
+            Some(zonefade::Soft::Alone(level)) => fx.draw_held_dim(&gfx.gpu, &mut fg.encoder, &scene_raw, level),
+            Some(zonefade::Soft::Over(a)) => fx.draw_held(&gfx.gpu, &mut fg.encoder, &scene_raw, a, zonefade::DIM),
+            None => fx.draw_held(&gfx.gpu, &mut fg.encoder, &scene_raw, 1.0, 0.0),
+        }
     }
     // Event crossfade, the effect flash and feedback blur, and the fades over the scene, under the 2D layer;
     // the zoning fade as a multiply too.
-    let (cross, m) = (w.screen.cross_alpha(), w.screen.multiply().map(|c| c * (1.0 - w.fade)));
+    let (cross, m) = (w.screen.cross_alpha(), w.screen.multiply().map(|c| c * w.zone_level()));
     let (flash, blur) = (w.screen.flash(w.effects.flash), w.screen.blur());
     if cross.is_some() || flash.is_some() || blur.is_some() || m.iter().any(|c| (c - 1.0).abs() > 0.005) {
         let fx = cx.screen_fx_world.get_or_insert_with(|| crate::render::screenfx::ScreenFx::new(&gfx.gpu, scene_fmt));
@@ -21282,7 +21659,7 @@ impl ApplicationHandler for App {
         }
         // Hidden (and on Wayland unmapped, nothing being presented) until the title can draw. Driven test runs
         // don't ask for focus and say so in the title, so they never take the user's keyboard.
-        let title = if self.drive.driven() { "FINAL FANTASY XI [test]" } else { "FINAL FANTASY XI" };
+        let title = if self.drive.driven() { "TimelessXI [test]" } else { "TimelessXI" };
         // No game files yet: the first-start window is a fixed size, whatever the config says.
         let bootstrap = firstrun::needed(&self.cfg.ffxi_dir());
         let [ww, wh] = if bootstrap { firstrun::WINDOW } else { self.cfg.window_size() };
@@ -21977,13 +22354,21 @@ fn minus_pressed(events: &[egui::Event]) -> bool {
     events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::Minus, pressed: true, .. }))
 }
 
-pub fn run(cfg: Config, drive: Drive) -> Result<()> {
+pub fn run(mut cfg: Config, drive: Drive) -> Result<()> {
     if desktop::supported()
         && let Err(e) = desktop::settle()
     {
         log::warn!("installing the client copy: {e:#}");
     }
     crate::patch::adopt_old_ffximain(&cfg.ffxi_dir());
+    // TimelessXI: the Timeless patches and the required mods, before the game files and the Lua mods are read (a
+    // test drive only with FFXI_UPDATE_CHECK, as the update check).
+    if (drive.login.is_none() || std::env::var_os("FFXI_UPDATE_CHECK").is_some())
+        && timeless::start(&mut cfg)
+        && let Err(e) = cfg.save()
+    {
+        log::warn!("saving the config: {e:#}");
+    }
     let event_loop = EventLoop::new()?;
     let mut app = App::new(cfg, drive);
     event_loop.run_app(&mut app)?;

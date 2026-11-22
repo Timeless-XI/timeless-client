@@ -120,6 +120,8 @@ pub struct Modern {
     lobby_text: std::cell::Cell<f32>,
     /// The windows' background opacity (config `modern_opacity`).
     opacity: std::cell::Cell<f32>,
+    /// How big mods' canvases are drawn (config `modern_mod_scale` / 100).
+    mod_zoom: std::cell::Cell<f32>,
     /// The panel a drag has really moved (show): a press alone moves nothing.
     dragging: std::cell::RefCell<Option<String>>,
     /// How menu rows look (rows.rs), and window borders (borders.rs).
@@ -229,6 +231,7 @@ impl Modern {
             dragging: Default::default(),
             lobby_text: Default::default(),
             opacity: std::cell::Cell::new(0.85),
+            mod_zoom: std::cell::Cell::new(1.0),
             row_style: Default::default(),
             border_style: Default::default(),
             images: Default::default(),
@@ -284,6 +287,15 @@ impl Modern {
     }
 
     /// The windows' background opacity from the config (Settings' Panel Opacity).
+    pub fn set_mod_zoom(&self, percent: u32) {
+        self.mod_zoom.set((percent as f32 / 100.0).clamp(0.5, 3.0));
+    }
+
+    /// How big mods' canvases are drawn: a canvas unit is this many points.
+    pub(super) fn mod_zoom(&self) -> f32 {
+        self.mod_zoom.get()
+    }
+
     pub fn set_opacity(&self, o: f32) {
         self.opacity.set(o.clamp(0.1, 1.0));
     }

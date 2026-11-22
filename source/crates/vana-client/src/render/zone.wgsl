@@ -30,6 +30,13 @@ struct Uniforms {
     modes: vec4<f32>,
     // Windowed mode's light boost (render light_boost, FUN_1000be50): rgb factors, w = 1 on.
     boost: vec4<f32>,
+    // Ours (Settings' Night Lighting, client/night.rs): x 1 Modern (0 Original: retail's lights, the rest unused),
+    // y seconds (the fire flicker), z how far into the night (0 day .. 1).
+    night: vec4<f32>,
+    // Ours, with night.x: each table slot's light scaled (the lamplighter's lamps, the lamps brighter at night).
+    slot_scale: array<vec4<f32>, 64>,
+    // Ours (Settings' Weather Modern, client/storm.rs): x the snow on the ground (0 none), y the gust, z the storm.
+    weather: vec4<f32>,
 };
 
 // FUN_1000bf30 -> FUN_1000be50 on every SetLight while windowed: a diffuse colour all of whose parts are below 0.8 is
@@ -154,7 +161,24 @@ struct VertexOut {
     @location(11) range: f32,
     // Scenery: the transformed normal's length, which scales every N.L (NORMALIZENORMALS off); 1 for actors.
     @location(12) nscale: f32,
+    // Actors: the snow settled on them (client/storm.rs settle, 0..1); 0 for scenery.
+    @location(13) @interpolate(flat) snow: f32,
 };
+
+// Ours (Night Lighting Modern): a point light's intensity (the table's, plights[2 (s - 1) + 1].w) for slot s + 1,
+// scaled by its slot's level and, for a warm (firelight) colour, a flicker. Original: the table's as it is.
+fn lw(s: u32, c: vec4<f32>) -> f32 {
+    if (u.night.x < 0.5) {
+        return c.w;
+    }
+    let i = s - 1u;
+    var k = u.slot_scale[i / 4u][i % 4u];
+    if (c.r > c.b * 1.3 && c.r > 0.0) {
+        let f = f32(i);
+        k = k * (1.0 + 0.07 * sin(u.night.y * 7.7 + f * 1.93) + 0.04 * sin(u.night.y * 17.3 + f * 4.1));
+    }
+    return c.w * k;
+}
 
 // FUN_100c94a0: of the floor's lights, the strongest w = 1 / max(d^2 Att2, 1e-4) at the actor's position within
 // its range (an unlit one competes too), as a directional light from the lamp: C x w x max(N.L, 0).
@@ -170,7 +194,10 @@ fn actor_lamp(packed: u32, pos: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
         let l = a.xyz - pos;
         let d2 = dot(l, l);
         if (sqrt(d2) > a.w) { continue; }
-        let att2 = select(1.0, 1.0 / c.w, c.w > 0.0);
+        let cw = lw(s, c);
+        // A lamp put out (Modern: its slot at 0) gives no light, nor takes the place of one that does.
+        if (u.night.x > 0.5 && cw <= 0.0) { continue; }
+        let att2 = select(1.0, 1.0 / cw, cw > 0.0);
         let wt = 1.0 / max(d2 * att2, 1e-4);
         if (wt > best) {
             best = wt;
@@ -200,7 +227,7 @@ fn point_lights(lights: vec4<u32>, p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
         if (d2 >= r2) { continue; }
         let q = d2 / r2;
         let win = (1.0 - q * q) * (1.0 - q * q);
-        sum = sum + boost(c.rgb) * c.w * max(dot(n, l * inverseSqrt(max(d2, 1e-6))), 0.0) * win / max(d2, 1.0);
+        sum = sum + boost(c.rgb) * lw(s, c) * max(dot(n, l * inverseSqrt(max(d2, 1e-6))), 0.0) * win / max(d2, 1.0);
     }
     return sum;
 }
@@ -218,7 +245,7 @@ fn ff_points(lights: vec4<u32>, p: vec3<f32>, nt: vec3<f32>) -> vec3<f32> {
         let l = a.xyz - p;
         let d2 = max(dot(l, l), 1e-12);
         if (d2 > a.w * a.w) { continue; }
-        sum = sum + boost(c.rgb) * c.w * max(dot(nt, l) * inverseSqrt(d2), 0.0) / d2;
+        sum = sum + boost(c.rgb) * lw(s, c) * max(dot(nt, l) * inverseSqrt(d2), 0.0) / d2;
     }
     return sum;
 }
@@ -248,7 +275,7 @@ fn bump_points(lights: vec4<u32>, v: vec3<f32>, n: vec3<f32>, inv: mat3x3<f32>, 
         let r = (a.xyz - t) * inv - v;
         let d2 = max(dot(r, r), 1e-12);
         if (d2 > a.w * a.w) { continue; }
-        sum = sum + boost(c.rgb) * c.w * max(dot(r, n) * inverseSqrt(d2) / d2, 0.0);
+        sum = sum + boost(c.rgb) * lw(s, c) * max(dot(r, n) * inverseSqrt(d2) / d2, 0.0);
     }
     return sum;
 }
@@ -402,6 +429,7 @@ fn skin(v: SkinIn) -> VertexOut {
     out.flash = pose[4].yz;
     out.point = actor_lamp(bitcast<u32>(pose[4].w), model[3].xyz, out.normal);
     out.area = u32(pose[5].x);
+    out.snow = fract(pose[5].x) / 0.98;
     out.tint = pose[5].yzw;
     out.nscale = 1.0;
     return out;
@@ -721,10 +749,48 @@ fn lit_zone(in: VertexOut, t: vec4<f32>) -> vec4<f32> {
     }
     // Every N.L takes the normal's length (NORMALIZENORMALS off).
     let lit = clamp(in.color.rgb * (ambient_rs(ambient) / 255.0 + in.nscale * (direct + point_lights(in.lights, in.world, n))) + in.point, vec3<f32>(0.0), vec3<f32>(1.0));
-    let rgb = clamp(to_gamma(t.rgb) * lit * 2.0, vec3<f32>(0.0), vec3<f32>(1.0));
+    var rgb = clamp(to_gamma(t.rgb) * lit * 2.0, vec3<f32>(0.0), vec3<f32>(1.0));
+    rgb = snow_cover(rgb, lit, n, in.world);
     let f = clamp((fog.y - d) / (fog.y - fog.x), 0.0, 1.0);
     let c = mix(fog_color, rgb, f);
     return vec4<f32>(select(pow(c, vec3<f32>(2.2)), c, u.fog.z > 0.5), 1.0);
+}
+
+// Ours (client/storm.rs): snow built up on what faces the sky (y is down: the up normal is -y), more as it builds,
+// patchy at the edges; lit as the surface is (white under the same light).
+fn snow_cover(rgb: vec3<f32>, lit: vec3<f32>, n: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
+    let k = u.weather.x;
+    if (k <= 0.0) {
+        return rgb;
+    }
+    let up = clamp(-n.y, 0.0, 1.0);
+    let speck = fract(sin(dot(floor(world.xz * 1.7), vec2<f32>(12.9898, 78.233))) * 43758.547);
+    // As it builds, steeper ground takes it too (rock faces stay bare), and it covers more fully.
+    let lo = mix(0.9, 0.3, k);
+    let cover = smoothstep(lo, lo + 0.16, up + (speck - 0.5) * 0.12) * smoothstep(0.0, 0.5, k);
+    let white = clamp(lit * vec3<f32>(0.95, 0.97, 1.0) * 1.12, vec3<f32>(0.0), vec3<f32>(1.0));
+    return mix(rgb, white, cover);
+}
+
+// Ours (client/storm.rs settle): a fine dusting of snow on a character, as much as has settled on them (`s`): loose
+// grains on what faces the sky, thickest across the shoulders and the tops of things, thinning down the sides, never
+// a solid cap. The grain follows the mesh (its texture coordinates), so it stays put as they move.
+fn grain(p: vec2<f32>) -> f32 {
+    return fract(sin(dot(p, vec2<f32>(12.9898, 78.233))) * 43758.547);
+}
+
+fn snow_dust(rgb: vec3<f32>, lit: vec3<f32>, n: vec3<f32>, uv: vec2<f32>, s: f32) -> vec3<f32> {
+    if (s <= 0.002) {
+        return rgb;
+    }
+    let up = clamp(-n.y, 0.0, 1.0);
+    let face = smoothstep(0.25, 0.9, up);
+    let g = grain(floor(uv * 160.0)) * 0.55 + grain(floor(uv * 64.0) + vec2<f32>(17.0, 3.0)) * 0.45;
+    let dens = face * s;
+    // More grains as it settles, each only partly white: a dusting, not a pile.
+    let cover = smoothstep(1.0 - dens * 0.9, 1.05 - dens * 0.9, g) * (0.3 + 0.35 * dens);
+    let white = clamp(lit * vec3<f32>(0.95, 0.97, 1.0) * 1.1, vec3<f32>(0.0), vec3<f32>(1.0));
+    return mix(rgb, white, cover);
 }
 
 // Config 0017's type-3 meshes (FUN_10175ac0 case 3, ps.1.1 at 0x1036b264): the normal map against the interpolated
@@ -792,7 +858,8 @@ fn lit_actor(in: VertexOut, t: vec4<f32>) -> vec4<f32> {
     let ga = select(min(floor(amb * 255.0 * mf) / 255.0, vec3<f32>(1.0)), amb, cloth);
     let em = select(0.0, max(mf - 1.5, 0.0), cloth);
     let lit = clamp((ga + 0.5 * mf * (color * ndl + in.point)) * in.tint + em, vec3<f32>(0.0), vec3<f32>(1.0));
-    let rgb = clamp(to_gamma(t.rgb) * lit * 2.0, vec3<f32>(0.0), vec3<f32>(1.0));
+    var rgb = clamp(to_gamma(t.rgb) * lit * 2.0, vec3<f32>(0.0), vec3<f32>(1.0));
+    rgb = snow_dust(rgb, lit, normalize(in.normal), in.uv, in.snow);
     let f = clamp((fog.y - in.depth) / (fog.y - fog.x), 0.0, 1.0);
     let c = mix(fog_color * in.flash.y, rgb, f);
     return vec4<f32>(select(pow(c, vec3<f32>(2.2)), c, u.fog.z > 0.5), 1.0);

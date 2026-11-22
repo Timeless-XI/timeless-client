@@ -34,7 +34,8 @@ pub(super) fn draw(
 ) {
     let host = &w.lua;
     let ppp = ctx.pixels_per_point();
-    host.set_modern_scale(Some(ppp));
+    // hud.screen's ui_scale takes in the Mod Interface Size, so HUD mods that size by it grow with it
+    host.set_modern_scale(Some(ppp * m.mod_zoom()));
     if !host.hud_shown() {
         return;
     }
@@ -81,7 +82,7 @@ fn element(
             } else {
                 FontFamily::Proportional
             };
-            let fid = FontId::new(m.theme.ui * size, family);
+            let fid = FontId::new(m.theme.ui * size * m.mod_zoom(), family);
             let colour = colour.map_or(m.theme.color("text"), rgba);
             let galley = painter.layout_no_wrap(text.clone(), fid, colour);
             let anchor = match align {

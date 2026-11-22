@@ -25,6 +25,11 @@ end
 | [`render.clear()`](#renderclear) | Clears every entity look the mod set. |
 | [`render.shader(id, wgsl?)`](#rendershader) | Adds, replaces or removes a post-process shader pass. |
 | [`render.shader_params(id, params)`](#rendershader_params) | Sets a shader pass's four parameter vectors. |
+| [`render.light(id, light?)`](#renderlight) | Puts a light in the world (Night Lighting Modern). |
+| [`render.lamp_zone(id, zone?)`](#renderlamp_zone) | Sets the zone's lamps near a point to a level, faded. |
+| [`render.clear_lights()`](#renderclear_lights) | Removes every light and lamp zone the mod set. |
+| [`render.lamps()`](#renderlamps) | The zone's lamps and their levels. |
+| [`render.night()`](#rendernight) | Whether Modern night lighting is on, and how far into the night it is. |
 | [`render.camera_distance()`](#rendercamera_distance) | The camera distance scale (1 the game's). |
 | [`render.set_camera_distance(scale)`](#renderset_camera_distance) | Sets the camera distance scale. |
 | [`render.camera()`](#rendercamera) | The camera's settings and where it is. |
@@ -52,7 +57,7 @@ how the game draws it.
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `hidden` | `boolean` | `false` | `true` hides the entity's model and its name plate. |
-| `name` | `string` | the entity's name | The name its plate shows. |
+| `name` | `string` | the entity's name | The name its plate and the target window show (TimelessXI build 8 and up for the target window); it can be longer than the game's own names. |
 | `name_colour` | `{r, g, b, a}` | the game's colour | The plate's colour, 0..255 per channel (named or positional; each defaults to 255). |
 | `alpha` | `number` | unchanged | Opacity 0..1 (clamped). The model is never drawn more opaque than the game would draw it. |
 | `tint` | `{r, g, b}` | unchanged | Multipliers for the model's colour, 1 = unchanged, e.g. `{1, 0.5, 0.5}` or `{g = 0.5, b = 0.5}` for reddish (named or positional; each defaults to 1). |
@@ -244,6 +249,120 @@ end)
 
 Only the numbers you give change: `{ {0.5} }` sets `post.p[0].x` and leaves the other fifteen as they were. Extra
 vectors or numbers past four are ignored.
+
+## `render.light`
+
+```lua
+render.light(id, light?) -> nothing
+```
+
+Puts a light in the world, or moves or changes the one your mod set under `id`; `nil` removes it. Lights show only
+while the player's Settings > Night Lighting is **Modern** (TimelessXI client build 7 and up): with **Original** the
+game's lighting is left exactly as it was and your lights are kept but not drawn. A light reaches the scenery and the
+characters near it as a lamp does, and a warm colour flickers like a flame.
+
+**Parameters**
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | yes | Your name for the light. |
+| `light` | `table` | no | The light (below); `nil` removes it. |
+
+**`light` fields**
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `x`, `y`, `z` | `number` | | Where it is (y points down: up is minus). |
+| `entity` | `integer` | | Instead of a point: follows an entity (server id or target index; ourselves too). |
+| `height` | `number` | `0` | Yalms above the point or the entity's feet. |
+| `colour` | `{r, g, b}` | warm | 0..255 each; 128 is the game's full colour, so 255 is about twice as bright. |
+| `range` | `number` | `8` | How far it reaches, in yalms (0.5..40). |
+| `intensity` | `number` | `10` | How bright (0..100); a street lamp is about 20. |
+| `halo` | `number` | `0` | The size of a soft glow drawn round it after dark, in yalms (0 none). |
+| `night_only` | `boolean` | `false` | Shines only after dark, fading in with the night. |
+
+**Returns** nothing.
+
+**Errors** No `x, y, z` and no `entity`; more than 128 lights in your mod.
+
+**Example**
+
+```lua
+-- A lantern carried by an NPC (target index 301), only at night.
+render.light("lantern", { entity = 301, height = 1.3, colour = { 255, 196, 120 }, range = 7, intensity = 7,
+  halo = 0.45, night_only = true })
+```
+
+The table has room for about 250 lights in a zone (its own first): lights past that are left out. Your lights are
+removed when your mod unloads.
+
+## `render.lamp_zone`
+
+```lua
+render.lamp_zone(id, zone?) -> nothing
+```
+
+Sets the zone's own lamps within a radius of a point to a level, faded over a few seconds, while Night Lighting is
+Modern; `nil` removes it and the lamps go back to the zone's own schedule. Where zones overlap the lowest level wins.
+
+**Parameters**
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | yes | Your name for the zone. |
+| `zone` | `table` | no | `{x, y, z, radius = 6, level = 1, fade = 1.5}`: level 0 (out) .. 1 (lit), fade in seconds. |
+
+**Returns** nothing.
+
+**Example**
+
+```lua
+-- A lamplighter: the lamps by the gate are out until he gets there.
+render.lamp_zone("gate", { x = -350, y = -10, z = -180, radius = 8, level = 0 })
+-- ... when he lights them:
+render.lamp_zone("gate", { x = -350, y = -10, z = -180, radius = 8, level = 1, fade = 2 })
+```
+
+## `render.clear_lights`
+
+```lua
+render.clear_lights() -> nothing
+```
+
+Removes every light and lamp zone your mod set. Other mods' stay.
+
+**Returns** nothing.
+
+## `render.lamps`
+
+```lua
+render.lamps() -> table[]
+```
+
+The zone's lamps (their glows) as last drawn: a list of `{x, y, z, level}`, level 0..1 as lamp zones set it (1 when
+none does). Empty before the zone's lamps are found.
+
+**Returns** a list of tables.
+
+## `render.night`
+
+```lua
+render.night() -> table
+```
+
+**Returns** `{modern, amount, darkness}`: `modern` true when Settings > Night Lighting is Modern (your lights and lamp
+zones show), `amount` how far into the night it is (0 by day, rising from 17:00 to 1 at 20:00, back to 0 by 7:00),
+`darkness` the player's Night Darkness (0..1).
+
+**Example**
+
+```lua
+if render.night().modern then
+  -- real lights
+else
+  -- draw a glow sprite instead
+end
+```
 
 ## `render.camera_distance`
 

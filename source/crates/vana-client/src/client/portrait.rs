@@ -61,6 +61,25 @@ pub(super) fn camera(w: &World, places: &HashMap<u32, Place>, id: u32, oval: boo
     Some(Camera { eye: centre + f * dist, target: centre, up: Vec3::NEG_Y, fov_y })
 }
 
+/// The camera on a whole actor (a mod's `body` portrait, a model preview): its full height in view, from a little to
+/// its right and slightly above, so a monster shows its shape (TimelessXI).
+pub(super) fn camera_body(w: &World, places: &HashMap<u32, Place>, id: u32, oval: bool) -> Option<Camera> {
+    let p = places.get(&id)?;
+    let a = w.actors.get(&id)?;
+    // y is down: the model's top is a.top above its feet (negative).
+    let span = a.top.abs().max(0.3);
+    let centre = Vec3::new(p.pos.x, p.pos.y - span * 0.5, p.pos.z);
+    let fov_y = 30f32.to_radians();
+    let dist = span * if oval { 0.78 } else { 0.68 } / (fov_y / 2.0).tan();
+    let f = Vec3::new(p.forward.x, 0.0, p.forward.z).normalize_or(Vec3::X);
+    // A three-quarter view: 35 degrees round from straight in front, the eye a tenth of its height above centre.
+    let side = Vec3::new(-f.z, 0.0, f.x);
+    let (s, c) = 35f32.to_radians().sin_cos();
+    let dir = (f * c + side * s).normalize_or(f);
+    let eye = centre + dir * dist + Vec3::new(0.0, -span * 0.1, 0.0);
+    Some(Camera { eye, target: centre, up: Vec3::NEG_Y, fov_y })
+}
+
 impl Portraits {
     /// Draws each wanted actor into a slot, a slot kept while its actor is wanted, and finishes it (backing, oval,
     /// frame). The ones drawn: entity -> (game UI image, modern UI texture).

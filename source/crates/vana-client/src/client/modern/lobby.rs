@@ -1350,7 +1350,7 @@ fn notes_layout(
                 gap(&mut y, size * 1.4);
                 let mut j = LayoutJob::default();
                 j.append(
-                    &format!("vana-client {v}"),
+                    &format!("TimelessXI {v}"),
                     0.0,
                     TextFormat { font_id: FontId::new(size * 1.25, strong.clone()), color: gold, ..Default::default() },
                 );

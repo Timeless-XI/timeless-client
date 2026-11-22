@@ -248,6 +248,10 @@ pub(super) fn install(
     me.set("name", m.name.as_str())?;
     me.set("version", m.version.as_str())?;
     me.set("api", super::manifest::API)?;
+    // Timeless fork: icons of kind "job" draw the modern UI's job pictograms (window canvases, lists, the HUD).
+    me.set("job_icons", true)?;
+    // Timeless fork: portraits of a model by its id (hud.portrait / a canvas's portrait with model = ...).
+    me.set("model_portraits", true)?;
     me.set("path", vm.dir.to_string_lossy().as_ref())?;
     g.set("mod", me)?;
 
@@ -2257,6 +2261,40 @@ fn cmds(v: Option<Table>) -> mlua::Result<Vec<super::window::Cmd>> {
                     icon: super::window::Icon::of(c.get::<Option<String>>("kind")?.as_deref(), c.get("id")?),
                     tint: colour,
                 },
+                // An actor drawn live, as hud.portrait (TimelessXI): entity (a server id) or model (a model id, drawn
+                // from the game's files), shape, bg, frame, frame_w, body, turn, spin.
+                "portrait" => {
+                    let model = c.get::<Option<u32>>("model")?;
+                    let entity = match (model, c.get::<Option<u32>>("entity")?) {
+                        (Some(m), _) if (1..=0x0fff).contains(&m) => crate::client::preview::id_of(m as u16),
+                        (Some(m), _) => return Err(mlua::Error::runtime(format!("model {m}: a model id 1..4095"))),
+                        (None, Some(e)) => e,
+                        (None, None) => {
+                            return Err(mlua::Error::runtime(
+                                "a portrait needs entity (a server id) or model (a model id)",
+                            ));
+                        }
+                    };
+                    let oval = match c.get::<Option<String>>("shape")?.as_deref() {
+                        None | Some("square") => false,
+                        Some("oval") => true,
+                        Some(v) => return Err(mlua::Error::runtime(format!("shape {v:?}: oval or square"))),
+                    };
+                    Cmd::Portrait {
+                        r: [n("x")?, n("y")?, n("w")?.max(1.0), n("h")?.max(1.0)],
+                        entity,
+                        look: super::hud::Look {
+                            bg: super::hud::colour(c.get("bg")?)?,
+                            oval,
+                            frame: super::hud::colour(c.get("frame")?)?,
+                            frame_w: c.get::<Option<f32>>("frame_w")?.unwrap_or(2.0).max(0.0),
+                        },
+                        body: c.get::<Option<bool>>("body")?.unwrap_or(model.is_some()),
+                        turn: n("turn")?,
+                        spin: n("spin")?,
+                        tint: colour,
+                    }
+                }
                 other => return Err(mlua::Error::runtime(format!("unknown draw command {other:?}"))),
             })
         })

@@ -1177,6 +1177,9 @@ pub struct Effects {
     pub lift_moves: Vec<LiftMove>,
     /// W+0x1bc: the camera is under a covered object (FUN_101845c0).
     covered: bool,
+    /// Ours (Settings' Weather Modern, client/storm.rs): a weather the zone has no folder for takes its milder kin's
+    /// (a blizzard a snowfall's) before retail's `suny`.
+    pub weather_kin: bool,
     /// Update op 0x60's screen flash from the last readback: the bytes the elements add to renderer +0x324..+0x326
     /// (FUN_10014f70; B, G, R as in the element colour), a frame or two late.
     pub flash: [u8; 3],
@@ -1357,6 +1360,7 @@ impl Effects {
             lift_moves: Vec::new(),
             sub_lib: None,
             covered: false,
+            weather_kin: false,
             flash: [0; 3],
             sounds: Vec::new(),
             stream_fade: None,
@@ -1668,8 +1672,10 @@ impl Effects {
                 .map(|(i, _)| i)
         };
         let Some(weat) = named(None, "weat") else { return };
-        // FUN_1018a7a0: neither the tag nor `suny`: nothing starts and nothing is killed.
-        let Some(folder) = named(Some(weat), tag).or_else(|| named(Some(weat), "suny")) else { return };
+        // FUN_1018a7a0: neither the tag nor `suny`: nothing starts and nothing is killed. Ours: its kin's between.
+        let kin =
+            || self.weather_kin.then(|| crate::client::storm_lighter(tag)).flatten().and_then(|k| named(Some(weat), k));
+        let Some(folder) = named(Some(weat), tag).or_else(kin).or_else(|| named(Some(weat), "suny")) else { return };
         let within = |mut i: usize| loop {
             match tree.nodes[i].parent {
                 Some(p) if p == folder => return true,
@@ -1730,7 +1736,12 @@ impl Effects {
         let fc = crate::dat::generator::fourcc;
         let weat = named(None, fc("weat"))?;
         let tag = self.weathers.last().map_or(fc("suny"), |w| w.tag);
-        let folder = named(Some(weat), tag).or_else(|| named(Some(weat), fc("suny"))).unwrap_or(weat);
+        let kin = || {
+            let t = std::str::from_utf8(&tag).ok()?;
+            let k = self.weather_kin.then(|| crate::client::storm_lighter(t)).flatten()?;
+            named(Some(weat), fc(k))
+        };
+        let folder = named(Some(weat), tag).or_else(kin).or_else(|| named(Some(weat), fc("suny"))).unwrap_or(weat);
         let under = |mut i: usize, f: usize| loop {
             match tree.nodes[i].parent {
                 Some(p) if p == f => return true,
@@ -1773,6 +1784,11 @@ impl Effects {
 
     /// FUN_101845c0: on a change, covered stops the transient weather emitters that spawn at the camera (op-1
     /// flags 4 or 0x4000000: rain, snow, dust) and kills their elements (FUN_10183b90); uncovered starts them again.
+    /// The camera is under a covered object (set_covered).
+    pub fn covered(&self) -> bool {
+        self.covered
+    }
+
     pub fn set_covered(&mut self, covered: bool) {
         if covered == self.covered {
             return;

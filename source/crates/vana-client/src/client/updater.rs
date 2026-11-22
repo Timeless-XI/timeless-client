@@ -9,11 +9,14 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-/// Where releases are published.
-/// Timeless XI: the upstream repository (the mod and DAT catalogues, release notes).
-pub const RELEASE_REPO: &str = "lenonk/vana-client";
-/// Timeless XI: where this build's own client updates come from, so an upstream release never replaces it.
-pub const CLIENT_RELEASE_REPO: &str = "Timeless-XI/timeless-client";
+/// Where releases are published: TimelessXI's builds, on a public repository that holds only the releases and the mod
+/// list (catalogue/mods.json). Its releases are signed with TimelessXI's key (release/signing-key.pub, put there by
+/// build-timeless.bat), so a stock vana-client build is never installed over this one.
+pub const RELEASE_REPO: &str = "Timeless-XI/timeless-client";
+/// The project this client is built from (its committed mod list names files there).
+pub const UPSTREAM_REPO: &str = "lenonk/vana-client";
+/// Timeless XI: where this build's own client updates come from (the same repository: kept for the code that names it).
+pub const CLIENT_RELEASE_REPO: &str = RELEASE_REPO;
 
 /// The release asset for this platform. A build for a platform no release carries (macOS, Linux on ARM so far) finds
 /// none and is never offered another platform's binary.
@@ -122,6 +125,21 @@ pub fn start(root: PathBuf, playonline: bool) -> Shared {
     std::thread::spawn(move || {
         // The button shows as soon as the version says so; the file check sizes it afterwards.
         let game = match crate::patch::behind(&root) {
+            // TimelessXI: a retail update waits until TimelessXI allows its version (catalogue/game.json), so the
+            // game files never run ahead of what the server and the Timeless patches were tried with.
+            Ok(Some(server))
+                if !super::timeless::game_update_allowed(
+                    &server.version,
+                    super::timeless::allowed_game_version()
+                        .map_err(|e| log::info!("update check: TimelessXI's allowed game version: {e:#}"))
+                        .ok()
+                        .as_deref(),
+                    crate::patch::applied_version(&root).as_deref(),
+                ) =>
+            {
+                log::info!("update check: game files {} held back until TimelessXI allows it", server.version);
+                Game::Current
+            }
             Ok(Some(server)) => {
                 g.lock().unwrap().game = Game::Behind(server.version.clone());
                 match crate::patch::plan_against(&root, server) {
@@ -221,7 +239,7 @@ fn verify(r: &Release, file: &Path) -> Result<()> {
         agent().get(url).call().with_context(|| url.clone())?.body_mut().with_config().limit(1024).read_to_vec()?;
     if !signed_by(SIGNING_KEY, &signed_text(&r.tag, asset_name(), &std::fs::read(file)?), &sig) {
         let _ = std::fs::remove_file(file);
-        bail!("the downloaded vana-client {} is not signed by the release key; not installed", r.tag);
+        bail!("the downloaded TimelessXI client {} is not signed by the release key; not installed", r.tag);
     }
     Ok(())
 }
@@ -388,6 +406,8 @@ pub struct UpdateUi {
     cursor: usize,
     job: Option<Arc<Mutex<Job>>>,
     reloaded: bool,
+    /// TimelessXI: opened by itself for a client update (open_client_only): it restarts the client when done.
+    auto: bool,
     /// The view's scale about the screen's centre: 1 classic, larger for the modern UI's text.
     pub zoom: f32,
 }
@@ -399,15 +419,17 @@ impl UpdateUi {
             [0, 1, 2].map(|r| offered(&s, r))
         };
         let cursor = if pick.iter().any(|&p| p) { UPDATE } else { CLOSE };
-        Self { status, root, pick, cursor, job: None, reloaded: false, zoom: 1.0 }
+        Self { status, root, pick, cursor, job: None, reloaded: false, auto: false, zoom: 1.0 }
     }
 
-    /// Timeless XI: the window with only the client program's row ticked (from the character menu's Update: the
-    /// game files stay as they are, a retail file update would undo the Timeless DAT patches).
+    /// TimelessXI: a newer TimelessXI client installed by itself (at start, or the character menu's Update): the window
+    /// opens with only the client checked and starts at once, and the client restarts when it's in place (poll). Game
+    /// files still wait for the Update button (a retail file update would undo the Timeless DAT patches).
     pub fn open_client_only(status: Shared, root: PathBuf) -> Self {
         let mut u = Self::open(status, root);
-        u.pick[0] = false;
-        u.pick[1] = false;
+        u.pick = [false, false, true];
+        u.auto = true;
+        u.start();
         u
     }
 
@@ -457,6 +479,15 @@ impl UpdateUi {
                     })?;
                     status.lock().unwrap().game = Game::Current;
                     lines.push(format!("Game files updated to {version} ({total_files} files)."));
+                    // TimelessXI: an updated game file is Square Enix's again; the Timeless patches go back in.
+                    match super::timeless::repatch(&root) {
+                        Ok(r) if r.written > 0 => {
+                            lines.push(format!("TimelessXI patches written again ({} changes); restart to use them.", r.written));
+                            restart = true;
+                        }
+                        Ok(_) => {}
+                        Err(e) => lines.push(format!("TimelessXI patches: {e:#}")),
+                    }
                 }
                 let plan = if viewer {
                     wait_plan(&status, &set, |s| s.viewer.get_or_insert(Game::Current), "PlayOnline Viewer files")?
@@ -488,7 +519,7 @@ impl UpdateUi {
                     let dest = exe().context("no executable path")?.with_extension("new");
                     download(&r.url, &dest, &|d, t| {
                         set(Progress {
-                            label: format!("Downloading vana-client {}", r.tag),
+                            label: format!("Downloading the TimelessXI client {}", r.tag),
                             done: d,
                             total: t.max(r.size),
                             detail: format!("{:.1} of {:.1} MB", d as f64 / 1e6, t.max(r.size) as f64 / 1e6),
@@ -497,7 +528,7 @@ impl UpdateUi {
                     verify(&r, &dest)?;
                     replace_self(&dest)?;
                     status.lock().unwrap().client = Client::Current;
-                    lines.push(format!("vana-client {} is installed; restart to use it.", r.tag));
+                    lines.push(format!("TimelessXI client {} is installed; restart to use it.", r.tag));
                     restart = true;
                     // The notes since this version, for the restarted client to show (none if GitHub won't say).
                     let from = env!("CARGO_PKG_VERSION");
@@ -592,10 +623,11 @@ impl UpdateUi {
     pub fn poll(&mut self) -> Out {
         let mut out = Out::default();
         if !self.reloaded
-            && let Some(Job::Done(lines, _)) = self.job.as_ref().map(|j| j.lock().unwrap()).as_deref()
+            && let Some(Job::Done(lines, restart)) = self.job.as_ref().map(|j| j.lock().unwrap()).as_deref()
         {
             self.reloaded = true;
             out.reload = lines.iter().any(|l| l.starts_with("Game files"));
+            out.restart = self.auto && *restart;
             self.cursor = UPDATE;
         }
         out
@@ -645,7 +677,7 @@ impl UpdateUi {
         match self.cursor {
             0 => "The game's data files, from the PlayOnline patch server.".into(),
             1 => "The PlayOnline Viewer's files, which a PlayOnline log-in needs current (kept, never run).".into(),
-            2 => "vana-client itself, from its latest release.".into(),
+            2 => "The TimelessXI client itself, from its latest release.".into(),
             UPDATE => "Download and install what is checked.".into(),
             _ => "Close this window.".into(),
         }
@@ -902,7 +934,8 @@ mod tests {
     fn release_signatures() {
         use ring::signature::{Ed25519KeyPair, KeyPair};
         // release/publish.sh's text and openssl's signature by the release key check against the built-in half.
-        let sig = hex::decode("6db22e308db928bf583baf80d49e91a6573ce88302c67964811dd7f9e0bf2bfa8b00d47f8889e6789d505fe2530cbba9402206e45e29cbd91bf8ba7a3015da01").unwrap();
+        // TimelessXI: signed with TimelessXI's release key.
+        let sig = hex::decode("8c39ba5e4f91f0b444992c0aa79d824ae35e64ebeeb6230d118068ae6707d1c73501560d9c9166725d7dcc2da2de0e05d81f38a87d82a0d27d6aef54cf5b5408").unwrap();
         assert!(signed_by(SIGNING_KEY, &signed_text("v0.0.0-test", "vana-client-linux-x86_64", b"binary"), &sig));
         let rng = ring::rand::SystemRandom::new();
         let pair = |rng| Ed25519KeyPair::from_pkcs8(Ed25519KeyPair::generate_pkcs8(rng).unwrap().as_ref()).unwrap();

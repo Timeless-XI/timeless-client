@@ -38,6 +38,9 @@ pub struct Entry {
     /// Archives unpacked in order into the one folder (a later one's files replace an earlier one's), or a mod's files
     /// each put at its `path`.
     pub files: Vec<File>,
+    /// TimelessXI: installed and kept up to date at every start (client/timeless.rs), not only offered.
+    #[serde(default)]
+    pub required: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -103,8 +106,10 @@ impl List {
 }
 
 /// Where a list is read from.
+/// TimelessXI: both lists are TimelessXI's, on its releases repository's main branch (the standard mods' files are
+/// served from there too), so nothing a player downloads depends on the upstream project staying online.
 pub fn url(list: List) -> String {
-    format!("https://raw.githubusercontent.com/{}/master/catalogue/{}", super::updater::RELEASE_REPO, list.file())
+    format!("https://raw.githubusercontent.com/{}/main/catalogue/{}", super::updater::RELEASE_REPO, list.file())
 }
 
 fn check(e: &Entry, any_host: bool) -> Result<()> {
@@ -155,17 +160,22 @@ pub fn parse(text: &str, any_host: bool) -> Result<Vec<Entry>> {
 /// A list: fetched, else the copy kept from the last fetch; only its kind's entries (packs or Lua mods).
 /// VANA_DAT_CATALOGUE / VANA_MOD_CATALOGUE: another list (a URL or a file).
 pub fn fetch(list: List) -> Result<Vec<Entry>> {
-    let want = |e: &Entry| (e.kind == "pack") == (list == List::Dats);
-    fetch_all(list).map(|v| v.into_iter().filter(want).collect())
+    fetch_with(list, super::updater::get_text)
 }
 
-fn fetch_all(list: List) -> Result<Vec<Entry>> {
+/// `fetch`, the list read with `get` (TimelessXI's start uses one that gives up rather than hang).
+pub fn fetch_with(list: List, get: fn(&str) -> Result<String>) -> Result<Vec<Entry>> {
+    let want = |e: &Entry| (e.kind == "pack") == (list == List::Dats);
+    fetch_all(list, get).map(|v| v.into_iter().filter(want).collect())
+}
+
+fn fetch_all(list: List, get: fn(&str) -> Result<String>) -> Result<Vec<Entry>> {
     let over = std::env::var(list.env()).ok();
     let kept = crate::config::catalogue_dir().join(list.file());
     let got = match over.as_deref() {
         Some(p) if !p.starts_with("http") => std::fs::read_to_string(p).with_context(|| p.to_string()),
-        Some(u) => super::updater::get_text(u),
-        None => super::updater::get_text(&url(list)),
+        Some(u) => get(u),
+        None => get(&url(list)),
     };
     match got {
         Ok(text) => {
@@ -430,7 +440,7 @@ mod tests {
                     .iter()
                     .map(|rel| {
                         let p = dir.join(rel);
-                        let url = format!("https://raw.githubusercontent.com/{}/master/crates/vana-client/assets/mods/{id}/{rel}", super::super::updater::RELEASE_REPO);
+                        let url = format!("https://raw.githubusercontent.com/{}/master/crates/vana-client/assets/mods/{id}/{rel}", super::super::updater::UPSTREAM_REPO);
                         serde_json::json!({"path": rel, "url": url, "sha256": sha256(&p).unwrap(), "size": std::fs::metadata(&p).unwrap().len()})
                     })
                     .collect();

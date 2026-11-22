@@ -23,6 +23,13 @@ pub struct Settings {
     pub party_tp: bool,
     pub lamp_lights: bool,
     pub smooth_lights: bool,
+    pub soft_zoning: bool,
+    pub zone_preload: bool,
+    pub night_lighting: bool,
+    pub night_darkness: u32,
+    pub own_light: bool,
+    pub modern_weather: bool,
+    pub screen_frost: bool,
     pub actor_shadows: u32,
     pub shadow_map: u32,
     pub ssao: bool,
@@ -43,6 +50,7 @@ pub struct Settings {
     pub timeless_ready_chime: bool,
     pub modern_scale: u32,
     pub modern_opacity: u32,
+    pub modern_mod_scale: u32,
     /// The mod packs in priority order (the Mods page; config `mods`).
     pub mods: Vec<crate::config::ModRef>,
     /// UI Setup's Reset pressed: this character's modern panels go back to where they start; its From: the setup
@@ -70,6 +78,13 @@ impl Settings {
             party_tp: c.party_tp,
             lamp_lights: c.lamp_lights,
             smooth_lights: c.smooth_lights,
+            soft_zoning: c.soft_zoning,
+            zone_preload: c.zone_preload,
+            night_lighting: c.night_lighting,
+            night_darkness: c.night_darkness.min(100),
+            own_light: c.own_light,
+            modern_weather: c.modern_weather,
+            screen_frost: c.screen_frost,
             actor_shadows: c.actor_shadows,
             shadow_map: c.shadow_map,
             ssao: c.ssao,
@@ -91,6 +106,7 @@ impl Settings {
             timeless_ready_chime: c.timeless_ready_chime,
             modern_scale: c.modern_scale,
             modern_opacity: pct(c.modern_opacity),
+            modern_mod_scale: c.modern_mod_scale,
             mods: crate::modpack::merged(&c.mods, &crate::modpack::folders()),
             reset_places: false,
             copy_ui: None,
@@ -113,6 +129,13 @@ impl Settings {
         c.party_tp = self.party_tp;
         c.lamp_lights = self.lamp_lights;
         c.smooth_lights = self.smooth_lights;
+        c.soft_zoning = self.soft_zoning;
+        c.zone_preload = self.zone_preload;
+        c.night_lighting = self.night_lighting;
+        c.night_darkness = self.night_darkness.min(100);
+        c.own_light = self.own_light;
+        c.modern_weather = self.modern_weather;
+        c.screen_frost = self.screen_frost;
         c.actor_shadows = self.actor_shadows;
         c.shadow_map = self.shadow_map;
         c.ssao = self.ssao;
@@ -129,6 +152,7 @@ impl Settings {
         c.timeless_ready_chime = self.timeless_ready_chime;
         c.modern_scale = self.modern_scale;
         c.modern_opacity = self.modern_opacity as f32 / 100.0;
+        c.modern_mod_scale = self.modern_mod_scale;
         c.mods = self.mods.clone();
         c.gamepad = self.gamepad;
         c.gamepad_deadzone = self.gamepad_dead as f32 / 100.0;
@@ -166,6 +190,13 @@ enum Val {
     PartyTp,
     LampLights,
     SmoothLights,
+    SoftZoning,
+    ZonePreload,
+    NightLighting,
+    NightDarkness,
+    OwnLight,
+    ModernWeather,
+    ScreenFrost,
     ActorShadows,
     ShadowMap,
     Ssao,
@@ -189,6 +220,7 @@ enum Val {
     TimelessChime,
     ModernScale,
     ModernOpacity,
+    ModScale,
     ResetPlaces,
     Gamepad,
     PadDeadZone,
@@ -277,6 +309,8 @@ pub enum Edit {
 }
 
 const OFF_ON: &[(u32, &str)] = &[(1, "ON"), (0, "OFF")];
+/// The Mod Interface Size slider's stops: 100 .. 250 % in 5 % steps.
+const MOD_STEPS: usize = 31;
 const MODERN_SCALES: &[(u32, &str)] = &[
     (50, "50%"),
     (55, "55%"),
@@ -348,6 +382,34 @@ fn rows(kind: Kind, tab: usize, in_game: bool, modern: bool) -> &'static [SRow] 
             Tool("0000"),
             OFF_ON,
             NextZone,
+        ),
+        row(
+            "Zone Changes",
+            "Retail fades to black while the next zone loads. Soft keeps the last picture, a little dimmed, and crossfades into the new zone (not retail).",
+            SoftZoning,
+            &[(0, "Retail"), (1, "Soft")],
+            Now,
+        ),
+        row(
+            "Preload Zones",
+            "Loads the zone behind a nearby zone line ahead of time, so walking through it is nearly instant. Uses more memory; turn it off if zone changes misbehave (not retail).",
+            ZonePreload,
+            OFF_ON,
+            Now,
+        ),
+        row(
+            "Weather",
+            "Original keeps the game's weather. Modern draws snow and blizzards as real storms: wind-driven snow with gusts, a whiteout that hides the distance, flat cold light, and snow building up on the ground (not retail).",
+            ModernWeather,
+            &[(0, "Original"), (1, "Modern")],
+            Now,
+        ),
+        row(
+            "Screen Frost",
+            "With Modern weather: frost creeps in at the edges of the screen in a blizzard's strongest gusts (not retail).",
+            ScreenFrost,
+            OFF_ON,
+            Now,
         ),
         row(
             "Gamma Base",
@@ -432,6 +494,13 @@ fn rows(kind: Kind, tab: usize, in_game: bool, modern: bool) -> &'static [SRow] 
             "Retail lights the world from lamps at the corners of its triangles, cut off sharply at a light's reach. Smooth lights every pixel and fades the edge out (not retail).",
             SmoothLights,
             &[(0, "Retail"), (1, "Smooth")],
+            Now,
+        ),
+        row(
+            "Carry a Light",
+            "With Modern night lighting: your character carries a soft light at night and in dark places, so you can see where you're going.",
+            OwnLight,
+            OFF_ON,
             Now,
         ),
         row(
@@ -576,6 +645,13 @@ fn rows(kind: Kind, tab: usize, in_game: bool, modern: bool) -> &'static [SRow] 
         ),
         row("Interface Size", "How big the modern windows are (not retail).", ModernScale, MODERN_SCALES, Now),
         row(
+            "Mod Interface Size",
+            "How big every mod's windows are drawn, pictures and print (cards, shops, maps), on top of the Interface Size (not retail).",
+            ModScale,
+            &[],
+            Now,
+        ),
+        row(
             "Panel Opacity",
             "How see-through the modern windows' backgrounds are (not retail).",
             ModernOpacity,
@@ -593,6 +669,20 @@ fn rows(kind: Kind, tab: usize, in_game: bool, modern: bool) -> &'static [SRow] 
     ];
     // Ours: the graphics options retail has no page for (a page holds 7 rows).
     const GRAPHICS: &[SRow] = &[
+        row(
+            "Night Lighting",
+            "Original keeps the game's lighting. Modern makes nights darker and moonlit (brighter at full moon), makes lamps and fires glow and flicker, and lets lanterns, torches and mods give off light (not retail).",
+            NightLighting,
+            &[(0, "Original"), (1, "Modern")],
+            Now,
+        ),
+        row(
+            "Night Darkness",
+            "With Modern night lighting: how dark nights get. 0% is the game's brightness with the glowing lamps.",
+            NightDarkness,
+            &[],
+            Now,
+        ),
         row(
             "Character Shadows",
             "Retail gives characters the game's simple shadows. Real makes characters cast proper shadows from the sun and moon, and from lamps when Lamp Lights is Real (not retail).",
@@ -944,7 +1034,9 @@ impl SettingsUi {
             | Val::Gpu
             | Val::Music
             | Val::Effects
-            | Val::ModernOpacity => Ctl::Slider,
+            | Val::NightDarkness
+            | Val::ModernOpacity
+            | Val::ModScale => Ctl::Slider,
             _ if r.choices.len() <= 3 => Ctl::Buttons(r.choices.len()),
             _ => Ctl::Slider,
         }
@@ -992,12 +1084,20 @@ impl SettingsUi {
             }
             Val::ModernScale => self.s.modern_scale,
             Val::ModernOpacity => self.s.modern_opacity,
+            Val::ModScale => self.s.modern_mod_scale,
             Val::ResetPlaces => self.s.reset_places as u32,
             Val::Gamepad => self.s.gamepad as u32,
             Val::PadDeadZone => self.s.gamepad_dead,
             Val::MouseCamSpeed => self.s.mouse_camera_speed,
             Val::LampLights => self.s.lamp_lights as u32,
             Val::SmoothLights => self.s.smooth_lights as u32,
+            Val::SoftZoning => self.s.soft_zoning as u32,
+            Val::ZonePreload => self.s.zone_preload as u32,
+            Val::NightLighting => self.s.night_lighting as u32,
+            Val::NightDarkness => self.s.night_darkness,
+            Val::OwnLight => self.s.own_light as u32,
+            Val::ModernWeather => self.s.modern_weather as u32,
+            Val::ScreenFrost => self.s.screen_frost as u32,
             Val::ActorShadows => self.s.actor_shadows,
             Val::ShadowMap => self.s.shadow_map,
             Val::Ssao => self.s.ssao as u32,
@@ -1032,12 +1132,20 @@ impl SettingsUi {
             }
             Val::ModernScale => self.s.modern_scale = x,
             Val::ModernOpacity => self.s.modern_opacity = x,
+            Val::ModScale => self.s.modern_mod_scale = x,
             Val::ResetPlaces => self.s.reset_places = x != 0,
             Val::Gamepad => self.s.gamepad = x != 0,
             Val::PadDeadZone => self.s.gamepad_dead = x,
             Val::MouseCamSpeed => self.s.mouse_camera_speed = x,
             Val::LampLights => self.s.lamp_lights = x != 0,
             Val::SmoothLights => self.s.smooth_lights = x != 0,
+            Val::SoftZoning => self.s.soft_zoning = x != 0,
+            Val::ZonePreload => self.s.zone_preload = x != 0,
+            Val::NightLighting => self.s.night_lighting = x != 0,
+            Val::NightDarkness => self.s.night_darkness = x.min(100),
+            Val::OwnLight => self.s.own_light = x != 0,
+            Val::ModernWeather => self.s.modern_weather = x != 0,
+            Val::ScreenFrost => self.s.screen_frost = x != 0,
             Val::ActorShadows => self.s.actor_shadows = x,
             Val::ShadowMap => self.s.shadow_map = x,
             Val::Ssao => self.s.ssao = x != 0,
@@ -1109,7 +1217,10 @@ impl SettingsUi {
             Val::ResetPlaces => (self.profiles.len() + 2, self.ui_pick),
             Val::Music => (21, (self.s.music / 5) as usize),
             Val::Effects => (21, (self.s.effects / 5) as usize),
+            Val::NightDarkness => (21, (self.s.night_darkness.min(100) / 5) as usize),
             Val::ModernOpacity => (19, (self.s.modern_opacity.clamp(10, 100) / 5 - 2) as usize),
+            // 100 .. 250 % in 5 % steps
+            Val::ModScale => (MOD_STEPS, (self.s.modern_mod_scale.clamp(100, 250) / 5 - 20) as usize),
             v => {
                 let list: Vec<u32> = r.choices.iter().map(|c| c.0).collect();
                 (list.len(), pos(&list, self.get(v)))
@@ -1154,7 +1265,9 @@ impl SettingsUi {
             Val::ResetPlaces => self.ui_pick = i.min(self.profiles.len() + 1),
             Val::Music => self.s.music = (i as u32 * 5).min(100),
             Val::Effects => self.s.effects = (i as u32 * 5).min(100),
+            Val::NightDarkness => self.s.night_darkness = (i as u32 * 5).min(100),
             Val::ModernOpacity => self.s.modern_opacity = ((i as u32 + 2) * 5).clamp(10, 100),
+            Val::ModScale => self.s.modern_mod_scale = ((i as u32 + 20) * 5).clamp(100, 250),
             v => {
                 if let Some(c) = r.choices.get(i) {
                     self.set(v, c.0);
@@ -1178,7 +1291,9 @@ impl SettingsUi {
             Val::FrameLimit => format!("{}", self.s.frame_limit),
             Val::Music => format!("{}%", self.s.music),
             Val::Effects => format!("{}%", self.s.effects),
+            Val::NightDarkness => format!("{}%", self.s.night_darkness),
             Val::ModernOpacity => format!("{}%", self.s.modern_opacity),
+            Val::ModScale => format!("{}%", self.s.modern_mod_scale),
             Val::Monitor => self
                 .monitors
                 .iter()

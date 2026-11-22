@@ -25,7 +25,8 @@ struct VOut { @builtin(position) clip: vec4<f32>, @location(0) uv: vec2<f32> };
     return vec4<f32>(u.color.rgb, 1.0);
 }
 @fragment fn image(i: VOut) -> @location(0) vec4<f32> {
-    return vec4<f32>(textureSample(tex, samp, i.uv).rgb, u.color.a);
+    // extra.y (ours): how far the picture is dimmed toward black (0 as it was); 0 for everything but a soft zone hold.
+    return vec4<f32>(textureSample(tex, samp, i.uv).rgb * (1.0 - u.extra.y), u.color.a);
 }
 // Op 0x72: a flat colour, SRCALPHA / ONE.
 @fragment fn flash() -> @location(0) vec4<f32> {
@@ -319,9 +320,9 @@ impl ScreenFx {
     }
 
     /// The held picture over `view` at alpha `a` (SRCALPHA / INVSRCALPHA).
-    pub fn draw_held(&self, gpu: &Gpu, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, a: f32) {
+    pub fn draw_held(&self, gpu: &Gpu, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, a: f32, dim: f32) {
         let Some((_, g)) = &self.prev else { return };
-        gpu.queue.put(&self.uniforms[3], 0, bytemuck::cast_slice(&[0.0f32, 0.0, 0.0, a, 0.0, 0.0, 0.0, 0.0]));
+        gpu.queue.put(&self.uniforms[3], 0, bytemuck::cast_slice(&[0.0f32, 0.0, 0.0, a, 0.0, dim, 0.0, 0.0]));
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("zone crossfade"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -329,6 +330,29 @@ impl ScreenFx {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&self.image);
+        pass.set_bind_group(0, g, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
+    /// Ours (Settings' Zone Changes Soft): the held picture alone on `view` at `level` (0 black .. 1 as it was): the
+    /// view cleared to black, the picture over it at alpha `level`.
+    pub fn draw_held_dim(&self, gpu: &Gpu, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, level: f32) {
+        let Some((_, g)) = &self.prev else { return };
+        gpu.queue.put(&self.uniforms[3], 0, bytemuck::cast_slice(&[0.0f32, 0.0, 0.0, level, 0.0, 0.0, 0.0, 0.0]));
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("zone hold"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
             })],
             depth_stencil_attachment: None,
             timestamp_writes: None,

@@ -1939,10 +1939,11 @@ fn main() -> Result<()> {
                             .filter(|_| std::env::var_os("FFXI_LAMPS_DARK").is_none())
                         {
                             println!("lamps: {:?}", l);
-                            zr.set_lamps(gpu, &l.iter().map(|l| (l.pos, l.slot)).collect::<Vec<_>>());
+                            zr.set_lamps(gpu, &l.iter().map(|l| (l.pos, l.slot)).collect::<Vec<_>>(), false);
                             eg.set_lamps(
                                 gpu,
                                 &l.iter().map(|l| (l.pos, l.slot, l.template, l.colour)).collect::<Vec<_>>(),
+                                &[],
                             );
                             // One more update copies the lamps' slots before the next frame's scenery reads them.
                             let mut e = gpu.device.create_command_encoder(&Default::default());
