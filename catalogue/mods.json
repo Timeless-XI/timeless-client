@@ -3516,12 +3516,6 @@
       "description": "TimelessXI companions, live: Companion View (/cv) for gear, stats and role, Companion Manager (/cmgr) to call, keep, save and set them up; role-coloured name plates, rings and speech bubbles in the world.",
       "files": [
         {
-          "path": "README.md",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-companions/README.md",
-          "sha256": "0d1573eb67693dcdce5a0a494f16e54ac896aaf3b5bf8df65439441ddaa128ca",
-          "size": 4802
-        },
-        {
           "path": "init.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-companions/init.lua",
           "sha256": "f20216dd8c0324d5052c5b6e0537e32a42cd3271359411613602ae0f219996b8",
@@ -3598,6 +3592,12 @@
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-companions/mod.toml",
           "sha256": "f0b507daf34a099712d5da333fe342ff421076aab5aff7cb0e03cdff8df70a3e",
           "size": 1806
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-companions/README.md",
+          "sha256": "0d1573eb67693dcdce5a0a494f16e54ac896aaf3b5bf8df65439441ddaa128ca",
+          "size": 4802
         }
       ],
       "required": true,
