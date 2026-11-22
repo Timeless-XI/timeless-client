@@ -1,0 +1,3624 @@
+{
+  "format": 1,
+  "mods": [
+    {
+      "authors": [],
+      "commands": {
+        "actions": {
+          "args": "",
+          "help": "Opens the Action Panel window."
+        }
+      },
+      "description": "A window of everything your jobs can use now: magic by school, job abilities, weapon skills and pet commands, with costs and recasts; a click uses one; //actions opens it (the action menu add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "21bc8f9040cb1c16f88bf11a33c81f9183df346ed52ac2180362d8a66c9071aa",
+          "size": 7795,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/action-panel/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "3fd3ef69a382b13d0c6bcf7c279d3ab65d9c2c6bca903f9b738ea7ab0b375e82",
+          "size": 569,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/action-panel/mod.toml"
+        }
+      ],
+      "id": "action-panel",
+      "kind": "lua",
+      "name": "Action Panel",
+      "version": "1.0.3"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "attend": {
+          "args": "[note]",
+          "help": "Writes down who is here (party, alliance, players nearby), with an optional note."
+        }
+      },
+      "description": "Writes down who is at an event: your party and alliance, and players nearby, with the time, to a file (the linkshell attendance add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "5e6ce27d829bd73df5cafadf9a03be130db594f35fa1e9e8cf962afe8a8cee59",
+          "size": 992,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/attendance/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "6df6ed2058f7ed3bbd8cf3c22b45c129e10805039a1f17eb99638ae3397961d8",
+          "size": 693,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/attendance/mod.toml"
+        }
+      ],
+      "id": "attendance",
+      "kind": "lua",
+      "name": "Attendance",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "ahbuy": {
+          "args": "<item> <price> [stack]",
+          "help": "Bids on an item at the auction house.",
+          "params": [
+            {
+              "name": "item",
+              "type": "item"
+            },
+            {
+              "name": "price",
+              "type": "int"
+            },
+            {
+              "name": "stack",
+              "options": [
+                "stack"
+              ],
+              "type": "enum"
+            }
+          ]
+        },
+        "ahlist": {
+          "args": "",
+          "help": "Lists your auction house sales in the log."
+        },
+        "ahsell": {
+          "args": "<item> <price> [stack]",
+          "help": "Puts an item up for sale at the auction house.",
+          "params": [
+            {
+              "name": "item",
+              "type": "item"
+            },
+            {
+              "name": "price",
+              "type": "int"
+            },
+            {
+              "name": "stack",
+              "options": [
+                "stack"
+              ],
+              "type": "enum"
+            }
+          ]
+        }
+      },
+      "description": "Bids and sales at the auction house by command, and your listings in the log (the auction helper add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "4a9b84e4ab9803325ca1f7cd4617b6f8c9e0829280abdcf15a191d608226b5da",
+          "size": 3032,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/auction-desk/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "16799085d66ea7f6959479c2f211cd2df34b001361c5347a01d93037f38d55c2",
+          "size": 982,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/auction-desk/mod.toml"
+        }
+      ],
+      "id": "auction-desk",
+      "kind": "lua",
+      "name": "Auction Desk",
+      "version": "1.0.3"
+    },
+    {
+      "authors": [],
+      "description": "Event messages that wait for a key move on by themselves after a few seconds (the text auto-advance add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "e37d4e5af72f591a5d59212f5fb3e7fdc4c2b344fac22a45f1f320d67cc8c267",
+          "size": 499,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/auto-advance/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "0f3b6f08a6b168f48ec4791073296f0e0616eebdc9b705d374c9e0e1002e65cb",
+          "size": 508,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/auto-advance/mod.toml"
+        }
+      ],
+      "id": "auto-advance",
+      "kind": "lua",
+      "name": "Text Auto-Advance",
+      "version": "1.0.1"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "automaton": {
+          "args": "<name>",
+          "forms": [
+            {
+              "args": "save <name>",
+              "help": "Saves the automaton's head, frame and attachments as a set."
+            },
+            {
+              "args": "list",
+              "help": "Lists your sets."
+            },
+            {
+              "args": "delete <name>",
+              "help": "Deletes a set."
+            }
+          ],
+          "help": "Your automaton's named sets."
+        }
+      },
+      "description": "Saves your automaton's head, frame and attachments as named sets and puts a set on with one command (the automaton set add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "7b52d7746da4b80459d2d03046f363a44e25530fab5f059021a047341b7b54d9",
+          "size": 3418,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/automaton-sets/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "25c59056ce6d5b0303c74ce781cedbdf89a358fee75c43d6c8dc6cd377a60c1b",
+          "size": 772,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/automaton-sets/mod.toml"
+        }
+      ],
+      "id": "automaton-sets",
+      "kind": "lua",
+      "name": "Automaton Sets",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "stow": {
+          "forms": [
+            {
+              "args": "get <item> [count | all]",
+              "help": "Fetches an item into your inventory.",
+              "params": [
+                {
+                  "name": "item",
+                  "type": "item"
+                },
+                {
+                  "also": [
+                    "all"
+                  ],
+                  "name": "count",
+                  "type": "int"
+                }
+              ]
+            },
+            {
+              "args": "put <item> [to <bag>] [all]",
+              "help": "Puts an item away, in a bag you name or where it belongs.",
+              "params": [
+                {
+                  "name": "item",
+                  "type": "item"
+                },
+                {
+                  "name": "all",
+                  "options": [
+                    "all"
+                  ],
+                  "type": "enum"
+                }
+              ]
+            },
+            {
+              "args": "gear",
+              "help": "Gathers the gear your Gearshift file names."
+            },
+            {
+              "args": "tidy",
+              "help": "Puts the rest away."
+            }
+          ],
+          "help": "Moves items between your bags by name."
+        }
+      },
+      "description": "Moves items between your bags by command: fetch and stow by name, gather the gear your Gearshift file names, tidy the rest away (the organizer and porter add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "5ec1c07c4df4b134d8645b4786e3fc070b6810d42e9425ab5a6311adae11ba9d",
+          "size": 6637,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/bag-manager/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "9208fe68dfdbbf138fb5a54a8a99947f6d2bdd5caddb6ece6c1beae02328d1cc",
+          "size": 1173,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/bag-manager/mod.toml"
+        }
+      ],
+      "id": "bag-manager",
+      "kind": "lua",
+      "name": "Bag Manager",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "description": "Battle lines in a short form, names coloured by who they are, and others' readies lines hidden (the battle log add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "3dc793ecde4838bd7a20e32585ca04cc80605e4c6e2349b6cbb818cbbe75142a",
+          "size": 7270,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/battle-text/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "3ef3d53998fd30580a36092a4bd6bf4d3f7a97ce7d9824c283f35645ddd8c280",
+          "size": 1123,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/battle-text/mod.toml"
+        }
+      ],
+      "id": "battle-text",
+      "kind": "lua",
+      "name": "Battle Text",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "blu": {
+          "args": "<name>",
+          "forms": [
+            {
+              "args": "save <name>",
+              "help": "Saves your set blue magic as a set."
+            },
+            {
+              "args": "list",
+              "help": "Lists your sets."
+            },
+            {
+              "args": "delete <name>",
+              "help": "Deletes a set."
+            },
+            {
+              "args": "codex",
+              "help": "Opens the codex of every blue spell and what teaches it."
+            }
+          ],
+          "help": "Your blue magic sets; with a name, sets that set."
+        }
+      },
+      "description": "Saves your set blue magic as named sets and puts a set back with one command; a codex of every blue spell and what teaches it; a call when a monster readies a move that teaches one you lack (the blue magic add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "1bdf27ee121e892c8f91a61d88042aebd430ce5d1d76db8711d00fb933f579e6",
+          "size": 7166,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/blue-sets/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "62e6228da99b34e8d3ec5f8272d178b80d475fc18cdbb4728828dfd8630aa4cd",
+          "size": 1266,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/blue-sets/mod.toml"
+        },
+        {
+          "path": "src/learn.lua",
+          "sha256": "a0880e8795530f37cf9175c7262a94317d5ea05569d10c588fcdb6186a10692e",
+          "size": 4399,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/blue-sets/src/learn.lua"
+        }
+      ],
+      "id": "blue-sets",
+      "kind": "lua",
+      "name": "Blue Magic Sets",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "calc": {
+          "args": "",
+          "forms": [
+            {
+              "args": "<sum>",
+              "help": "Works out a sum in the log."
+            }
+          ],
+          "help": "Opens the calculator window."
+        }
+      },
+      "description": "Works out sums in the chat line or a small window: gil, stacks, prices (the calculator add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "f1e3702b500995a62f39baf71e5739835c1da835f821a87fb572b37c49a36693",
+          "size": 3026,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/calculator/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "b7630c51f0774bc84263916b14797ea2490dbe2c38d6677b8464dffe543a2ee0",
+          "size": 529,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/calculator/mod.toml"
+        }
+      ],
+      "id": "calculator",
+      "kind": "lua",
+      "name": "Calculator",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "description": "Sets how far the camera stands from you, in and out of battle, and how fast it pans (the camera add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "0a47a6671079c4e292829ae83dfb518d32efaa828e014caad7adddf11c7f9add",
+          "size": 636,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/camera-range/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "26f6cae6ee7ccb54a1fa9bb05140200ab5e4bfe23c7ef521c0c3b2bace61e95a",
+          "size": 837,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/camera-range/mod.toml"
+        }
+      ],
+      "id": "camera-range",
+      "kind": "lua",
+      "name": "Camera Range",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "description": "Works out a treasure casket's two-digit combination from its hints and tells you what is left and what to try (the casket solver add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "9c46810112393134534aad47f391da21a0432170b05eb8f5e39dcacbc39893cd",
+          "size": 2807,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/casket-solver/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "a75e37bf0e6028818b9172f084ae09190d18935b2cdececf4222d4ef9836722d",
+          "size": 417,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/casket-solver/mod.toml"
+        }
+      ],
+      "id": "casket-solver",
+      "kind": "lua",
+      "name": "Casket Solver",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "description": "A grid of buttons over the party list: a row per member, a column per spell you choose; a click casts it on them (the click-to-cast add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "9f0eda1b758d48107603935a30a89384c800920f556e7fb1683fd2914a13e9b6",
+          "size": 4314,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/cast-grid/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "ddacac11a3f5c51fa4630413f54373c809cf8483ad20f6927eed68f37f4334f2",
+          "size": 639,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/cast-grid/mod.toml"
+        }
+      ],
+      "id": "cast-grid",
+      "kind": "lua",
+      "name": "Cast Grid",
+      "version": "1.0.1"
+    },
+    {
+      "authors": [],
+      "description": "A call sound when you get a tell, someone says your name or a word you chose, invites you or checks you (the chat monitor add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "1ee30d76f66b9afd8f473de7b1953b6bed60159a3dd612661b45cacfddba6908",
+          "size": 2060,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/chat-alerts/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "39b4782ebc31f6af9c7321f2a4dd84b73d6a6b93d13521dbf884ba27447ecad7",
+          "size": 1640,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/chat-alerts/mod.toml"
+        }
+      ],
+      "id": "chat-alerts",
+      "kind": "lua",
+      "name": "Chat Alerts",
+      "version": "1.0.1"
+    },
+    {
+      "authors": [],
+      "description": "Hides chat from chosen players, lines with chosen words, shouts or yells, and repeated lines (the chat filter add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "4f21250d3fd8534889dd7273f5bcd32bc9252a29f502e0e6d4aa29c30f90c9f0",
+          "size": 1754,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/chat-filter/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "02a71c821fa8f7909b450f16ffee9cad58f8997c6c8caee65a3d3c33a999d160",
+          "size": 872,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/chat-filter/mod.toml"
+        }
+      ],
+      "id": "chat-filter",
+      "kind": "lua",
+      "name": "Chat Filter",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "chatfind": {
+          "args": "<words>",
+          "help": "Searches this session's chat lines."
+        },
+        "chatwin": {
+          "args": "<tell | party | ls | ls2 | say | shout | yell | unity>",
+          "help": "Opens a window for one chat channel.",
+          "params": [
+            {
+              "name": "tell",
+              "options": [
+                "tell",
+                "party",
+                "ls",
+                "ls2",
+                "say",
+                "shout",
+                "yell",
+                "unity"
+              ],
+              "type": "enum"
+            }
+          ]
+        }
+      },
+      "description": "A separate window for a chat channel (tells, party, linkshells, say, shout, yell, unity) with a line to answer in, and a search over the session's lines (the chat window add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "fd2b84c38fed447c20f362d1142b52288365f49c9cdae0f3c24da8d392c573dd",
+          "size": 3818,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/chat-windows/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "7caf82d63d8acd88724baf469a21ef97b0ecf7105fd36de78220f4c8ac4775b6",
+          "size": 831,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/chat-windows/mod.toml"
+        }
+      ],
+      "id": "chat-windows",
+      "kind": "lua",
+      "name": "Chat Windows",
+      "version": "1.0.3"
+    },
+    {
+      "authors": [],
+      "description": "Switches for the game's built-in waits and a few display choices (the config and delay add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "da80e59683902b65ee8ff041f3c99f4a629108027dc34df658088b33c32646ea",
+          "size": 794,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/client-tweaks/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "642f8a997dc2f9c3ca5d7b52c0537a7c16576d762fca59aa374a9fe057b21aa6",
+          "size": 1344,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/client-tweaks/mod.toml"
+        }
+      ],
+      "id": "client-tweaks",
+      "kind": "lua",
+      "name": "Client Tweaks",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "description": "Earth time, the moon phase and the next Vana'diel day beside the game's clock (the clock add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "fed0daffa74a39156c95957c867780f03c9f3f42ac3915a1386641633489645e",
+          "size": 371,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/clock/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "8a925cd9b42f94d60f5b5652ed66c69e7291de845e10b179877271d9ead936ef",
+          "size": 377,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/clock/mod.toml"
+        }
+      ],
+      "id": "clock",
+      "kind": "lua",
+      "name": "Clock",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "left": {
+          "args": "",
+          "forms": [
+            {
+              "args": "spells [job]",
+              "help": "The spells a job has yet to learn.",
+              "params": [
+                {
+                  "name": "job",
+                  "type": "job"
+                }
+              ]
+            },
+            {
+              "args": "quests",
+              "help": "The quests not done, by area."
+            }
+          ],
+          "help": "Opens or closes the Completion Log window."
+        }
+      },
+      "description": "What is left to do: the spells a job has yet to learn and every area's quests, done, under way or not started (the checklist add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "9d3b89ccb3fd7e34c6fb89b1420734b9e2a311d085ce0fac3a0579640c029c53",
+          "size": 4683,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/completion-log/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "e16bae2122b13b97973d729c8752cbec009f3f097623c00a04149717817aafeb",
+          "size": 733,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/completion-log/mod.toml"
+        }
+      ],
+      "id": "completion-log",
+      "kind": "lua",
+      "name": "Completion Log",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "pops": {
+          "args": "[NM]",
+          "help": "The pop items for an Empyrean NM, or a list of them."
+        },
+        "znm": {
+          "args": "",
+          "help": "The Zeni NMs' pop items."
+        }
+      },
+      "description": "A window for the content you are in: Dynamis, Abyssea, Salvage, Nyzul Isle, Omen, Delve, Odyssey, Sortie or a reive, with the time left and what the content's messages tell; pop lists for the Empyrean and Zeni NMs (the content tracker add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "8c1359da98cf9f443c885ccd83939a63ff50e483c34ed571a63bc4d2eaf75970",
+          "size": 11332,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/content-trackers/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "f428d7f10e3285b4dc90a099a8f1aec17892778a0c369f28ca2463799799fdd4",
+          "size": 880,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/content-trackers/mod.toml"
+        },
+        {
+          "path": "src/delve.lua",
+          "sha256": "90cd36ad2e0ecf0b9b6913de0d9e5a1771f43f3ad6f09055e6860ded0f9fbb4b",
+          "size": 3133,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/content-trackers/src/delve.lua"
+        },
+        {
+          "path": "src/empy.lua",
+          "sha256": "f532db27f6f679c5e6b00ad55eee0aa1e9cfa0b183af69b350b7f8f3635dbf75",
+          "size": 11676,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/content-trackers/src/empy.lua"
+        },
+        {
+          "path": "src/odyssey.lua",
+          "sha256": "64d0ebf74b525a5ad306f55b1c0a72dff90730464e262bcacb2a0b6cdd572b3d",
+          "size": 4818,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/content-trackers/src/odyssey.lua"
+        },
+        {
+          "path": "src/omen.lua",
+          "sha256": "c08e825c4bea98b707d8660358ed9327cd21456583ff8116360ead8da3751e1a",
+          "size": 4701,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/content-trackers/src/omen.lua"
+        },
+        {
+          "path": "src/pops.lua",
+          "sha256": "b05c96ca74abf8ccbdbefca8e5c116f4d8059f18003f48a0a4c7784f7915e286",
+          "size": 8031,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/content-trackers/src/pops.lua"
+        },
+        {
+          "path": "src/reive.lua",
+          "sha256": "872ec243b87be2b74cf1c7b219427fa9017af29713ff224a7c8d5502e3cea323",
+          "size": 4126,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/content-trackers/src/reive.lua"
+        },
+        {
+          "path": "src/sortie.lua",
+          "sha256": "a9846e7e62898c4bf5b9052fb83c5d0eaa1ba9807cfb0f49dc1135b577152160",
+          "size": 2332,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/content-trackers/src/sortie.lua"
+        },
+        {
+          "path": "src/znm.lua",
+          "sha256": "d2e95567eb919307139af5aea18aaf0c5c22c87182d0e4500bdf4bf9e58dcf03",
+          "size": 3026,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/content-trackers/src/znm.lua"
+        }
+      ],
+      "id": "content-trackers",
+      "kind": "lua",
+      "name": "Content Trackers",
+      "version": "1.1.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "timer": {
+          "args": "<time> <name>",
+          "forms": [
+            {
+              "args": "cancel <name>",
+              "help": "Stops a countdown."
+            },
+            {
+              "args": "clear",
+              "help": "Stops them all."
+            }
+          ],
+          "help": "Starts a countdown: 90, 5m, 1h30m or 2:30."
+        }
+      },
+      "description": "Your countdowns as rows in the Timers windows, with a line when each is up (the timer add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "75a93fddeae2004e3b9675f14c8161d1b112285cb774939d750c649e74bf3eea",
+          "size": 1552,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/countdowns/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "88efba88dd5e8f10a016df9a750afbb448ba17839037ba58970cf1382eed5f52",
+          "size": 603,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/countdowns/mod.toml"
+        }
+      ],
+      "id": "countdowns",
+      "kind": "lua",
+      "name": "Countdowns",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "description": "Plays cutscenes and other events faster (the fast-cutscene add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "6c9817b96474b6deef2e7bdda8e9a63aedd6ff1f28586d3c5a0a426b7682256a",
+          "size": 282,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/cutscene-speed/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "046f341ad8f8c5db7fd84b9d45111705737109f68912d12cd558504eca4c2c4c",
+          "size": 422,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/cutscene-speed/mod.toml"
+        }
+      ],
+      "id": "cutscene-speed",
+      "kind": "lua",
+      "name": "Cutscene Speed",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "description": "NPC talk in a speech bubble with the speaker's face and name, its tail pointing at them, over the speaker or at the bottom of the screen (the balloon add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "d84cd5df2ea3b66ce8939764c6013aa15ae71cb24511490a794869975e1b3b0e",
+          "size": 4950,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/dialogue-bubbles/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "e79a9d7d356919530fc8c35145a8444e38b6d8a95728c5950793a5d79c81921c",
+          "size": 1014,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/dialogue-bubbles/mod.toml"
+        }
+      ],
+      "id": "dialogue-bubbles",
+      "kind": "lua",
+      "name": "Dialogue Bubbles",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [
+        "vana-client"
+      ],
+      "commands": {
+        "dps": {
+          "args": "",
+          "forms": [
+            {
+              "args": "reset",
+              "help": "Starts counting again."
+            }
+          ],
+          "help": "Your party's damage since the first hit after a reset."
+        }
+      },
+      "description": "/dps: the damage your party dealt since the first hit after a reset; /dps reset starts again. Members who left keep counting in the total.",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "b3f17e5389fcac684eb7644242fa9607671224a4c0a2ce81971750525e1dfb1a",
+          "size": 3452,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/dps/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "eaf0b83ed2aa18fbc6ce50ffaa8883763ed831eb7f6cf4d812c53b8dc4361b4a",
+          "size": 615,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/dps/mod.toml"
+        }
+      ],
+      "id": "dps",
+      "kind": "lua",
+      "name": "DPS",
+      "version": "1.0.4"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "cancel": {
+          "args": "<effect>[, <effect>...]",
+          "help": "Cancels status effects: a name, a name with *, or an id."
+        }
+      },
+      "description": "Cancels your status effects by name or id from a command, for macros (the cancel add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "0ddbc92a5791877ebc3f3c5e535a42b96c5704b08965905a7312adbc8acbaee7",
+          "size": 1283,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/effect-remover/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "ea7e91f1776f13dd5c528a70cbf1c08ef34acfb104e8e037442618ba00f50bce",
+          "size": 523,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/effect-remover/mod.toml"
+        }
+      ],
+      "id": "effect-remover",
+      "kind": "lua",
+      "name": "Effect Remover",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "rename": {
+          "args": "<name> as <new name>",
+          "forms": [
+            {
+              "args": "<name>",
+              "help": "Gives it its name back."
+            }
+          ],
+          "help": "Shows a character or monster under another name, on your screen only."
+        },
+        "renames": {
+          "args": "",
+          "help": "Lists the names you changed."
+        }
+      },
+      "description": "Renames characters and monsters on your screen, hides your name plate, and sets your size (the renamer and name plate add-ons). Only you see it.",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "7de1ae87fd0623e320222e3d7c676fac9698024d846e5d38a3b87cd075a027c4",
+          "size": 1793,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/entity-styles/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "25c8b05d91ad7586674121688645359a1557bf6dd41149c7366e934aaf880930",
+          "size": 1012,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/entity-styles/mod.toml"
+        }
+      ],
+      "id": "entity-styles",
+      "kind": "lua",
+      "name": "Entity Styles",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "description": "What you wear as a grid of item icons, as the equipment menu lays it out, with the ammo count (the equipment viewer add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "cac2f681ece3ef0ffb74c982c239b5d72728cbbeb14a0dfa65f07c48022ae43c",
+          "size": 1997,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/equipment-grid/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "f815e87b16e55da1ebdc5c93ba556b9b03b6d81251058496ffd001604b254e4a",
+          "size": 384,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/equipment-grid/mod.toml"
+        }
+      ],
+      "id": "equipment-grid",
+      "kind": "lua",
+      "name": "Equipment Grid",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "rules": {
+          "args": "",
+          "forms": [
+            {
+              "args": "reload",
+              "help": "Reads the rules file again."
+            }
+          ],
+          "help": "Lists your event rules."
+        }
+      },
+      "description": "Runs your command lines when things happen: a zone, a job, an effect gained or lost, HP or MP low, a word in chat, a new day or weather (the auto-exec add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "68781344ce31d190e832cfe371bf369b983350b41a73dde33cf245456b2dbc05",
+          "size": 3105,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/event-rules/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "2d2c209c6f7a7f434e6c9a9e137af20fac4353754875f765a805c14ddd0e404a",
+          "size": 611,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/event-rules/mod.toml"
+        }
+      ],
+      "id": "event-rules",
+      "kind": "lua",
+      "name": "Event Rules",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "description": "The zone lines around you outlined on the ground, so you can see where a zone ends (the zone line add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "7de6c955346bd2faa5787906ccff65e6ec328829676d94a010b0bbf123dc25f4",
+          "size": 1719,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/exit-markers/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "fc680145db6f46ec289d0954aeca8ddb73fd89ee0c60610fd798ec82bffb259e",
+          "size": 612,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/exit-markers/mod.toml"
+        }
+      ],
+      "id": "exit-markers",
+      "kind": "lua",
+      "name": "Exit Markers",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "find": {
+          "args": "<words>",
+          "help": "Which bags hold each item whose name has these words, every character's."
+        }
+      },
+      "description": "/find <words>: the bags holding each item whose name has them, the account's other characters' too (the find-all add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "b47b7735388b915871f34178da5418daeb23bf0a90646af411ab98e63fa72a90",
+          "size": 3102,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/find/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "89ba156000d50dd80fa2846d897b2eadadb9bf1141092b3b9a0448fcd83fe50a",
+          "size": 287,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/find/mod.toml"
+        }
+      ],
+      "id": "find",
+      "kind": "lua",
+      "name": "Find",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "description": "The modern UI's focus panel on the target panel: the focus target and the last target, each with its HP; a click targets it.",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "8faa9b07f01ee6b50b3beb85b9460c65803759d5a4353487e88e737497671f48",
+          "size": 1000,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/focus-target/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "8daef04d24155d249fb8f8f1643948f46f3a632041493d0b8e74d8943a415c25",
+          "size": 471,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/focus-target/mod.toml"
+        }
+      ],
+      "id": "focus-target",
+      "kind": "lua",
+      "name": "Focus and Last Target",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "gather": {
+          "args": "reset",
+          "help": "Starts the gathering log again."
+        }
+      },
+      "description": "Your harvesting, logging, mining and excavation this session: tries, success rate, broken tools and what you got (the gathering add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "d15e0d6988dd6fe5f34f69154b52488462ec32ab5c61a9d799b064a821c6f730",
+          "size": 2335,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gathering-log/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "160f3337e983a1e778d37bbd6631e0dabdd1ee797ccdd66cb7b6e61fdc44abb8",
+          "size": 527,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gathering-log/mod.toml"
+        }
+      ],
+      "id": "gathering-log",
+      "kind": "lua",
+      "name": "Gathering Log",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "gearstats": {
+          "args": "",
+          "help": "Opens or closes the Gear Stats window."
+        }
+      },
+      "description": "The totals of the stats on everything you wear, from the items' descriptions and their augments (the gear stat add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "df681f06c5104138aa1d3a7059983485979e498745cb65eba74a8b219320a240",
+          "size": 3120,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gear-stats/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "d0aa36e1edde69f85db220e41347af95a59f03bee7243999199fbc1ce1d7d0b4",
+          "size": 515,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gear-stats/mod.toml"
+        }
+      ],
+      "id": "gear-stats",
+      "kind": "lua",
+      "name": "Gear Stats",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "ac": {
+          "args": "<command>",
+          "help": "Ashitacast's commands, for the loaded profile."
+        },
+        "gearshift": {
+          "args": "",
+          "forms": [
+            {
+              "args": "file",
+              "help": "Shows the loaded gear file, or that the set builder's sets are worn."
+            },
+            {
+              "args": "reload",
+              "help": "Reads the gear file again."
+            },
+            {
+              "args": "mode <hybrid|acc|pdt|mdt|mb|macc|off>",
+              "help": "The set builder's toggles: hybrid or accuracy TP, physical or magic defence, magic burst or magic accuracy nukes; off clears them."
+            }
+          ],
+          "help": "Opens the set builder's window."
+        },
+        "gs": {
+          "args": "<command>",
+          "help": "GearSwap's commands, for the loaded GearSwap file."
+        },
+        "lac": {
+          "args": "<command>",
+          "help": "LuAshitacast's commands, for the loaded profile."
+        },
+        "spellcast": {
+          "args": "<command>",
+          "help": "Spellcast's commands, for the loaded file."
+        }
+      },
+      "description": "Swaps gear around your actions from GearSwap job files and LuAshitacast and Ashitacast XML profiles, unchanged (the gear-swap add-ons), or builds every set of your job from the gear you hold (//gearshift).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "2ff7c39b75bf33b13dc07a83c3c30b067fabd11088672b4ed9ed61c1eaf7474a",
+          "size": 5665,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "cd9252a5f4a06eaaeca2b2a733610741264e98f90c6ae680a0e5528346b1bd2e",
+          "size": 2234,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/mod.toml"
+        },
+        {
+          "path": "src/acxml.lua",
+          "sha256": "b72302a72954bc3a066c6b57c46227d842c977ca8d9e346f54ecbe994709ea88",
+          "size": 55548,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/acxml.lua"
+        },
+        {
+          "path": "src/build/bis.lua",
+          "sha256": "b3a0d9ac3695d2bfa2e8557ed60147bc20a0c2d18939356144e8adf34975e76d",
+          "size": 51647,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/build/bis.lua"
+        },
+        {
+          "path": "src/build/blu.lua",
+          "sha256": "04203420f5de1128199346a0657fafecf404ae71b1e9c4afd0edd90840d8de6b",
+          "size": 4510,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/build/blu.lua"
+        },
+        {
+          "path": "src/build/pick.lua",
+          "sha256": "1842be1601ee6a180b229ecb950b21e2e301e1c819e6088b1f74625b77874495",
+          "size": 13400,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/build/pick.lua"
+        },
+        {
+          "path": "src/build/run.lua",
+          "sha256": "b1cf4e0e6b34fb421abd8d820f49d4e669761b9bfa466345d8058f8abbbb657b",
+          "size": 21735,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/build/run.lua"
+        },
+        {
+          "path": "src/build/sets.lua",
+          "sha256": "a61b612b6d08002a825e137e6725cc721da7a0cc21c87a6787a739540acc4786",
+          "size": 25156,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/build/sets.lua"
+        },
+        {
+          "path": "src/build/stats.lua",
+          "sha256": "34ddb89d41a626eb9f573a36743f49811b0614c4bb7cde6615764ee9241b96ff",
+          "size": 18408,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/build/stats.lua"
+        },
+        {
+          "path": "src/build/window.lua",
+          "sha256": "5a1a94e8ab0217afe2c6acdbf6dc66c0ecce5a1d99c4a9f4592324d470da4d80",
+          "size": 10239,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/build/window.lua"
+        },
+        {
+          "path": "src/build/ws.lua",
+          "sha256": "ed75f281fa4429df5a12e439fdbb8783dd23f048730ff134b9029ecbe462f43d",
+          "size": 31220,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/build/ws.lua"
+        },
+        {
+          "path": "src/compat.lua",
+          "sha256": "f95f7cdff5e89d6e02fbcc39427a6039af959570b7c23d8bc816f62257be8a9e",
+          "size": 5247,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/compat.lua"
+        },
+        {
+          "path": "src/core.lua",
+          "sha256": "77f088304e0da563f4694ebb701cc55f370e189078156d7cd70b0337e917f4cf",
+          "size": 12902,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/core.lua"
+        },
+        {
+          "path": "src/gs.lua",
+          "sha256": "97749a6781578efcb148f69645e7ebf6669e45000f74ffdd22598e63cc74e7c8",
+          "size": 27962,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/gs.lua"
+        },
+        {
+          "path": "src/lac.lua",
+          "sha256": "b8eb4ddd421798d63e5e042a5f2ccbccfd174c4435c0bc38e3993bc72a42f5b6",
+          "size": 22446,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/lac.lua"
+        },
+        {
+          "path": "src/modes.lua",
+          "sha256": "77faefbca23148dc5271e981d5491ea4b1b553c6cb3a810e65d69482211138ae",
+          "size": 4356,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/modes.lua"
+        },
+        {
+          "path": "src/names.lua",
+          "sha256": "3339fc27f8a2d66e93ad92cb7df5b151be344a04df81e6e3619b4e587b403750",
+          "size": 4242,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/names.lua"
+        },
+        {
+          "path": "src/regex.lua",
+          "sha256": "ce7a3ca99e897d217247cc8f9582d3bd33e9b6175233ddb40c5a866c49971e30",
+          "size": 6151,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/regex.lua"
+        },
+        {
+          "path": "src/spellcast.lua",
+          "sha256": "1b6b589b1fafa445131b41a7dc88f2a3eb5133f670126bfc03c55160232726b8",
+          "size": 52726,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/spellcast.lua"
+        },
+        {
+          "path": "src/texts.lua",
+          "sha256": "0f4b49b146188ea927da20da9a4196a333ef0799acb2830aada8e80eeb1ce99e",
+          "size": 10144,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/texts.lua"
+        },
+        {
+          "path": "src/windower.lua",
+          "sha256": "c648c48fb9a8202783010f8185252b1cd8569f536510eeac4347419445b1eaf2",
+          "size": 6994,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/windower.lua"
+        },
+        {
+          "path": "src/xml.lua",
+          "sha256": "9eec421ee1fa6ba12930446b648e0bc1ec97c1ae8608b67f28e07864274a5b6c",
+          "size": 4647,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/gearshift/src/xml.lua"
+        }
+      ],
+      "id": "gearshift",
+      "kind": "lua",
+      "name": "Gearshift",
+      "version": "0.2.7"
+    },
+    {
+      "authors": [],
+      "description": "Hides chosen parts of the interface in the Mog House, in town zones you name, while fighting or in cutscenes (the hide-the-HUD add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "11b60620ff9c6704d87b894a11f34be7eaf844704a7f789881954a4404fc71d8",
+          "size": 1545,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hide-rules/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "65a59b199020922670dd221847d667888db5508ee40e8168ae73cc1bded69af2",
+          "size": 1077,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hide-rules/mod.toml"
+        }
+      ],
+      "id": "hide-rules",
+      "kind": "lua",
+      "name": "Hide Rules",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [
+        "Arusia"
+      ],
+      "commands": {
+        "hb": {
+          "args": "",
+          "forms": [
+            {
+              "args": "show",
+              "help": "Shows the bars."
+            },
+            {
+              "args": "hide",
+              "help": "Hides the bars."
+            },
+            {
+              "args": "more",
+              "help": "Shows one more bar."
+            },
+            {
+              "args": "fewer",
+              "help": "Shows one bar fewer."
+            },
+            {
+              "args": "palette",
+              "help": "Opens or closes the macro palette for your job."
+            },
+            {
+              "args": "mode",
+              "help": "Switches between the keyboard hotbars and the gamepad crossbars."
+            },
+            {
+              "args": "mode hotbars",
+              "help": "Uses the keyboard hotbars."
+            },
+            {
+              "args": "mode gamepad",
+              "help": "Uses the gamepad crossbars: hold LT, RT or both, then the d-pad, a face button, L1 / R1 or L3 / R3."
+            },
+            {
+              "args": "assign",
+              "help": "Starts or ends assigning crossbar slots with the controller (or hold a trigger and press Back; a trigger and Start open the manager): a slot press opens the library's list, A puts the macro there."
+            },
+            {
+              "args": "run <bar> <slot>",
+              "help": "Fires a slot."
+            },
+            {
+              "args": "reload",
+              "help": "Reads this world's macros file (macros-<World>.json) again."
+            },
+            {
+              "args": "wipestock",
+              "help": "Empties the game's macro palette (it can be restored)."
+            },
+            {
+              "args": "restorestock",
+              "help": "Puts the game's macro palette back."
+            }
+          ],
+          "help": "Opens the hotbar manager."
+        }
+      },
+      "description": "Hotbars of multi-line macros with their actions' icons and recasts, loaded by main job and sub job; a macro library with a builder and a palette to drag from. Play with the keyboard's hotbars or the gamepad's crossbars (LT, RT or both with the d-pad, face buttons, L1 / R1 and L3 / R3), and switch between them with //hb mode. Gamepad mode needs input.capture (to take the triggers and buttons) and automation (a slot fires from a timer, since a pad filter cannot wait for a macro's waits).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "973862ea736c7e265bc7861d650f15f08490f024a34b69948302f8a4de5a769d",
+          "size": 5754,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "ca4e0fb1d17c8a5696972a3c21863f1c7e86bdf24a9b2b05f864f5290678bf02",
+          "size": 4215,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/mod.toml"
+        },
+        {
+          "path": "src/actions.lua",
+          "sha256": "f57c3421c24ff30a55dd28fafe1a079980647682cf8a9346044e3306e4290906",
+          "size": 4071,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/src/actions.lua"
+        },
+        {
+          "path": "src/bar.lua",
+          "sha256": "ccccfaf82f239ff1d9f3cd973ad0e727749739d55c151b6385ef312815352497",
+          "size": 13705,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/src/bar.lua"
+        },
+        {
+          "path": "src/builder.lua",
+          "sha256": "2b94f26f83aefe20ceb91536c491597cbce9defda20afe7f93f25c91d1854c80",
+          "size": 12588,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/src/builder.lua"
+        },
+        {
+          "path": "src/chooser.lua",
+          "sha256": "7814a48cb72f4e9f81cf7489a0228d1863791b13f603e8039cbaecb22aeaf489",
+          "size": 4003,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/src/chooser.lua"
+        },
+        {
+          "path": "src/data.lua",
+          "sha256": "14a1039554c699de0410e450f9ea9058bb8c59476bcf673472a8a97832fe7be2",
+          "size": 15962,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/src/data.lua"
+        },
+        {
+          "path": "src/ghost.lua",
+          "sha256": "74e8caa5008b7ea3c0d02ea69e0e71ed29fbda02fa53a86521d94446f88b1763",
+          "size": 2407,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/src/ghost.lua"
+        },
+        {
+          "path": "src/jobs.lua",
+          "sha256": "8c553f5f802bfd310eb9e3decddccf24fcfdb2a621d578ad6259a5a11e1b1d5e",
+          "size": 696,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/src/jobs.lua"
+        },
+        {
+          "path": "src/keys.lua",
+          "sha256": "1563db0d7abedef62ca3d6895dd3e43f3fe7727ef283ea73cea46f0e050861b2",
+          "size": 4860,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/src/keys.lua"
+        },
+        {
+          "path": "src/manager.lua",
+          "sha256": "bca8cbce43b50c74606c553bc5cc825c983ee16174b9745d3e1be5208577f975",
+          "size": 32263,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/src/manager.lua"
+        },
+        {
+          "path": "src/menu.lua",
+          "sha256": "2b09d2a11a33ca386a97fbb8c41b6559600e8a5e4c2f1238446f9f5bcf430246",
+          "size": 1122,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/src/menu.lua"
+        },
+        {
+          "path": "src/mode.lua",
+          "sha256": "c555b7e068446f69df79bf61d7829cfd375b58aa3a0d75a9d518f9ecbe752e3e",
+          "size": 1444,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/src/mode.lua"
+        },
+        {
+          "path": "src/pad.lua",
+          "sha256": "724bc6238ae857ae0378e2010f7ba6be0c17c3a9582848e8beb2b6df24dd46a4",
+          "size": 17620,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/src/pad.lua"
+        },
+        {
+          "path": "src/palette.lua",
+          "sha256": "97102a5fdff6b9705552437dfb13fa82c191a8315d8519bb7f5b7b2fda9e378b",
+          "size": 6355,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/src/palette.lua"
+        },
+        {
+          "path": "src/runner.lua",
+          "sha256": "1d921f612e5ef2adededc9b9bf704ca66c574f2fbe4f961cf19cd3f585890d0b",
+          "size": 2044,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/src/runner.lua"
+        },
+        {
+          "path": "src/slotview.lua",
+          "sha256": "05401d9e2ce26fb80e372f9aecc6abe4c893052f35ebb08089589a2fc205587f",
+          "size": 7986,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/src/slotview.lua"
+        },
+        {
+          "path": "src/stock.lua",
+          "sha256": "4da0e6c74cda1b7f5d2426baa880276a2c1194036c23a88f39cae801e2048197",
+          "size": 4618,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/hotbar/src/stock.lua"
+        }
+      ],
+      "id": "hotbar",
+      "kind": "lua",
+      "name": "Hotbars",
+      "version": "1.12.5"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "bags": {
+          "forms": [
+            {
+              "args": "add <item>",
+              "help": "Counts an item.",
+              "params": [
+                {
+                  "name": "item",
+                  "type": "item"
+                }
+              ]
+            },
+            {
+              "args": "addkey <key item>",
+              "help": "Shows whether you have a key item.",
+              "params": [
+                {
+                  "name": "key item",
+                  "type": "key_item"
+                }
+              ]
+            },
+            {
+              "args": "remove <name>",
+              "help": "Stops counting an item or key item."
+            },
+            {
+              "args": "list",
+              "help": "Lists what it counts."
+            }
+          ],
+          "help": "The items and key items the Inventory HUD counts."
+        }
+      },
+      "description": "Bag space, gil and the items and key items you choose, in a window on a screen edge (the inventory and gil tracker add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "32f116438b35a98524713fc60a7400bce671ab1508fe31dd5d8ec862eff00a3f",
+          "size": 3308,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/inventory-hud/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "1ccb312635612ec67b353f20f4a0a33690ba8ef62373298a0da81dcba3730746",
+          "size": 977,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/inventory-hud/mod.toml"
+        }
+      ],
+      "id": "inventory-hud",
+      "kind": "lua",
+      "name": "Inventory HUD",
+      "version": "1.0.3"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "trials": {
+          "args": "",
+          "help": "Lists your trial weapons' weapon skill points."
+        }
+      },
+      "description": "A trial weapon's weapon skill points toward its unlock, shown while it is highlighted in a game list and listed by command (the latent checker add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "07a8ec4735075d5310651a3ef8a8a3ee7eaa563051a10dc110d553ca61df4342",
+          "size": 1814,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/item-details/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "b508fb1f75544e6d152a5616918c321523e8d38b2d36971a47ad8264cc44935c",
+          "size": 511,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/item-details/mod.toml"
+        },
+        {
+          "path": "src/trials.lua",
+          "sha256": "07137c7e6e74ab06cb77dcb5df72c44ea81da90bb30f6d48a3a9b477acaa030d",
+          "size": 783,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/item-details/src/trials.lua"
+        }
+      ],
+      "id": "item-details",
+      "kind": "lua",
+      "name": "Item Details",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "description": "Charges and counters your jobs use: stratagems, Ready and Quick Draw charges, Ninja shadows and tools, maneuvers (the job gauge add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "48e7159a47298259c3bf26ace3abe11e653ca8a9ea19e87e506ef1556c2c511d",
+          "size": 2910,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/job-gauges/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "e7cdcdc1dd32c5e6104c62eda8d30ab2c1dd77fd9d7b9e5c8bedfe74d6fe9b44",
+          "size": 453,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/job-gauges/mod.toml"
+        }
+      ],
+      "id": "job-gauges",
+      "kind": "lua",
+      "name": "Job Gauges",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "alias": {
+          "args": "<name> <line>",
+          "help": "Makes a short name run a longer command line."
+        },
+        "aliases": {
+          "args": "",
+          "help": "Lists your aliases."
+        },
+        "bind": {
+          "args": "<key> <line>",
+          "help": "Binds a key to a command line."
+        },
+        "binds": {
+          "args": "",
+          "help": "Lists your key binds."
+        },
+        "unalias": {
+          "args": "<name>",
+          "help": "Removes an alias."
+        },
+        "unbind": {
+          "args": "<key>",
+          "help": "Takes a key's bind off."
+        }
+      },
+      "description": "Binds keys to command lines and makes short aliases for long commands, kept per character (the bind and alias add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "4441167147f1b3019fff135b1f8268a40a389997aab83ca567b90d24408b1cf7",
+          "size": 2848,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/key-commands/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "501a5c1b3e62f9ac2e8538d755bc19c80464ed698af8a0694c89d4dbf8dfde01",
+          "size": 860,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/key-commands/mod.toml"
+        }
+      ],
+      "id": "key-commands",
+      "kind": "lua",
+      "name": "Key Commands",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "links": {
+          "args": "",
+          "forms": [
+            {
+              "args": "<number>",
+              "help": "Opens a link in your browser."
+            }
+          ],
+          "help": "Lists the web links seen in chat."
+        }
+      },
+      "description": "Numbers the web links in chat so you can open or copy them (the chat link add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "c87e52b29ea64f7c0f1d11a6f6273e728efbf9340cc612ee55722624356641e8",
+          "size": 2412,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/link-catcher/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "2c72882cc68b59d9d5fa3f1296031212f90ad7760764043b056eb3cc13c8b9ed",
+          "size": 510,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/link-catcher/mod.toml"
+        }
+      ],
+      "id": "link-catcher",
+      "kind": "lua",
+      "name": "Link Catcher",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "trim": {
+          "args": "<spell, ability or mount>",
+          "forms": [
+            {
+              "args": "list",
+              "help": "Lists what you left out."
+            },
+            {
+              "args": "clear",
+              "help": "Puts everything back."
+            }
+          ],
+          "help": "Leaves a spell, ability or mount out of the game's lists; again puts it back."
+        }
+      },
+      "description": "Spells, abilities and mounts you never use left out of the game's lists, kept per character (the list trimming add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "23bc2db9b50d83e1636b57126d39ba4a237556b69a7f9155ed98381ac036949d",
+          "size": 2488,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/list-trimmer/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "cbf35de7087160fc716f6cc882437481f67ca89bc78bc31b70e7d89832f848fc",
+          "size": 687,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/list-trimmer/mod.toml"
+        }
+      ],
+      "id": "list-trimmer",
+      "kind": "lua",
+      "name": "List Trimmer",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "description": "Writes the chat log to a file a day per character, as plain text (the logger add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "5045ccc35c18ff9fe7a787bd2d1bb74af7e5e8895f3ecad4fb48db2b7b28606d",
+          "size": 934,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/log-files/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "be4410ebb4a2d89f044c63d56df91452d8505d2b42c84de06a267f1e8aef740c",
+          "size": 492,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/log-files/mod.toml"
+        }
+      ],
+      "id": "log-files",
+      "kind": "lua",
+      "name": "Log Files",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "look": {
+          "forms": [
+            {
+              "args": "race <race>",
+              "help": "Your race.",
+              "params": [
+                {
+                  "name": "race",
+                  "options": [
+                    "hume m",
+                    "hume f",
+                    "elvaan m",
+                    "elvaan f",
+                    "tarutaru m",
+                    "tarutaru f",
+                    "mithra",
+                    "galka"
+                  ],
+                  "type": "enum"
+                }
+              ]
+            },
+            {
+              "args": "face <1a..8b>",
+              "help": "Your face.",
+              "params": [
+                {
+                  "name": "1a..8b",
+                  "options": [
+                    "1a",
+                    "1b",
+                    "2a",
+                    "2b",
+                    "3a",
+                    "3b",
+                    "4a",
+                    "4b",
+                    "5a",
+                    "5b",
+                    "6a",
+                    "6b",
+                    "7a",
+                    "7b",
+                    "8a",
+                    "8b"
+                  ],
+                  "type": "enum"
+                }
+              ]
+            },
+            {
+              "args": "<slot> <item | none | own>",
+              "help": "A piece of your gear.",
+              "params": [
+                {
+                  "name": "slot",
+                  "options": [
+                    "head",
+                    "body",
+                    "hands",
+                    "legs",
+                    "feet",
+                    "main",
+                    "sub",
+                    "range"
+                  ],
+                  "type": "enum"
+                },
+                {
+                  "also": [
+                    "none",
+                    "own"
+                  ],
+                  "name": "item",
+                  "type": "item"
+                }
+              ]
+            },
+            {
+              "args": "copy [name]",
+              "help": "Copies a player's look (your target's).",
+              "params": [
+                {
+                  "name": "name",
+                  "type": "player"
+                }
+              ]
+            },
+            {
+              "args": "others <race | own>",
+              "help": "One race for everyone else.",
+              "params": [
+                {
+                  "also": [
+                    "own"
+                  ],
+                  "name": "race",
+                  "options": [
+                    "hume m",
+                    "hume f",
+                    "elvaan m",
+                    "elvaan f",
+                    "tarutaru m",
+                    "tarutaru f",
+                    "mithra",
+                    "galka"
+                  ],
+                  "type": "enum"
+                }
+              ]
+            },
+            {
+              "args": "reset",
+              "help": "Your look back."
+            }
+          ],
+          "help": "Changes how characters look, on your screen only."
+        }
+      },
+      "description": "Changes how characters look on your screen only: your race, face and gear, a target's look copied, one race for everyone else (the dress-up add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "09c960786ff89da001ae491f76b8623bf9f7b9119b38ad88ef59470ca86535f6",
+          "size": 5340,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/look-changer/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "40f004796ed8694491be04d16b22e9e72b8240edddf80dad47575df53ea76b52",
+          "size": 1621,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/look-changer/mod.toml"
+        },
+        {
+          "path": "src/models.lua",
+          "sha256": "40e56a27a0a408d36ea0ac8de411b3ad982077466ec29a81301dbff72e42deb9",
+          "size": 132426,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/look-changer/src/models.lua"
+        }
+      ],
+      "id": "look-changer",
+      "kind": "lua",
+      "name": "Look Changer",
+      "version": "1.0.4"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "loot": {
+          "args": "[lot | pass | drop] [add | remove] <item>",
+          "forms": [
+            {
+              "args": "list",
+              "help": "Lists your rules."
+            }
+          ],
+          "help": "Lots, passes or drops treasure by your lists.",
+          "params": [
+            {
+              "name": "lot",
+              "options": [
+                "lot",
+                "pass",
+                "drop"
+              ],
+              "type": "enum"
+            },
+            {
+              "name": "add",
+              "options": [
+                "add",
+                "remove"
+              ],
+              "type": "enum"
+            },
+            {
+              "name": "item",
+              "type": "item"
+            }
+          ]
+        }
+      },
+      "description": "Lots, passes and drops treasure by your lists (the treasury and loot add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "809057150e85010abe1e6fd39ba752ace344af837bcc56154be898052e0aaa48",
+          "size": 5453,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/loot-rules/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "647448608445f5316f5136b63bdc5b679c1584b7f73f31b2bbf28a282ed69e1f",
+          "size": 1133,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/loot-rules/mod.toml"
+        }
+      ],
+      "id": "loot-rules",
+      "kind": "lua",
+      "name": "Loot Rules",
+      "version": "1.0.3"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "lootlog": {
+          "args": "reset",
+          "help": "Starts the loot log again."
+        }
+      },
+      "description": "Treasure Hunter on your target, what each kind of monster has dropped this session, and the treasure pool's time left (the loot tracker add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "4b94b98164e6ba2a9c1d72b3dfb0505108c9f092dc654b3506f87b3672a0c274",
+          "size": 3383,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/loot-tracker/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "d240677b06596dc80ca93427c8af97e156391f5971692ac6c26778fa39efe61f",
+          "size": 556,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/loot-tracker/mod.toml"
+        }
+      ],
+      "id": "loot-tracker",
+      "kind": "lua",
+      "name": "Loot Tracker",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "macros": {
+          "forms": [
+            {
+              "args": "save [sub]",
+              "help": "Keeps the palette's book and set for this job (or this sub job)."
+            },
+            {
+              "args": "forget [sub]",
+              "help": "Forgets them."
+            },
+            {
+              "args": "list",
+              "help": "Lists what is kept."
+            }
+          ],
+          "help": "The macro book and set kept for each job."
+        }
+      },
+      "description": "Turns the macro palette to the book and set you keep for each job when the job changes (the macro changer add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "dce38447ff3154544e4fd40bfcf71a016b7b0f9308b31b41f464a8a090e48963",
+          "size": 2495,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/macro-books/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "9b7eae8ed4e56b46eda2487b2c4132c8082c63b6c788b47eaaa50098a8a7f52d",
+          "size": 724,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/macro-books/mod.toml"
+        }
+      ],
+      "id": "macro-books",
+      "kind": "lua",
+      "name": "Macro Book Switch",
+      "version": "1.0.3"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "mapnote": {
+          "forms": [
+            {
+              "args": "add <text>",
+              "help": "Pins a note where you stand."
+            },
+            {
+              "args": "del <n>",
+              "help": "Removes a note by its number."
+            },
+            {
+              "args": "list",
+              "help": "Lists this zone's notes."
+            },
+            {
+              "args": "track <name>",
+              "help": "Marks a monster on the map."
+            },
+            {
+              "args": "untrack <name>",
+              "help": "Stops marking it."
+            }
+          ],
+          "help": "Notes on the zone's map, and monsters to track on it."
+        }
+      },
+      "description": "Notes pinned to places on a zone's map, your party and the monsters you track, marked on the Map Overlay (the map marker add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "93829992bf5b338b407e0a300b256d8485985cfdf599f472610c2254a3057c1f",
+          "size": 3703,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/map-notes/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "5ff3a7fc8959811318a5dab2907191d9261b0bdc735eff65daab4dd094ecb1ae",
+          "size": 987,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/map-notes/mod.toml"
+        }
+      ],
+      "id": "map-notes",
+      "kind": "lua",
+      "name": "Map Notes",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "description": "Ctrl or Alt + O shows the zone map over the game (the map add-ons): pan it with a drag, zoom it with the wheel.",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "df1c4ae32c5617239ba103e6b61af0b5976e28cb6fb9264a37103a443e785201",
+          "size": 5141,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/map-overlay/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "3023d2d07fda75bc36f94241d9cd8a350a945b35e79f5332f961b3153d2e24cd",
+          "size": 848,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/map-overlay/mod.toml"
+        }
+      ],
+      "id": "map-overlay",
+      "kind": "lua",
+      "name": "Map Overlay",
+      "version": "1.1.1"
+    },
+    {
+      "authors": [],
+      "description": "A small map in a corner that follows you and shows what is nearby (the minimap add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "89e83ffded5eaacd633e83570b6930127ebf479190588ec470d913e6e80d888d",
+          "size": 3230,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/minimap/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "3351e64e291a321f2218e537c46018a3aeda9361878143f357793065ef101cc8",
+          "size": 360,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/minimap/mod.toml"
+        }
+      ],
+      "id": "minimap",
+      "kind": "lua",
+      "name": "Minimap",
+      "version": "2.0.1"
+    },
+    {
+      "authors": [],
+      "description": "A box on screen with what nearby monsters ready or start casting, a sound for the moves you watch, and an alert when a monster you watch for comes near (the monster alert add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "0c299b1df52c8c443f41cf819a175cd76f891629331dc65d3b5c30f56d477dbd",
+          "size": 3265,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/monster-alerts/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "5b9d9a19f75ec3f4b08b668502fa7c4ba0257d7228dd10ad820b050f2d5a381c",
+          "size": 763,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/monster-alerts/mod.toml"
+        }
+      ],
+      "id": "monster-alerts",
+      "kind": "lua",
+      "name": "Monster Alerts",
+      "version": "1.0.1"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "mobnote": {
+          "args": "",
+          "forms": [
+            {
+              "args": "<text>",
+              "help": "Sets it."
+            },
+            {
+              "args": "clear",
+              "help": "Clears it."
+            }
+          ],
+          "help": "Shows your note on the target."
+        }
+      },
+      "description": "A bar across the top of the screen with the zone, the time and weather, and your target: its /check result and the notes you keep on it (the info bar add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "5c05a839964f1590ff6b97d9c5146d9fca1082c9313afde993c552362f320023",
+          "size": 3390,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/monster-notes/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "f8c03ea542716bb66b738c1c94f67c725d2275450a31abb1dc3004b54a63b869",
+          "size": 815,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/monster-notes/mod.toml"
+        }
+      ],
+      "id": "monster-notes",
+      "kind": "lua",
+      "name": "Monster Notes",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "ride": {
+          "args": "",
+          "forms": [
+            {
+              "args": "<part of a name>",
+              "help": "Calls the mount whose name has it."
+            },
+            {
+              "args": "list",
+              "help": "Lists your mounts."
+            }
+          ],
+          "help": "Calls a random mount."
+        }
+      },
+      "description": "Calls a random mount of yours, or one by part of its name (the mount roulette add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "93e58a4a78511233a2397b2ea92834b5415563f0be2d5d874bbb6119db9ceffa",
+          "size": 1203,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/mount-picker/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "2dd96182ea8fc6f3bbdf4968412ddc8b6397a359e4d62289eae9619da11af24e",
+          "size": 567,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/mount-picker/mod.toml"
+        }
+      ],
+      "id": "mount-picker",
+      "kind": "lua",
+      "name": "Mount Picker",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "focus": {
+          "args": "<name>",
+          "help": "Brings another character's game window to the front.",
+          "params": [
+            {
+              "name": "name",
+              "type": "player"
+            }
+          ]
+        },
+        "send": {
+          "args": "<name | all | others> <command>",
+          "help": "Runs a command in your other game windows.",
+          "params": [
+            {
+              "also": [
+                "all",
+                "others"
+              ],
+              "name": "name",
+              "type": "player"
+            }
+          ]
+        },
+        "sendtarget": {
+          "args": "[name]",
+          "help": "Has your other windows target what you target."
+        },
+        "stna": {
+          "args": "[name]",
+          "help": "Casts the -na spell for an ailment this job can remove (or in another window)."
+        }
+      },
+      "description": "Commands, targets and status removal sent to your other game windows on this machine, focus switching, and tells relayed between them (the multibox add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "c7dd9f41d153752cdcbd4f0eca3bf491d2efd0f8af4c8434ed44309c8d6a9d75",
+          "size": 3661,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/multibox/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "138254746ba9ba8b6659463727c29dee84b3834530408e009385b7f3d574d3c9",
+          "size": 1196,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/multibox/mod.toml"
+        }
+      ],
+      "id": "multibox",
+      "kind": "lua",
+      "name": "Multibox Control",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "music": {
+          "args": "<track number>",
+          "forms": [
+            {
+              "args": "off",
+              "help": "Back to the zone's music."
+            }
+          ],
+          "help": "Plays one of the game's tracks.",
+          "params": [
+            {
+              "name": "track number",
+              "type": "int"
+            }
+          ]
+        }
+      },
+      "description": "Plays any of the game's tracks, keeps the zone's music in battle or silences it while mounted (the music add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "b661c803aade62bcde6e703e1a5e14bbd95db4b72cecce84b9caa7612c4147b8",
+          "size": 1641,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/music-picker/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "1d3dd10561aa6fdf4984d028cc3d736e1a03fe71ebeab3acd084ac597125e655",
+          "size": 985,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/music-picker/mod.toml"
+        }
+      ],
+      "id": "music-picker",
+      "kind": "lua",
+      "name": "Music Picker",
+      "version": "1.0.3"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "errand": {
+          "args": "<name>",
+          "forms": [
+            {
+              "args": "save <name> <npc>: <option> > ...",
+              "help": "Keeps an errand by name."
+            },
+            {
+              "args": "list",
+              "help": "Lists your errands."
+            },
+            {
+              "args": "delete <name>",
+              "help": "Deletes one."
+            }
+          ],
+          "help": "Runs a named errand."
+        },
+        "job": {
+          "args": "<main>[/<sub>]",
+          "help": "Changes jobs at a moogle, as //job war/nin or //job blm/none."
+        },
+        "npc": {
+          "args": "<name>: <option> > <option> > ...",
+          "help": "Walks an NPC's menus: the options in order."
+        }
+      },
+      "description": "Walks an NPC's menus by command, keeps such errands by name, and changes jobs at a moogle by command (the NPC shop and job change add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "aa5286d98eaddc85c68710036f25a59477a9b3d8553d5a7d0e78d06f24884586",
+          "size": 4390,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/npc-errands/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "7d86373477e50ed6576a12d9c18f3db960668949b525eee5f6157c20ed3f2c4b",
+          "size": 982,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/npc-errands/mod.toml"
+        }
+      ],
+      "id": "npc-errands",
+      "kind": "lua",
+      "name": "NPC Errands",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "roeset": {
+          "args": "<name>",
+          "forms": [
+            {
+              "args": "save <name>",
+              "help": "Saves the objectives you have set."
+            },
+            {
+              "args": "list",
+              "help": "Lists your sets."
+            },
+            {
+              "args": "delete <name>",
+              "help": "Deletes a set."
+            }
+          ],
+          "help": "Sets a named set of Records of Eminence objectives."
+        },
+        "roeshow": {
+          "args": "",
+          "help": "Lists the objectives you have set."
+        }
+      },
+      "description": "Saves the Records of Eminence objectives you have set as named sets and puts a set back with one command (the objective set add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "04f9f5875f93689c7290aacb1c40c13b2b51e8a85feed646a8a91b2063ccd4ac",
+          "size": 2253,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/objective-sets/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "195baee987b54e7de9e9d7ac9bef1f1d7820e5d5b0c67720ed85d3cdf5869f33",
+          "size": 852,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/objective-sets/mod.toml"
+        }
+      ],
+      "id": "objective-sets",
+      "kind": "lua",
+      "name": "Objective Sets",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "padbars": {
+          "args": "",
+          "help": "Opens or closes the controller crossbars' setup window."
+        }
+      },
+      "description": "Controller crossbars: hold LT or RT and the d-pad and face buttons use that side's eight actions, set per job (the crossbar add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "ad794ddd5c2e5a0007c63d64d1a998f6745fc874ffcffc0ee02b6b87119ff4e8",
+          "size": 9275,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/pad-bars/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "77e4abd11f55ffae69ccedfd8ebd9dee087892812f7512e76192fe027f87528f",
+          "size": 888,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/pad-bars/mod.toml"
+        },
+        {
+          "path": "src/actions.lua",
+          "sha256": "438e8d10553df88101be7e9ee02e4ec1efab0f7b23c7d1c3ea3630cd2163f1ab",
+          "size": 2720,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/pad-bars/src/actions.lua"
+        },
+        {
+          "path": "src/runner.lua",
+          "sha256": "e81d7c6519b31e95d2a10afadd03eff76ca4f960c55c2c93d36e4c044f0ca6c8",
+          "size": 2400,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/pad-bars/src/runner.lua"
+        }
+      ],
+      "id": "pad-bars",
+      "kind": "lua",
+      "name": "Pad Bars",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "description": "Accepts party invites from the players you list and invites players who send you a chosen word in a tell (the auto-invite and auto-join add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "59d3c8e5c9d1bd4ea28014213b8a953e059befe54b7bda2f51a5dc06f00d24fe",
+          "size": 1079,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/party-tools/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "ade309ca99ff165056378399dd76452513752c73913c051f75aea474d113a0ef",
+          "size": 964,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/party-tools/mod.toml"
+        }
+      ],
+      "id": "party-tools",
+      "kind": "lua",
+      "name": "Party Tools",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "description": "The modern UI's chip over the cast bar: the spell, weapon skill, ability or item asked for while the server has not answered, its refusal in the server's words, or that no answer came.",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "182dd2c184c07c6746d28ddcf7731bcf75cf1e46982dff3b9c44d6d459bc3af0",
+          "size": 8960,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/pending-actions/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "c4cfe51a8dcdfe2df1415a4f451422ce9d727138a3db7a20fc340259a51af348",
+          "size": 485,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/pending-actions/mod.toml"
+        }
+      ],
+      "id": "pending-actions",
+      "kind": "lua",
+      "name": "Pending Actions",
+      "version": "1.0.1"
+    },
+    {
+      "authors": [],
+      "description": "Your pet's HP, MP and TP, what it is fighting and your pet commands' recasts, in a window on a screen edge (the pet status add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "66378c11dbde2c7741f8875b84f2570d550d55284407b13d1e24a00428705ff0",
+          "size": 2496,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/pet-status/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "d53fa03b6f60a0fb2880ceda8dcd2db7b46e82ca809223bc0a7bd74be72f17bb",
+          "size": 427,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/pet-status/mod.toml"
+        }
+      ],
+      "id": "pet-status",
+      "kind": "lua",
+      "name": "Pet Status",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "description": "Your HP, MP and TP as large bars near the middle of the screen (the player bar add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "269c5790fc1ca644566983ef965eb9b544bb886cef454963aa64b2bd0d4e9964",
+          "size": 1740,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/player-bars/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "3fd78d4d9ff0c5b91136c885314618bf14d0b0995989200cccfb4ca91b24aa83",
+          "size": 582,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/player-bars/mod.toml"
+        }
+      ],
+      "id": "player-bars",
+      "kind": "lua",
+      "name": "Player Bars",
+      "version": "1.0.1"
+    },
+    {
+      "authors": [],
+      "description": "Type a spell or ability you have as a command, in short: /cure3 me, /provoke, /utsusemiichi (the shortcut add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "c1b0e5e536a50ba05547e333804800263993ca3032a25cf549e2413abe01d888",
+          "size": 2282,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/quick-commands/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "c39636b93364ae04127164d26b439c1cc415fce19aa4276eaa4759ead7935cf9",
+          "size": 470,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/quick-commands/mod.toml"
+        }
+      ],
+      "id": "quick-commands",
+      "kind": "lua",
+      "name": "Quick Commands",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "description": "Plays the character you choose as soon as the character list shows, once per start (the auto-login add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "d3099d351fc5d4edd88f69304080a7ed420cd45d84fa14f29940165422727c42",
+          "size": 713,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/quick-play/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "10a562697a722c6f03568f28166d49822c4ecdd3055badf2d93ebca96af82611",
+          "size": 486,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/quick-play/mod.toml"
+        }
+      ],
+      "id": "quick-play",
+      "kind": "lua",
+      "name": "Quick Play",
+      "version": "1.0.1"
+    },
+    {
+      "authors": [],
+      "description": "Rings on the ground around you at the distances you choose, such as how far your area spells and songs reach (the range display add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "470cb2b994f8d802f501859c6a9295a3154edbd3480f8ed87538cf9cbe6468ff",
+          "size": 1432,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/range-rings/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "84e971ed87ae56f63b99982a1a061f36ee12e81e0d5be439f06ad25e40ea358a",
+          "size": 753,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/range-rings/mod.toml"
+        }
+      ],
+      "id": "range-rings",
+      "kind": "lua",
+      "name": "Range Rings",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "description": "The Fields or Grounds of Valor regime in force and your kills, in a window beside the timers.",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "e51b04ac79020ff3a6f2e0bd48f760c4358391d36fd6fd8399ca8b64bf2da10a",
+          "size": 13469,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/regime/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "186cce02d3de929c17de205c7ff945335c04f3f2e8c3c429f36ac831dda96e52",
+          "size": 439,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/regime/mod.toml"
+        }
+      ],
+      "id": "regime",
+      "kind": "lua",
+      "name": "Training Regime",
+      "version": "1.0.1"
+    },
+    {
+      "authors": [],
+      "description": "Says your Corsair roll's number, whether it is lucky or unlucky and its power, and can hold back a Double-Up on a lucky roll (the roll tracker add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "d8c34c280cbbec8f64aba0cb990ba80fae6e143ee18acad000b87e1a145aa51c",
+          "size": 5119,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/roll-helper/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "8c36d11479b7ce22e4d0e2f5c0b02cc4d0ab814f6d2e25798f6d22c137122b8e",
+          "size": 556,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/roll-helper/mod.toml"
+        }
+      ],
+      "id": "roll-helper",
+      "kind": "lua",
+      "name": "Roll Helper",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "record": {
+          "args": "",
+          "forms": [
+            {
+              "args": "stop",
+              "help": "Stops the recording."
+            }
+          ],
+          "help": "Starts recording a video."
+        },
+        "shot": {
+          "args": "",
+          "help": "Takes a screenshot into its character and zone folder."
+        }
+      },
+      "description": "Screenshots filed in folders by character and zone, and video recording by command (the screenshot organizer and capture add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "0555df78c07afdf10d0bd701248bdf27454f7cba0576dc5a6e5c995aa9d072df",
+          "size": 979,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/screen-capture/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "b7ebb915be9f349fd6046c58a00ecaf4e7b56886a393a1c5a9fd9764cadd858f",
+          "size": 634,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/screen-capture/mod.toml"
+        }
+      ],
+      "id": "screen-capture",
+      "kind": "lua",
+      "name": "Screen Capture",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "note": {
+          "args": "<name> <text>",
+          "forms": [
+            {
+              "args": "<name>",
+              "help": "Removes it."
+            }
+          ],
+          "help": "Puts a named note on the screen."
+        },
+        "notes": {
+          "args": "",
+          "help": "Lists your screen notes."
+        }
+      },
+      "description": "Puts your notes on the screen by command, where you drag them (the text add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "ec415bec05bfec422378c70ffd1495b042fd9a7f9a60916c2fa1e21ec19fd0ac",
+          "size": 1948,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/screen-notes/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "927e74e9efec0cf8d28f133f145c4d798d75e92d55faba072a8f6dff49b1dcc6",
+          "size": 547,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/screen-notes/mod.toml"
+        }
+      ],
+      "id": "screen-notes",
+      "kind": "lua",
+      "name": "Screen Notes",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "sell": {
+          "args": "<item> [all]",
+          "help": "Sells an item (or every copy) to the open shop.",
+          "params": [
+            {
+              "name": "item",
+              "type": "item"
+            },
+            {
+              "name": "all",
+              "options": [
+                "all"
+              ],
+              "type": "enum"
+            }
+          ]
+        },
+        "trade": {
+          "args": "<item> [count], <item> [count]...",
+          "help": "Hands items to your target NPC."
+        }
+      },
+      "description": "Sells items by name to the open shop and hands items to your target NPC by command (the sell and trade add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "1ea1b08980fe0d427b6f195810060eb6866465a58dcdb7fa73bf433697fb71bb",
+          "size": 2939,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/sell-hand-in/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "8a943f38d6f08fb0a28d647e2f7afc54f4fc8dce5df5a403db9a75692b05455b",
+          "size": 730,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/sell-hand-in/mod.toml"
+        }
+      ],
+      "id": "sell-hand-in",
+      "kind": "lua",
+      "name": "Sell and Hand In",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "skills": {
+          "args": "",
+          "help": "Lists your skills, their caps and today's gains."
+        }
+      },
+      "description": "Adds your session's total to each skill-up line, and lists your skills, their caps and today's gains (the skill-up tracker add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "6f01317280ce74bdb6713c88227b6a30d59011ed17132419d8fc23a122b5729b",
+          "size": 1725,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/skill-log/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "5af76e4cd0c1fed60960d78f2e260cf6841bacf3e189e962597400a766d102c1",
+          "size": 512,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/skill-log/mod.toml"
+        }
+      ],
+      "id": "skill-log",
+      "kind": "lua",
+      "name": "Skill-up Log",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "description": "In a party, the skillchains your party can make together; on your target, an open skillchain, what closes it, and when to magic burst (the skillchain add-ons).",
+      "files": [
+        {
+          "path": "data/skillchains.txt",
+          "sha256": "a1d32b91f03f877c3933ed85850504fe45a6b1df468aad9ab0444d51332435c2",
+          "size": 17381,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/skillchain/data/skillchains.txt"
+        },
+        {
+          "path": "init.lua",
+          "sha256": "b44b8c4d2478950dd5ab635e579e67c16bda8a0e9bfb12981766e064f6da5ece",
+          "size": 9841,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/skillchain/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "5374da7ccd58cb1b2198e815db4be13f3df72658ef114c4ea17f702db3cf25f1",
+          "size": 541,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/skillchain/mod.toml"
+        },
+        {
+          "path": "sc.lua",
+          "sha256": "81994dfaff102f2306980ee4c051cb5c5bcca36724233c1901e014b958618621",
+          "size": 5430,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/skillchain/sc.lua"
+        },
+        {
+          "path": "tracker.lua",
+          "sha256": "ef3e66f863ca053bd48bf10e04d7f453e11c1a1df8b88c772d809a20c78c551a",
+          "size": 12048,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/skillchain/tracker.lua"
+        }
+      ],
+      "id": "skillchain",
+      "kind": "lua",
+      "name": "Skillchain Helper",
+      "version": "2.0.1"
+    },
+    {
+      "authors": [],
+      "description": "Holds a spell, item or ranged shot you start while moving until you stand still, so moving doesn't interrupt it (castdelay).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "fd923474645b608ec440c5907d19cfe79c2a57efcfe3f435e4c56dd017ba76cf",
+          "size": 786,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/steady-cast/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "0e6d85d41d2378b3e3dda70896d955e0f0a4596165e69fc8e0d92831c8b1d88d",
+          "size": 649,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/steady-cast/mod.toml"
+        },
+        {
+          "path": "src/hold.lua",
+          "sha256": "5b052f6bde30881dbbe55a5cc46ca7882c38a6da246b6aabeacd6d25129501e7",
+          "size": 1885,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/steady-cast/src/hold.lua"
+        }
+      ],
+      "id": "steady-cast",
+      "kind": "lua",
+      "name": "Steady Cast",
+      "version": "1.0.1"
+    },
+    {
+      "authors": [],
+      "description": "Rows at the top of the modern battle menu naming a spell, ability or weapon skill worth using now, and why.",
+      "files": [
+        {
+          "path": "data/resistances.txt",
+          "sha256": "70e92a1aaff03f84aaacb85652667f29d3950d7c8b8302a9225e1a9cb08166d2",
+          "size": 391905,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/suggestions/data/resistances.txt"
+        },
+        {
+          "path": "facts.lua",
+          "sha256": "0a2020fbbabfd3f8b4b183ca85754ab82d53a0b641eb080d3d0574d81f7f012e",
+          "size": 8400,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/suggestions/facts.lua"
+        },
+        {
+          "path": "init.lua",
+          "sha256": "960e87be27027c10bd17d4355f79d2bcaeb02e43884ff523106f16dcbf4c1308",
+          "size": 3306,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/suggestions/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "f12a5c4f4e32da603342e23e18b95ab6dc9dcf3523d199694a2e6a25c0db2d4f",
+          "size": 415,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/suggestions/mod.toml"
+        },
+        {
+          "path": "rules.lua",
+          "sha256": "a368f3bcfb2f2dee0f704052189ed2f42f7928b9a76c77db71d78e59393af1cc",
+          "size": 30625,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/suggestions/rules.lua"
+        }
+      ],
+      "id": "suggestions",
+      "kind": "lua",
+      "name": "Battle Suggestions",
+      "version": "2.0.1"
+    },
+    {
+      "authors": [],
+      "description": "A small bar filling toward your next auto-attack while you fight, from your weapon's delay (the swing timer add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "25b4a0a387935edd587d7b9bf61824d39a4d9bfb25cf6be5e2d291f226252a43",
+          "size": 1302,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/swing-timer/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "3a9e24b8362d85f148afe069f6c63386347d14685511f939ac8370c48c2e7775",
+          "size": 392,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/swing-timer/mod.toml"
+        }
+      ],
+      "id": "swing-timer",
+      "kind": "lua",
+      "name": "Swing Timer",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "description": "After Synthesize, asks how many to make and crafts them one after another (the crafting add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "41fece940fcb8af28927d4d00c173b0e97700f593a51fd109a95da7cf2303174",
+          "size": 1000,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/synth-amount/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "a25f5dcd51d6c52faf3c60c67f36c0b5dc0d1efbea2535bb8d47a136fd255868",
+          "size": 399,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/synth-amount/mod.toml"
+        }
+      ],
+      "id": "synth-amount",
+      "kind": "lua",
+      "name": "Synthesis Amount",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "description": "A large HP bar for your target near the top of the screen, with what it is readying or casting (the enemy bar add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "2264ea3d84e1e8d84c3a4d5eee7365231e4951611f52c07c82edb5581119e95b",
+          "size": 3050,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/target-bar/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "f4d2a29d82df89816a554cc7dcdf62bf5899b55c6aa5144806ce64b706f6b0c8",
+          "size": 479,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/target-bar/mod.toml"
+        }
+      ],
+      "id": "target-bar",
+      "kind": "lua",
+      "name": "Target Bar",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "description": "The effects anyone has put on your target, as icons under the target window (the debuff tracker add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "a85d0ef30a6b384c79679f306623a19216017bf80d22f07150323b79a83d4d8f",
+          "size": 2742,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/target-debuffs/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "74bf82ddcf0cb0a687a748b70ef02a01c763c640c0690de0fb5ae30b9c5c1f91",
+          "size": 411,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/target-debuffs/mod.toml"
+        }
+      ],
+      "id": "target-debuffs",
+      "kind": "lua",
+      "name": "Target Debuffs",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "description": "Your target's distance and HP percent in the target window (the distance and target-info add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "3f653904279aef62811b4a2d51806da88e5d97780c448f944b41fce85c96c89f",
+          "size": 334,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/target-info/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "c12398a0228657c7c014344766b53f74974c9674c7f91feba74f7479cc34a8d3",
+          "size": 608,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/target-info/mod.toml"
+        }
+      ],
+      "id": "target-info",
+      "kind": "lua",
+      "name": "Target Info",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "targetlines": {
+          "args": "",
+          "help": "Same as //tl."
+        },
+        "tl": {
+          "args": "",
+          "forms": [
+            {
+              "args": "test",
+              "help": "A line to your target for 8 seconds."
+            },
+            {
+              "args": "clear",
+              "help": "Removes every line showing."
+            }
+          ],
+          "help": "Target Lines: whether it is on and how many lines show. Its settings are on the Battle tab."
+        }
+      },
+      "description": "FFXII-style glowing arcs from each actor to its target as attacks, spells and abilities land, with AoE rings (MogSafe's TargetLines for Windower).",
+      "files": [
+        {
+          "path": "arc.lua",
+          "sha256": "fba97894edee5e4252e3ca1892353e67538d8e0224592ea963b8cd49557858cd",
+          "size": 720,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/target-lines/arc.lua"
+        },
+        {
+          "path": "engine.lua",
+          "sha256": "9e83bc1471da75369610134d014c84f51c73768a66c4961e074bc340fa3bbf76",
+          "size": 9668,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/target-lines/engine.lua"
+        },
+        {
+          "path": "img/core.png",
+          "sha256": "99c6fe39ae43acea5880983c91b5325e31ac4bb29f867fb748916022be2aa63e",
+          "size": 583,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/target-lines/img/core.png"
+        },
+        {
+          "path": "img/glow.png",
+          "sha256": "8972b38e60ebca132acaae00f2b0db8b6fc80c56701b17293c33ffd1d316f0ca",
+          "size": 1553,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/target-lines/img/glow.png"
+        },
+        {
+          "path": "init.lua",
+          "sha256": "6140f0378b4db72cbc91fedee17477b1e38ab9b8ee997467d8bb4b65866377db",
+          "size": 7617,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/target-lines/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "922e3e763404327ac1f78892f8ba6bed89f4b65cdf05d0344d902f45d7e8d073",
+          "size": 3866,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/target-lines/mod.toml"
+        }
+      ],
+      "id": "target-lines",
+      "kind": "lua",
+      "name": "Target Lines",
+      "version": "1.1.2"
+    },
+    {
+      "authors": [],
+      "description": "A ring on the ground under your target, in a colour you choose (the target marker add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "330eb778e1a91b94379d170bb2f9d17a13cc5c4ddbd2adec58c0ceb06cacbdfd",
+          "size": 806,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/target-marker/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "49b2518ec9acce98c362729b948acd02aa533acc1cf88f916741c277519cb1b5",
+          "size": 512,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/target-marker/mod.toml"
+        }
+      ],
+      "id": "target-marker",
+      "kind": "lua",
+      "name": "Target Marker",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "face": {
+          "args": "",
+          "forms": [
+            {
+              "args": "away",
+              "help": "Turns you away from it."
+            }
+          ],
+          "help": "Turns you toward your target."
+        },
+        "tgt": {
+          "args": "<name or server id>",
+          "help": "Targets by name or server id."
+        }
+      },
+      "description": "Targets by name or id, turns you toward or away from your target, and can check each monster you target (the targeting add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "0ad4e2eb016f147f45af68684848c5dadccff2e7c001b98d3ac026f13110e078",
+          "size": 1736,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/targeting/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "983f4a044f63f0840a074dd6d4d7e5c77edb08dedb1101ddc7ef6dbc07615d10",
+          "size": 758,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/targeting/mod.toml"
+        }
+      ],
+      "id": "targeting",
+      "kind": "lua",
+      "name": "Targeting Helpers",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "r": {
+          "args": "<message>",
+          "help": "Answers the last tell."
+        },
+        "tells": {
+          "args": "",
+          "help": "Lists the tells kept while you were away."
+        }
+      },
+      "description": "Keeps the tells that come while you are away, answers the last tell with //r, and can send an away reply (the answering machine add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "93e89ee58636b7af482ac568365ea92b404428ebc5ff2df67082e56b3f857bdd",
+          "size": 2556,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/tell-inbox/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "c3c8aa09194ea8176bd1db44d1e668a46c81e6943ba34b5230b48cb6db3cda4e",
+          "size": 735,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/tell-inbox/mod.toml"
+        }
+      ],
+      "id": "tell-inbox",
+      "kind": "lua",
+      "name": "Tell Inbox",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "description": "Recasts, your effects and the ones you put on others and on monsters, in windows that slide in and out (the timers add-ons).",
+      "files": [
+        {
+          "path": "data/actions.tsv",
+          "sha256": "933edc9293ffc66cbb219f930495cc45a3a12f5e6f8930bf2ae1f6353fa8ab6c",
+          "size": 76037,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/timers/data/actions.tsv"
+        },
+        {
+          "path": "data/augments.tsv",
+          "sha256": "c34d52797a4de57722d19629d1a9b436e0a157197f555e5c330eede5534373d7",
+          "size": 178,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/timers/data/augments.tsv"
+        },
+        {
+          "path": "data/gear.tsv",
+          "sha256": "92ddc1259e1f81c496d375c6e0bff004a245b6b95a1b516c1b915dd0bf209832",
+          "size": 10155,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/timers/data/gear.tsv"
+        },
+        {
+          "path": "data/jobpoints.tsv",
+          "sha256": "b0be6c612783d28fe84f28e752a3579a4e750610560d0a24faa753e3e20be7cf",
+          "size": 1435,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/timers/data/jobpoints.tsv"
+        },
+        {
+          "path": "data/merits.tsv",
+          "sha256": "2e1713206d559bfe736da9401692e340393510214fbc762b1e20b722e5248181",
+          "size": 3960,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/timers/data/merits.tsv"
+        },
+        {
+          "path": "data/status.tsv",
+          "sha256": "bdb46acc9cd6d1672b25fb46a6f42bf791f6e9d7f86eb9fd2dfe1917939b76b1",
+          "size": 23286,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/timers/data/status.tsv"
+        },
+        {
+          "path": "durations.lua",
+          "sha256": "4b83d0feb3827282a7c39a13e3aa7c10c351f0bb0c055513f1798020adea2431",
+          "size": 20838,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/timers/durations.lua"
+        },
+        {
+          "path": "engine.lua",
+          "sha256": "1d144e51e0b888bcc8cfea2386520793156acee4d847c2ed900e34f9184ada13",
+          "size": 21702,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/timers/engine.lua"
+        },
+        {
+          "path": "init.lua",
+          "sha256": "0606ced6777dcb23e60b6b8e822203997a56b3234d68f11b84c2dfc1c83aff10",
+          "size": 2436,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/timers/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "d8afb1c629f92a63e4f1e6d70242d33bdecf2366d19252781f86a16dc52be9d2",
+          "size": 444,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/timers/mod.toml"
+        },
+        {
+          "path": "rows.lua",
+          "sha256": "242ea105de0ce5fb6dd5bdf0a61d473daf492dda34fbd14d616da477cc56b0d4",
+          "size": 10706,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/timers/rows.lua"
+        }
+      ],
+      "id": "timers",
+      "kind": "lua",
+      "name": "Timers",
+      "version": "2.0.1"
+    },
+    {
+      "authors": [],
+      "description": "The time on every chat log line, not only chat (the timestamp add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "068dd0b4f791a78b377fd8557f1f5d658c80d057c28ba22463cd475dcb9037cd",
+          "size": 262,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/timestamps/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "cf516bf4e97d7764273db7c1da2821dd35eb1c592383826594b0b4a55221c8d0",
+          "size": 333,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/timestamps/mod.toml"
+        }
+      ],
+      "id": "timestamps",
+      "kind": "lua",
+      "name": "Timestamps",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "seek": {
+          "args": "<name>",
+          "help": "Lists who in the zone matches a name."
+        },
+        "track": {
+          "args": "<name>",
+          "forms": [
+            {
+              "args": "stop",
+              "help": "Stops tracking."
+            }
+          ],
+          "help": "Tracks a monster or NPC with Wide Scan."
+        }
+      },
+      "description": "Tracks a monster or NPC by name with Wide Scan, and lists who in the zone matches a name (the wide scan add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "135984228fdc49589d824b016c8eef86d7765cffd3f8d18dfc1e2451c4ed6382",
+          "size": 1723,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/tracking/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "b211c11b705619495b32cd8b51df24580c0d826883007e2be1752d3cf2665688",
+          "size": 669,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/tracking/mod.toml"
+        }
+      ],
+      "id": "tracking",
+      "kind": "lua",
+      "name": "Tracking Tools",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "trusts": {
+          "args": "<lineup>",
+          "forms": [
+            {
+              "args": "save <lineup> [trust, trust...]",
+              "help": "Saves the trusts you name, or the ones out now."
+            },
+            {
+              "args": "list",
+              "help": "Lists your lineups."
+            },
+            {
+              "args": "delete <lineup>",
+              "help": "Deletes a lineup."
+            }
+          ],
+          "help": "Calls a named trust lineup."
+        }
+      },
+      "description": "Saves the trusts you call as named lineups and calls a lineup with one command (the trust set add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "31fa2c758b23e402a1077f9790d609b31be27d7347ae309038a0c30fd5e97d70",
+          "size": 5182,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/trust-lineups/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "f55b4f7b4c0393d40d54489d14042521f85ffed8e4e60e1edc1580a5ba101238",
+          "size": 717,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/trust-lineups/mod.toml"
+        }
+      ],
+      "id": "trust-lineups",
+      "kind": "lua",
+      "name": "Trust Lineups",
+      "version": "1.0.3"
+    },
+    {
+      "authors": [],
+      "description": "Shows or hides what your trusts say in the chat log (the trust chatter filters).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "4cc279fb1cc80191cda1ecbfb4e4ef0bad29c72389dad623304cee8357a0ba35",
+          "size": 647,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/trust-speech/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "f47de29858b7a99d28529dc922a7e12c0041d258667d607d0f57189422c88403",
+          "size": 422,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/trust-speech/mod.toml"
+        }
+      ],
+      "id": "trust-speech",
+      "kind": "lua",
+      "name": "Trust Speech",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "description": "[[words]] in a chat line become the auto-translate phrase, and <tags> such as <star> or <note> become the game's symbols (the translate and chars add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "69431b6bcf52a2786a8bfef124d074869a5cce73f66907c723c8d886b5fc8f65",
+          "size": 901,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/typing-helpers/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "a83547be98873b820c9a9b1f451eb18d057a25a4126c8b88f0212e88c6f30736",
+          "size": 482,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/typing-helpers/mod.toml"
+        }
+      ],
+      "id": "typing-helpers",
+      "kind": "lua",
+      "name": "Typing Helpers",
+      "version": "1.0.1"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "useall": {
+          "args": "<item>",
+          "forms": [
+            {
+              "args": "stop",
+              "help": "Stops."
+            }
+          ],
+          "help": "Uses every copy of an item, one after another.",
+          "params": [
+            {
+              "name": "item",
+              "type": "item"
+            }
+          ]
+        }
+      },
+      "description": "Uses every copy of an item one after another, such as a stack of pouches or bags (the pouch add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "c74fac9ac1933e05a117bcc52258953741ded4fe9687eb96bbee0d1323252523",
+          "size": 1591,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/use-all/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "266dcaf2f352ec3785dabc32b9cfb424ff08835b370e512423c9b4b6e3c60a49",
+          "size": 536,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/use-all/mod.toml"
+        }
+      ],
+      "id": "use-all",
+      "kind": "lua",
+      "name": "Item Use Queue",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "description": "Changes how the world looks: brightness, colour, a cel-shaded look with outlines, or wireframe (the render tweak add-ons). The menus are not changed.",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "fcb9a0d1f9982c0b6db6fb7a18192e7ef32335415fd6e8daa965ce14bca34dd0",
+          "size": 1878,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/visual-tweaks/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "0a20f2ed4746691ec5c9d34edb8479f0961146753a24b2854d7a1c461a751713",
+          "size": 879,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/visual-tweaks/mod.toml"
+        }
+      ],
+      "id": "visual-tweaks",
+      "kind": "lua",
+      "name": "Visual Tweaks",
+      "version": "1.0.0"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "warp": {
+          "args": "[hp | sg | wp] <zone> [number or place]",
+          "forms": [
+            {
+              "args": "home",
+              "help": "Warps home with the Warp spell or a warp item."
+            },
+            {
+              "args": "dim <holla | dem | mea>",
+              "help": "Uses a Dimensional Ring.",
+              "params": [
+                {
+                  "name": "holla",
+                  "options": [
+                    "holla",
+                    "dem",
+                    "mea"
+                  ],
+                  "type": "enum"
+                }
+              ]
+            }
+          ],
+          "help": "Warps by Home Point, Survival Guide or Waypoint.",
+          "params": [
+            {
+              "name": "hp",
+              "options": [
+                "hp",
+                "sg",
+                "wp"
+              ],
+              "type": "enum"
+            },
+            {
+              "name": "zone",
+              "type": "zone"
+            }
+          ]
+        }
+      },
+      "description": "Answers the Home Point, Survival Guide and Waypoint menus by name, and warps home with the Warp spell or a warp item (the warp add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "5171a010e2796ed823b0bf200b5b9c4efbad43bacb8a5c718a49faf34a4f8fd9",
+          "size": 15540,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/warp-helper/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "9b7fd1bf7bef8ec425a37342b1e55ff66ace39f784ce2dfefbe040199717be72",
+          "size": 1319,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/warp-helper/mod.toml"
+        },
+        {
+          "path": "src/places.lua",
+          "sha256": "aa2872cac22092e4a6b7d791be61d2a9b1593862d9a8e962f9ea8f51038a771b",
+          "size": 5226,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/warp-helper/src/places.lua"
+        }
+      ],
+      "id": "warp-helper",
+      "kind": "lua",
+      "name": "Warp Helper",
+      "version": "1.0.3"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "weather": {
+          "args": "",
+          "help": "Shows the weather, zone and day now."
+        }
+      },
+      "description": "Tells you when the weather you are waiting for starts or ends, and can tell your party (the weather add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "f101f8ae1911de62780cd89764c59880473d58009ea005e403de84bf43285876",
+          "size": 1054,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/weather-watch/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "8e46ffda9fb008d356fdd45f91934650937b9cd04a68526bd47b8d32c54d3ca6",
+          "size": 829,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/weather-watch/mod.toml"
+        }
+      ],
+      "id": "weather-watch",
+      "kind": "lua",
+      "name": "Weather Watch",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "ah": {
+          "args": "[words]",
+          "help": "Looks words up on the auction site (none: the item pointed at, or your target)."
+        },
+        "wiki": {
+          "args": "[words]",
+          "help": "Looks words up on the wiki (none: the item pointed at, or your target)."
+        }
+      },
+      "description": "Looks up an item, a spell, your target or any words on the wiki or the auction site, in your browser (the lookup add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "8dd1e293afab1a6af8e7c9dd09b24be39bb2930c9e2d53e93ad73ad29a9f0847",
+          "size": 1530,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/web-search/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "dc15fc5b6551faf89050dce3f160d2e3bbc3de4dce5877b360055f81571c25b2",
+          "size": 660,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/web-search/mod.toml"
+        }
+      ],
+      "id": "web-search",
+      "kind": "lua",
+      "name": "Web Search",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "winpos": {
+          "forms": [
+            {
+              "args": "save",
+              "help": "Keeps where and how big the window is now."
+            },
+            {
+              "args": "forget",
+              "help": "Forgets it."
+            }
+          ],
+          "help": "This character's game window place."
+        }
+      },
+      "description": "Puts the game window back where and how big you keep it for each character, and can keep it on top (the window position add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "ba061b515e9d2383dcf5417a04b09a04cee896012f2ad72310db03bea9ee6688",
+          "size": 1432,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/window-placement/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "18d3a52d1fb41a489e10b04ff51d1f5dbf775e5b81a8dc1e42e818ed8ecaabe4",
+          "size": 943,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/window-placement/mod.toml"
+        }
+      ],
+      "id": "window-placement",
+      "kind": "lua",
+      "name": "Window Placement",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "commands": {
+        "xp": {
+          "args": "reset",
+          "help": "Starts the XP tracker's rates again."
+        }
+      },
+      "description": "Experience, limit and capacity points with their rates per hour, in a window on a screen edge (the point-watch add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "86544029c2a427f5a84c42d8d8e4e2368ef590d9a6d17ed903440bd089d34160",
+          "size": 3611,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/xp-tracker/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "dc160174931af172ee4db6fa9af362eb407f16cc1d1ba703cfe9706626055eb4",
+          "size": 501,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/xp-tracker/mod.toml"
+        }
+      ],
+      "id": "xp-tracker",
+      "kind": "lua",
+      "name": "XP Tracker",
+      "version": "1.0.2"
+    },
+    {
+      "authors": [],
+      "description": "The zone's name across the screen for a few seconds as you arrive (the zone name add-ons).",
+      "files": [
+        {
+          "path": "init.lua",
+          "sha256": "c8ff18026a29e03f7c8d484b09b7d2f093fc1b1a9ff0fb93ac002cae55355727",
+          "size": 1087,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/zone-banner/init.lua"
+        },
+        {
+          "path": "mod.toml",
+          "sha256": "efa4c9b691ada5d65d24a58e424ab3926182beed74a73c78c62c06b3e73c5b47",
+          "size": 317,
+          "url": "https://raw.githubusercontent.com/lenonk/vana-client/master/crates/vana-client/assets/mods/zone-banner/mod.toml"
+        }
+      ],
+      "id": "zone-banner",
+      "kind": "lua",
+      "name": "Zone Banner",
+      "version": "1.0.0"
+    }
+  ]
+}

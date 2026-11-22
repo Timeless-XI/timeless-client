@@ -1,0 +1,719 @@
+//! The modern UI's art and style (docs/modern-ui.md): the production pack v2 (assets/modern: manifest.json with
+//! logical sizes and nine-slice insets, 2x atlases, theme.json's palette), the window frames built from it, and the
+//! bundled OFL fonts (assets/fonts).
+
+use egui::{
+    Color32, ColorImage, Context, FontData, FontDefinitions, FontFamily, Rect, TextureHandle, TextureId,
+    TextureOptions, Vec2, pos2, vec2,
+};
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+const THEME: &str = include_str!("../../../assets/modern/theme.json");
+/// Timeless XI: the Timeless interface's palette, over the modern one.
+const TIMELESS_THEME: &str = include_str!("../../../assets/timeless/theme.json");
+const MANIFEST: &str = include_str!("../../../assets/modern/manifest.json");
+/// Timeless XI: Timeless View's Pewter Hairline sprites (menu / misc icons and controls, tools/timeless/pewter): one
+/// atlas and its rects, drawn in place of the pack's while the Timeless interface is on.
+const PEWTER_PNG: &[u8] = include_bytes!("../../../assets/timeless/pewter/pewter.png");
+const PEWTER_JSON: &str = include_str!("../../../assets/timeless/pewter/pewter.json");
+/// Timeless XI: Timeless View's serif (Cormorant Garamond SemiBold, OFL) for window titles and menu rows.
+const SERIF_TTF: &[u8] = include_bytes!("../../../assets/fonts/CormorantGaramond-SemiBold.ttf");
+const ATLASES: [(&str, &[u8]); 13] = [
+    ("atlases/frames_0@2x.png", include_bytes!("../../../assets/modern/atlases/frames_0@2x.png")),
+    ("atlases/controls_0@2x.png", include_bytes!("../../../assets/modern/atlases/controls_0@2x.png")),
+    ("atlases/gauges_0@2x.png", include_bytes!("../../../assets/modern/atlases/gauges_0@2x.png")),
+    ("atlases/icons_0@2x.png", include_bytes!("../../../assets/modern/atlases/icons_0@2x.png")),
+    ("atlases/indicators_0@2x.png", include_bytes!("../../../assets/modern/atlases/indicators_0@2x.png")),
+    ("atlases/jobs_0@2x.png", include_bytes!("../../../assets/modern/atlases/jobs_0@2x.png")),
+    ("atlases/status_0@2x.png", include_bytes!("../../../assets/modern/atlases/status_0@2x.png")),
+    ("atlases/weather_0@2x.png", include_bytes!("../../../assets/modern/atlases/weather_0@2x.png")),
+    ("atlases/markers_0@2x.png", include_bytes!("../../../assets/modern/atlases/markers_0@2x.png")),
+    ("atlases/actions_0@2x.png", include_bytes!("../../../assets/modern/atlases/actions_0@2x.png")),
+    ("atlases/actions_1@2x.png", include_bytes!("../../../assets/modern/atlases/actions_1@2x.png")),
+    ("atlases/actions_2@2x.png", include_bytes!("../../../assets/modern/atlases/actions_2@2x.png")),
+    ("atlases/actions_3@2x.png", include_bytes!("../../../assets/modern/atlases/actions_3@2x.png")),
+];
+const FONTS: [(&str, &[u8]); 5] = [
+    ("FiraSans-Regular", include_bytes!("../../../assets/fonts/FiraSans-Regular.ttf")),
+    ("FiraSans-SemiBold", include_bytes!("../../../assets/fonts/FiraSans-SemiBold.ttf")),
+    ("Inter-SemiBold", include_bytes!("../../../assets/fonts/Inter-SemiBold.ttf")),
+    ("Inter-BoldItalic", include_bytes!("../../../assets/fonts/Inter-BoldItalic.ttf")),
+    ("JetBrainsMono-Regular", include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf")),
+];
+/// The window frames (80 x 80 logical, 24 insets, NINE_SLICE.md); their border is cut out with the border-only
+/// frame's alpha, which every variant shares.
+const FRAMES: [&str; 5] = ["window_normal", "window_focused", "window_inactive", "window_alert", "window_tooltip"];
+const FRAME_MASK: &str = "frames/window_normal_border";
+
+/// Emphasis beside egui's Proportional (Fira Sans) and Monospace (JetBrains Mono): titles and names; the bars' labels.
+pub const STRONG: &str = "strong";
+pub const LABEL: &str = "label";
+/// Party-list names out of the zone: their face, kept whatever the interface's is.
+pub const NAME: &str = "name";
+/// Timeless XI: Timeless View's titles and menu rows (Cormorant Garamond, Fira Sans behind it); STRONG elsewhere.
+pub const SERIF: &str = "serif";
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct ThemeFile {
+    palette: HashMap<String, String>,
+}
+
+pub struct Theme {
+    colors: HashMap<String, Color32>,
+    /// Timeless XI: the Timeless palette (assets/timeless/theme.json) and whether it is on (Interface = Timeless).
+    timeless: HashMap<String, Color32>,
+    timeless_on: std::cell::Cell<bool>,
+    /// Colours mods set (ui.skin.colour).
+    skin: std::cell::RefCell<HashMap<String, Color32>>,
+    /// Point sizes: body text, titles, small print.
+    pub ui: f32,
+    pub title: f32,
+    pub small: f32,
+}
+
+/// "#rrggbb" or "#rrggbbaa".
+fn hex(s: &str) -> Option<Color32> {
+    let s = s.strip_prefix('#')?;
+    let v = |i: usize| u8::from_str_radix(s.get(i..i + 2)?, 16).ok();
+    match s.len() {
+        6 => Some(Color32::from_rgb(v(0)?, v(2)?, v(4)?)),
+        8 => Some(Color32::from_rgba_unmultiplied(v(0)?, v(2)?, v(4)?, v(6)?)),
+        _ => None,
+    }
+}
+
+impl Theme {
+    pub fn load() -> Self {
+        let f: ThemeFile = serde_json::from_str(THEME).unwrap_or_else(|e| {
+            log::error!("modern UI theme.json: {e}");
+            ThemeFile::default()
+        });
+        let mut colors: HashMap<String, Color32> =
+            f.palette.iter().filter_map(|(k, v)| Some((k.clone(), hex(v)?))).collect();
+        // The pack's previews: parchment white text, a slate grey for the quiet parts.
+        colors.entry("text".into()).or_insert(Color32::from_rgb(0xe6, 0xe1, 0xd6));
+        colors.entry("muted".into()).or_insert(Color32::from_rgb(0x8f, 0x9d, 0xa6));
+        let timeless = Self::timeless_palette();
+        Self {
+            colors,
+            timeless,
+            timeless_on: Default::default(),
+            skin: Default::default(),
+            ui: 16.0,
+            title: 18.0,
+            small: 14.5,
+        }
+    }
+
+    /// Timeless XI: the Timeless palette. A `timeless-theme.json` beside the client's config.json, when there is one,
+    /// replaces the built-in file, so colours can be tried without a rebuild (read when the client starts).
+    fn timeless_palette() -> HashMap<String, Color32> {
+        let local = crate::config::config_path().with_file_name("timeless-theme.json");
+        let text = std::fs::read_to_string(&local).ok();
+        let parse = |s: &str| serde_json::from_str::<ThemeFile>(s);
+        let f = match text.as_deref().map(parse) {
+            Some(Ok(f)) => {
+                log::info!("Timeless theme from {}", local.display());
+                f
+            }
+            Some(Err(e)) => {
+                log::error!("{}: {e}; using the built-in Timeless theme", local.display());
+                parse(TIMELESS_THEME).unwrap_or_default()
+            }
+            None => parse(TIMELESS_THEME).unwrap_or_else(|e| {
+                log::error!("Timeless theme.json: {e}");
+                ThemeFile::default()
+            }),
+        };
+        f.palette.iter().filter_map(|(k, v)| Some((k.clone(), hex(v)?))).collect()
+    }
+
+    /// Timeless XI: the Timeless look on or off (Interface = Timeless), set every frame.
+    pub fn set_timeless(&self, on: bool) {
+        self.timeless_on.set(on);
+    }
+
+    /// Timeless XI: the Timeless look is on.
+    pub fn timeless(&self) -> bool {
+        self.timeless_on.get()
+    }
+
+    /// The colours mods set, in place of the palette's.
+    pub fn set_skin(&self, colours: HashMap<String, Color32>) {
+        *self.skin.borrow_mut() = colours;
+    }
+
+    /// A palette colour (theme.json "palette").
+    pub fn color(&self, name: &str) -> Color32 {
+        if let Some(c) = self.skin.borrow().get(name) {
+            return *c;
+        }
+        if self.timeless_on.get()
+            && let Some(c) = self.timeless.get(name)
+        {
+            return *c;
+        }
+        self.colors.get(name).copied().unwrap_or(Color32::MAGENTA)
+    }
+
+    /// egui's zoom: the window height in pixels against 1080 times the size setting (percent), clamped to 0.4 .. 3.
+    /// egui multiplies in the monitor's scale, so a 200% panel draws the interface twice as large.
+    pub fn zoom(&self, height_px: f32, scale: u32) -> f32 {
+        (height_px / 1080.0 * scale as f32 / 100.0).clamp(0.4, 3.0)
+    }
+}
+
+#[derive(Deserialize)]
+struct ManifestFile {
+    items: Vec<Item>,
+}
+
+#[derive(Deserialize)]
+struct Item {
+    id: String,
+    size: [f32; 2],
+    png_size: [f32; 2],
+    #[serde(default)]
+    nine_slice: Option<[f32; 4]>,
+    atlas: AtlasRef,
+}
+
+#[derive(Deserialize)]
+struct AtlasRef {
+    file: String,
+    rect: [u32; 4],
+}
+
+/// A sprite in its atlas: the UV rect, its logical size, nine-slice insets in logical pixels, atlas pixels per
+/// logical pixel, and the atlas size.
+#[derive(Clone, Copy, Debug)]
+pub struct Sprite {
+    pub tex: TextureId,
+    pub uv: Rect,
+    pub size: Vec2,
+    pub margins: Option<[f32; 4]>,
+    pub px: f32,
+    pub atlas: Vec2,
+}
+
+/// A window frame for any size: its border on a separate texture (transparent inside), the interior's vertical
+/// gradient (top to bottom), its logical size, corner insets and the interior's inset.
+pub struct Frame {
+    pub border: TextureHandle,
+    pub gradient: Vec<Color32>,
+    pub size: f32,
+    pub corner: f32,
+    pub inset: f32,
+}
+
+/// A mod's PNG (ui.skin): its texture key and pixels (width, height, RGBA).
+pub type SkinImage = (String, Arc<(u32, u32, Vec<u8>)>);
+/// A mod's frame: its name, border, and interior's top and bottom colours.
+pub type SkinFrame = (String, Option<SkinImage>, Option<Color32>, Option<Color32>);
+/// The mods' sprites and frames by name, and the textures they draw from.
+type SkinArt = (HashMap<String, Sprite>, HashMap<String, std::rc::Rc<Frame>>, Vec<TextureHandle>);
+
+/// The atlases on the GPU, the sprites by manifest id, the window frames by name.
+pub struct Art {
+    _textures: Vec<TextureHandle>,
+    sprites: HashMap<String, Sprite>,
+    frames: HashMap<String, std::rc::Rc<Frame>>,
+    /// Sprites and frames mods set (ui.skin), with the textures they draw from.
+    skin: std::cell::RefCell<SkinArt>,
+    /// Timeless XI: the Pewter Hairline sprites, and whether they are in use this frame (Interface = Timeless).
+    pewter: HashMap<String, Sprite>,
+    pewter_on: std::cell::Cell<bool>,
+}
+
+#[derive(Deserialize)]
+struct PewterFile {
+    items: HashMap<String, PewterItem>,
+}
+
+#[derive(Deserialize)]
+struct PewterItem {
+    rect: [u32; 4],
+    size: [f32; 2],
+}
+
+/// Timeless XI: the Pewter sprites over the pack's (`base`): each keeps the pack's logical size and insets where the
+/// pack has the sprite (its own size otherwise: icons/companion), its pixels the atlas cell.
+fn pewter_sprites(
+    ctx: &Context,
+    base: &HashMap<String, Sprite>,
+    textures: &mut Vec<TextureHandle>,
+) -> HashMap<String, Sprite> {
+    let Some(img) = decode(PEWTER_PNG) else {
+        log::error!("Timeless View: pewter.png does not decode");
+        return HashMap::new();
+    };
+    let f: PewterFile = match serde_json::from_str(PEWTER_JSON) {
+        Ok(f) => f,
+        Err(e) => {
+            log::error!("Timeless View pewter.json: {e}");
+            return HashMap::new();
+        }
+    };
+    let t =
+        ctx.load_texture("timeless/pewter", ColorImage::from_rgba_unmultiplied(img.0, &img.1), TextureOptions::LINEAR);
+    let at = vec2(img.0[0] as f32, img.0[1] as f32);
+    let out = f
+        .items
+        .iter()
+        .map(|(id, it)| {
+            let [x, y, w, h] = it.rect.map(|v| v as f32);
+            let uv = Rect::from_min_max(pos2(x / at.x, y / at.y), pos2((x + w) / at.x, (y + h) / at.y));
+            let (size, margins) = match base.get(id) {
+                Some(b) => (b.size, b.margins),
+                None => (vec2(it.size[0], it.size[1]), None),
+            };
+            (id.clone(), Sprite { tex: t.id(), uv, size, margins, px: w / size.x.max(1.0), atlas: at })
+        })
+        .collect();
+    textures.push(t);
+    out
+}
+
+fn decode(png: &[u8]) -> Option<([usize; 2], Vec<u8>)> {
+    let mut d = png::Decoder::new(std::io::Cursor::new(png));
+    d.set_transformations(png::Transformations::normalize_to_color8() | png::Transformations::ALPHA);
+    let mut r = d.read_info().ok()?;
+    let mut buf = vec![0u8; r.output_buffer_size()?];
+    let info = r.next_frame(&mut buf).ok()?;
+    buf.truncate(info.buffer_size());
+    (info.color_type == png::ColorType::Rgba).then_some(([info.width as usize, info.height as usize], buf))
+}
+
+/// A rect of an RGBA image.
+fn crop(img: &([usize; 2], Vec<u8>), r: [u32; 4]) -> Vec<u8> {
+    let [x, y, w, h] = r.map(|v| v as usize);
+    let stride = img.0[0] * 4;
+    (y..y + h).flat_map(|row| img.1[row * stride + x * 4..row * stride + (x + w) * 4].iter().copied()).collect()
+}
+
+/// A window frame for the game UI's pass (the retail windows' frames while Modern is on): the border image
+/// (transparent inside), its corner as a share of its side, the interior's top and bottom colours, and the interior's
+/// inset as a share of the side.
+pub struct FrameImage {
+    pub size: [usize; 2],
+    pub rgba: Vec<u8>,
+    pub corner_uv: f32,
+    pub top: [f32; 4],
+    pub bottom: [f32; 4],
+    pub inset: f32,
+}
+
+/// The frame `name` (window_normal ...) as Art::load builds it, without egui.
+pub fn frame_image(name: &str) -> Option<FrameImage> {
+    let m: ManifestFile = serde_json::from_str(MANIFEST).ok()?;
+    let find = |id: &str| m.items.iter().find(|it| it.id == id);
+    let bytes = |file: &str| ATLASES.iter().find(|(n, _)| *n == file).map(|(_, b)| *b);
+    let (mask, it) = (find(FRAME_MASK)?, find(&format!("frames/{name}"))?);
+    let alpha: Vec<u8> = crop(&decode(bytes(&mask.atlas.file)?)?, mask.atlas.rect).chunks(4).map(|p| p[3]).collect();
+    let (w, h) = (it.atlas.rect[2] as usize, it.atlas.rect[3] as usize);
+    let mut rgba = crop(&decode(bytes(&it.atlas.file)?)?, it.atlas.rect);
+    let cx = w / 2;
+    let inside: Vec<usize> =
+        (0..h).filter(|&y| rgba[(y * w + cx) * 4 + 3] > 0 && alpha.get(y * w + cx) == Some(&0)).collect();
+    let (&top, &bottom) = (inside.first()?, inside.last()?);
+    let col = |y: usize| {
+        let k = (y * w + cx) * 4;
+        [rgba[k] as f32 / 255.0, rgba[k + 1] as f32 / 255.0, rgba[k + 2] as f32 / 255.0, 1.0]
+    };
+    let (ct, cb) = (col(top), col(bottom));
+    for (p, a) in rgba.chunks_mut(4).zip(&alpha) {
+        p[3] = *a;
+    }
+    let corner_uv = it.nine_slice.map_or(24.0, |n| n[0]) / it.size[0];
+    Some(FrameImage { size: [w, h], rgba, corner_uv, top: ct, bottom: cb, inset: top as f32 / w as f32 })
+}
+
+/// A sprite's pixels (its atlas cell, 2x) by manifest id, without egui: for the game UI's pass (mods' HUD icons).
+/// Each atlas is decoded once, on first use.
+pub fn sprite_pixels(id: &str) -> Option<(u32, u32, Vec<u8>)> {
+    type Decoded = std::sync::Mutex<HashMap<String, Arc<([usize; 2], Vec<u8>)>>>;
+    static MANIFEST_ITEMS: std::sync::OnceLock<HashMap<String, AtlasRef>> = std::sync::OnceLock::new();
+    static DECODED: std::sync::OnceLock<Decoded> = std::sync::OnceLock::new();
+    let items = MANIFEST_ITEMS.get_or_init(|| {
+        serde_json::from_str::<ManifestFile>(MANIFEST)
+            .map(|m| m.items.into_iter().map(|it| (it.id, it.atlas)).collect())
+            .unwrap_or_default()
+    });
+    let a = items.get(id)?;
+    let img = {
+        let mut decoded = DECODED.get_or_init(Default::default).lock().ok()?;
+        match decoded.get(&a.file) {
+            Some(img) => img.clone(),
+            None => {
+                let bytes = ATLASES.iter().find(|(n, _)| *n == a.file).map(|(_, b)| *b)?;
+                let img = Arc::new(decode(bytes)?);
+                decoded.insert(a.file.clone(), img.clone());
+                img
+            }
+        }
+    };
+    Some((a.rect[2], a.rect[3], crop(&img, a.rect)))
+}
+
+impl Art {
+    pub fn load(ctx: &Context) -> Self {
+        let mut textures = Vec::new();
+        let mut images: HashMap<&str, ([usize; 2], Vec<u8>)> = HashMap::new();
+        let mut atlases: HashMap<&str, (TextureId, Vec2)> = HashMap::new();
+        for (name, bytes) in ATLASES {
+            let Some(img) = decode(bytes) else {
+                log::error!("modern UI: {name} does not decode");
+                continue;
+            };
+            let t = ctx.load_texture(
+                format!("modern/{name}"),
+                ColorImage::from_rgba_unmultiplied(img.0, &img.1),
+                TextureOptions::LINEAR,
+            );
+            atlases.insert(name, (t.id(), vec2(img.0[0] as f32, img.0[1] as f32)));
+            textures.push(t);
+            images.insert(name, img);
+        }
+        let m: ManifestFile = serde_json::from_str(MANIFEST).unwrap_or_else(|e| {
+            log::error!("modern UI manifest.json: {e}");
+            ManifestFile { items: Vec::new() }
+        });
+        let mut sprites = HashMap::new();
+        for it in &m.items {
+            let Some(&(tex, at)) = atlases.get(it.atlas.file.as_str()) else { continue };
+            let [x, y, w, h] = it.atlas.rect.map(|v| v as f32);
+            let uv = Rect::from_min_max(pos2(x / at.x, y / at.y), pos2((x + w) / at.x, (y + h) / at.y));
+            sprites.insert(
+                it.id.clone(),
+                Sprite {
+                    tex,
+                    uv,
+                    size: vec2(it.size[0], it.size[1]),
+                    margins: it.nine_slice,
+                    px: it.png_size[0] / it.size[0],
+                    atlas: at,
+                },
+            );
+        }
+        let mut frames = HashMap::new();
+        let find = |id: &str| m.items.iter().find(|it| it.id == id);
+        if let Some(mask) = find(FRAME_MASK).and_then(|it| Some((images.get(it.atlas.file.as_str())?, it))) {
+            let alpha: Vec<u8> = crop(mask.0, mask.1.atlas.rect).chunks(4).map(|p| p[3]).collect();
+            for name in FRAMES {
+                let Some(it) = find(&format!("frames/{name}")) else { continue };
+                let Some(img) = images.get(it.atlas.file.as_str()) else { continue };
+                let (w, h) = (it.atlas.rect[2] as usize, it.atlas.rect[3] as usize);
+                let mut rgba = crop(img, it.atlas.rect);
+                // The interior: the centre column inside the border (its first and last pixels where the mask ends).
+                let cx = w / 2;
+                let inside: Vec<usize> =
+                    (0..h).filter(|&y| rgba[(y * w + cx) * 4 + 3] > 0 && alpha[y * w + cx] == 0).collect();
+                let (Some(&top), Some(&bottom)) = (inside.first(), inside.last()) else { continue };
+                let gradient = (top..=bottom)
+                    .map(|y| {
+                        Color32::from_rgb(
+                            rgba[(y * w + cx) * 4],
+                            rgba[(y * w + cx) * 4 + 1],
+                            rgba[(y * w + cx) * 4 + 2],
+                        )
+                    })
+                    .collect();
+                for (p, a) in rgba.chunks_mut(4).zip(&alpha) {
+                    p[3] = *a;
+                }
+                let px = it.png_size[0] / it.size[0];
+                let border = ctx.load_texture(
+                    format!("modern/{name}"),
+                    ColorImage::from_rgba_unmultiplied([w, h], &rgba),
+                    TextureOptions::LINEAR,
+                );
+                let corner = it.nine_slice.map_or(24.0, |n| n[0]);
+                frames.insert(
+                    name.to_string(),
+                    std::rc::Rc::new(Frame { border, gradient, size: it.size[0], corner, inset: top as f32 / px }),
+                );
+            }
+        }
+        let pewter = pewter_sprites(ctx, &sprites, &mut textures);
+        Self { _textures: textures, sprites, frames, skin: Default::default(), pewter, pewter_on: Default::default() }
+    }
+
+    /// A sprite by manifest id: a mod's (ui.skin), else Timeless XI: the Pewter one while the Timeless interface is
+    /// on, else the pack's.
+    pub fn sprite(&self, id: &str) -> Option<Sprite> {
+        if let Some(s) = self.skin.borrow().0.get(id) {
+            return Some(*s);
+        }
+        if self.pewter_on.get()
+            && let Some(s) = self.pewter.get(id)
+        {
+            return Some(*s);
+        }
+        self.sprites.get(id).copied()
+    }
+
+    /// Timeless XI: the Pewter sprites in use or not (Interface = Timeless), set at the start of every frame.
+    pub fn set_timeless(&self, on: bool) {
+        self.pewter_on.set(on);
+    }
+
+    pub fn frame(&self, name: &str) -> Option<std::rc::Rc<Frame>> {
+        if let Some(f) = self.skin.borrow().1.get(name) {
+            return Some(f.clone());
+        }
+        self.frames.get(name).cloned()
+    }
+
+    /// Mods' sprites and frames (ui.skin) in place of the pack's: a sprite keeps the pack's logical size and insets
+    /// (its PNG's pixels spread over them); a frame keeps the pack's size, corners and inset, with the mod's border and
+    /// interior colours (or the pack's where it gives none).
+    pub fn set_skin(&self, ctx: &Context, sprites: &[(String, SkinImage)], frames: &[SkinFrame]) {
+        let mut textures = Vec::new();
+        let mut load = |key: &str, img: &(u32, u32, Vec<u8>)| {
+            let t = ctx.load_texture(
+                key,
+                ColorImage::from_rgba_unmultiplied([img.0 as usize, img.1 as usize], &img.2),
+                TextureOptions::LINEAR,
+            );
+            textures.push(t.clone());
+            t
+        };
+        let mut s = HashMap::new();
+        for (name, (key, img)) in sprites {
+            let Some(base) = self.sprites.get(name) else { continue };
+            let t = load(key, img);
+            let full = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+            s.insert(
+                name.clone(),
+                Sprite {
+                    tex: t.id(),
+                    uv: full,
+                    px: img.0 as f32 / base.size.x.max(1.0),
+                    atlas: vec2(img.0 as f32, img.1 as f32),
+                    ..*base
+                },
+            );
+        }
+        let mut f = HashMap::new();
+        for (name, border, top, bottom) in frames {
+            let Some(base) = self.frames.get(name) else { continue };
+            let border = match border {
+                Some((key, img)) => load(key, img),
+                None => base.border.clone(),
+            };
+            let (a, b) =
+                (top.unwrap_or(base.gradient[0]), bottom.unwrap_or(*base.gradient.last().unwrap_or(&base.gradient[0])));
+            let gradient = if top.is_none() && bottom.is_none() {
+                base.gradient.clone()
+            } else {
+                (0..16).map(|i| a.lerp_to_gamma(b, i as f32 / 15.0)).collect()
+            };
+            f.insert(
+                name.clone(),
+                std::rc::Rc::new(Frame { border, gradient, size: base.size, corner: base.corner, inset: base.inset }),
+            );
+        }
+        *self.skin.borrow_mut() = (s, f, textures);
+    }
+}
+
+fn manifest() -> &'static ManifestFile {
+    static M: std::sync::OnceLock<ManifestFile> = std::sync::OnceLock::new();
+    M.get_or_init(|| serde_json::from_str(MANIFEST).unwrap_or(ManifestFile { items: Vec::new() }))
+}
+
+/// The pack's sprites by name with their logical sizes (the frames are `pack_frames`), for mods.
+pub fn pack_sprites() -> &'static std::collections::BTreeMap<String, [f32; 2]> {
+    static S: std::sync::OnceLock<std::collections::BTreeMap<String, [f32; 2]>> = std::sync::OnceLock::new();
+    S.get_or_init(|| {
+        manifest().items.iter().filter(|it| !it.id.starts_with("frames/")).map(|it| (it.id.clone(), it.size)).collect()
+    })
+}
+
+/// The palette's colour names.
+pub fn pack_colours() -> &'static Vec<String> {
+    static C: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    C.get_or_init(|| {
+        let f: ThemeFile = serde_json::from_str(THEME).unwrap_or_default();
+        let mut names: Vec<String> =
+            f.palette.keys().cloned().chain(["text".to_string(), "muted".to_string()]).collect();
+        names.sort();
+        names.dedup();
+        names
+    })
+}
+
+/// The window frames: name, logical size and corner.
+pub fn pack_frames() -> &'static Vec<(String, f32, f32)> {
+    static F: std::sync::OnceLock<Vec<(String, f32, f32)>> = std::sync::OnceLock::new();
+    F.get_or_init(|| {
+        FRAMES
+            .iter()
+            .filter_map(|n| {
+                manifest()
+                    .items
+                    .iter()
+                    .find(|it| it.id == format!("frames/{n}"))
+                    .map(|it| (n.to_string(), it.size[0], it.nine_slice.map_or(24.0, |s| s[0])))
+            })
+            .collect()
+    })
+}
+
+/// A bundled font's bytes by name ("Inter-BoldItalic" ...).
+pub fn font(name: &str) -> Option<&'static [u8]> {
+    FONTS.iter().find(|(n, _)| *n == name).map(|(_, b)| *b)
+}
+
+/// System fonts with Japanese (game text, Japanese players' chat) and their face index, tried in order *(ours: none of
+/// the bundled faces has kana or kanji)*.
+const CJK: [(&str, u32); 12] = [
+    ("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc", 0),
+    ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 0),
+    ("/usr/share/fonts/google-noto-sans-cjk-fonts/NotoSansCJK-Regular.ttc", 0),
+    ("/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc", 0),
+    ("/usr/share/fonts/noto-cjk/NotoSansCJKjp-Regular.otf", 0),
+    ("/usr/share/fonts/adobe-source-han-sans/SourceHanSansJP-Regular.otf", 0),
+    ("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", 0),
+    ("/usr/share/fonts/wenquanyi/wqy-zenhei/wqy-zenhei.ttc", 0),
+    ("C:\\Windows\\Fonts\\YuGothM.ttc", 0),
+    ("C:\\Windows\\Fonts\\meiryo.ttc", 0),
+    ("C:\\Windows\\Fonts\\msgothic.ttc", 0),
+    ("/System/Library/Fonts/Hiragino Sans GB.ttc", 0),
+];
+
+/// The first of `CJK` present, read once.
+fn cjk_font() -> Option<Arc<FontData>> {
+    static FONT: std::sync::OnceLock<Option<Arc<FontData>>> = std::sync::OnceLock::new();
+    FONT.get_or_init(|| {
+        let (path, index) = CJK.iter().find(|(p, _)| std::path::Path::new(p).is_file())?;
+        let bytes = std::fs::read(path).map_err(|e| log::warn!("CJK font {path}: {e}")).ok()?;
+        log::info!("modern UI: Japanese glyphs from {path}");
+        let mut f = FontData::from_owned(bytes);
+        f.index = *index;
+        Some(Arc::new(f))
+    })
+    .clone()
+}
+
+/// The bundled fonts: Fira Sans for the interface (egui's Proportional), Fira Sans SemiBold for titles (STRONG), Inter
+/// Bold Italic for the bars' labels and the party's names (LABEL), Inter SemiBold for names out of the zone (NAME),
+/// JetBrains Mono for logs (Monospace); egui's fonts stay behind them for missing glyphs, then a system Japanese
+/// font (`CJK`).
+pub fn install_fonts(ctx: &Context) {
+    install_fonts_with(ctx, None);
+}
+
+/// Timeless XI: the fonts for the Timeless interface (`timeless`) or the modern one. Timeless (style D) sets labels
+/// and names in Fira Sans SemiBold, the classic lettering made crisp, in place of Inter Bold Italic / SemiBold.
+pub fn install_fonts_for(ctx: &Context, timeless: bool) {
+    install_fonts_inner(ctx, None, timeless);
+}
+
+/// `install_fonts` with another body and title face (`modern-shot --font`, for comparing typefaces).
+pub fn install_fonts_with(ctx: &Context, body: Option<(Vec<u8>, Vec<u8>)>) {
+    install_fonts_inner(ctx, body, false);
+}
+
+fn install_fonts_inner(ctx: &Context, body: Option<(Vec<u8>, Vec<u8>)>, timeless: bool) {
+    let mut defs = FontDefinitions::default();
+    for (name, bytes) in FONTS {
+        defs.font_data.insert(name.to_string(), Arc::new(FontData::from_static(bytes)));
+    }
+    let (regular, strong) = match body {
+        Some((r, s)) => {
+            defs.font_data.insert("body-regular".into(), Arc::new(FontData::from_owned(r)));
+            defs.font_data.insert("body-strong".into(), Arc::new(FontData::from_owned(s)));
+            ("body-regular", "body-strong")
+        }
+        None => ("FiraSans-Regular", "FiraSans-SemiBold"),
+    };
+    let mut fallbacks = defs.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+    let cjk = cjk_font().map(|f| defs.font_data.insert("cjk".into(), f)).is_some();
+    if cjk {
+        fallbacks.push("cjk".into());
+    }
+    let with =
+        |first: &str| -> Vec<String> { std::iter::once(first.to_string()).chain(fallbacks.iter().cloned()).collect() };
+    defs.families.insert(FontFamily::Proportional, with(regular));
+    defs.families.insert(FontFamily::Name(STRONG.into()), with(strong));
+    // Timeless XI: Timeless View's serif for titles and menu rows, a little larger (Cormorant's small x-height), with
+    // Fira Sans behind it for what it lacks.
+    defs.font_data.insert(
+        "CormorantGaramond-SemiBold".into(),
+        Arc::new(FontData::from_static(SERIF_TTF).tweak(egui::FontTweak { scale: 1.2, ..Default::default() })),
+    );
+    defs.families.insert(
+        FontFamily::Name(SERIF.into()),
+        std::iter::once("CormorantGaramond-SemiBold".to_string()).chain(with(strong)).collect(),
+    );
+    let (name, label) = if timeless { (strong, strong) } else { ("Inter-SemiBold", "Inter-BoldItalic") };
+    defs.families.insert(FontFamily::Name(NAME.into()), with(name));
+    defs.families.insert(FontFamily::Name(LABEL.into()), with(label));
+    let mono = defs.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
+    defs.families.insert(
+        FontFamily::Monospace,
+        std::iter::once("JetBrainsMono-Regular".to_string())
+            .chain(mono)
+            .chain(cjk.then(|| "cjk".to_string()))
+            .collect(),
+    );
+    ctx.set_fonts(defs);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Timeless XI: the Pewter atlas decodes, every pack icon has a Pewter one, and every rect lies in the atlas.
+    #[test]
+    fn pewter_covers_every_pack_icon() {
+        let f: PewterFile = serde_json::from_str(PEWTER_JSON).unwrap();
+        let (size, _) = decode(PEWTER_PNG).expect("pewter.png decodes");
+        for it in manifest().items.iter().filter(|it| it.id.starts_with("icons/")) {
+            assert!(f.items.contains_key(&it.id), "no Pewter {}", it.id);
+        }
+        assert!(f.items.contains_key("icons/companion"));
+        for (id, it) in &f.items {
+            let [x, y, w, h] = it.rect.map(|v| v as usize);
+            assert!(x + w <= size[0] && y + h <= size[1], "{id} outside the atlas");
+        }
+    }
+
+    #[test]
+    fn theme_and_manifest_parse() {
+        let t = Theme::load();
+        for c in ["charcoal", "surface", "bronze", "gold", "focus", "hp", "mp", "tp", "text", "muted"] {
+            assert_ne!(t.color(c), Color32::MAGENTA, "{c}");
+        }
+        // Timeless XI: every Timeless colour parses and wins while the Timeless look is on.
+        let tf: ThemeFile = serde_json::from_str(TIMELESS_THEME).unwrap();
+        assert!(tf.palette.values().all(|v| hex(v).is_some()), "timeless theme.json: bad colour");
+        t.set_timeless(true);
+        for (k, v) in &tf.palette {
+            assert_eq!(t.color(k), hex(v).unwrap(), "timeless {k}");
+        }
+        t.set_timeless(false);
+        let m: ManifestFile = serde_json::from_str(MANIFEST).unwrap();
+        assert_eq!(m.items.len(), 1257);
+        assert!(m.items.iter().all(|it| ATLASES.iter().any(|(n, _)| *n == it.atlas.file)));
+        for (_, bytes) in ATLASES {
+            assert!(decode(bytes).is_some());
+        }
+        for f in FRAMES.iter().map(|f| format!("frames/{f}")).chain([FRAME_MASK.to_string()]) {
+            assert!(m.items.iter().any(|it| it.id == f && it.nine_slice == Some([24.0; 4])), "{f}");
+        }
+    }
+
+    /// The game UI's copy of a sprite is its 2x atlas cell.
+    #[test]
+    fn sprite_pixels_cut_the_cell() {
+        let (w, h, rgba) = sprite_pixels("status/s2").unwrap();
+        assert_eq!((w, h, rgba.len()), (128, 128, 128 * 128 * 4));
+        assert!(rgba.chunks(4).any(|p| p[3] > 0));
+        assert!(sprite_pixels("status/none").is_none());
+    }
+}

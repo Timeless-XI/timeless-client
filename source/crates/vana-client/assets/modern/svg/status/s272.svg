@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="radial-gradient-1" cx="29.5" cy="29.5" r="16.2" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f6d46e" stop-opacity="0.95"/>
+      <stop offset="0.5" stop-color="#f2c230" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#f2c230" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="linear-gradient-1" x1="29.5" y1="5.2" x2="29.5" y2="53.8" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f8dd8d"/>
+      <stop offset="0.42" stop-color="#f2c230"/>
+      <stop offset="1" stop-color="#796118"/>
+    </linearGradient>
+    <linearGradient id="linear-gradient-2" x1="29.5" y1="20.34" x2="29.5" y2="38.66" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fcf0cb"/>
+      <stop offset="1" stop-color="#f6d46e"/>
+    </linearGradient>
+    <linearGradient id="linear-gradient-3" x1="29.5" y1="25.45" x2="29.5" y2="33.55" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#faeab7"/>
+    </linearGradient>
+  </defs>
+  <title>s272.svg</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <g id="emblem">
+      <path id="halo" d="M27.329 4.843 C27.504 3.78 28.423 3 29.5 3 C30.577 3 31.496 3.78 31.671 4.843 L32.746 11.385 C40.309 12.731 46.269 18.691 47.615 26.254 L54.157 27.329 C55.22 27.504 56 28.423 56 29.5 C56 30.577 55.22 31.496 54.157 31.671 L47.615 32.746 C46.269 40.309 40.309 46.269 32.746 47.615 L31.671 54.157 C31.496 55.22 30.577 56 29.5 56 C28.423 56 27.504 55.22 27.329 54.157 L26.254 47.615 C18.691 46.269 12.731 40.309 11.385 32.746 L11.385 32.746 L4.843 31.671 C3.78 31.496 3 30.577 3 29.5 C3 28.423 3.78 27.504 4.843 27.329 L11.385 26.254 C12.731 18.691 18.691 12.731 26.254 11.385 Z" fill="#0a1118"/>
+      <path id="aura" d="M45.7 29.5 C45.7 38.45 38.45 45.7 29.5 45.7 C20.55 45.7 13.3 38.45 13.3 29.5 C13.3 20.55 20.55 13.3 29.5 13.3 C38.45 13.3 45.7 20.55 45.7 29.5 Z" fill="url(#radial-gradient-1)" opacity="0.9"/>
+      <polygon id="star" points="29.5,5.2 32.93,26.07 53.8,29.5 32.93,32.93 29.5,53.8 26.07,32.93 5.2,29.5 26.07,26.07" fill="url(#linear-gradient-1)" stroke="#0a1118" stroke-width="1.4" stroke-linejoin="round"/>
+      <polygon id="cross_star" data-name="cross star" points="38.66,20.34 32.74,29.5 38.66,38.66 29.5,32.74 20.34,38.66 26.26,29.5 20.34,20.34 29.5,26.26" fill="url(#linear-gradient-2)" stroke="#0a1118" stroke-linejoin="round"/>
+      <path id="core" d="M33.55 29.5 C33.55 31.74 31.74 33.55 29.5 33.55 C27.26 33.55 25.45 31.74 25.45 29.5 C25.45 27.26 27.26 25.45 29.5 25.45 C31.74 25.45 33.55 27.26 33.55 29.5 Z" fill="url(#linear-gradient-3)"/>
+    </g>
+  </g>
+</svg>

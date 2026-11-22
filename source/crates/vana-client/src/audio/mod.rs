@@ -1,0 +1,959 @@
+//! Music and sound effects as the client plays them: file formats, the sound thread (mixer), and the
+//! game-side music logic (CYyMusicLoadTask FUN_100365e0, zone music FUN_100926a0, title FUN_1023ae50).
+
+pub mod atrac3;
+pub mod format;
+pub mod mixer;
+pub mod output;
+
+use mixer::{Cmd, Mixer, Status};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender, channel};
+
+/// Menu sounds: type-0x3d "SeSep" resources in DAT 0 named "0001".. (FUN_10036d10 ..), = se ids.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[allow(dead_code)]
+pub enum Ui {
+    /// "0001": cursor moved (menu events 1/2).
+    Cursor = 1,
+    /// "0002": item chosen (event 5).
+    Select = 2,
+    /// "0003": cancel / back (event 6).
+    Cancel = 3,
+    /// "0004": not allowed.
+    Error = 4,
+    /// "0009": a target set from none, a sub-target confirm, an NPC talk started (FUN_10037d70).
+    Target = 9,
+    /// "0010": the target switched (FUN_10037dd0).
+    Switch = 10,
+    /// "0011": the action menu opened (FUN_10037e30).
+    ActionMenu = 11,
+    /// "0013": the focus moved to another window (sort windows, log focus; FUN_10037e90).
+    Close = 13,
+    /// "0014": a main menu page opened (FUN_10037ef0).
+    Open = 14,
+    /// "0015": the next page of a spooled message (FUN_10037f50).
+    Page = 15,
+    /// "0016": the screenshot shutter (FUN_10037fb0).
+    Shutter = 16,
+}
+
+/// Music after an expansion's title track: {track, ticks before the switch, next} (FFXiMain 0x10351718).
+const SEQUENCE: [(u32, i32, u32); 7] =
+    [(0, 0, 0), (108, 0, 108), (242, 8100, 108), (179, 7140, 108), (140, 8160, 108), (58, 8160, 108), (34, 7740, 108)];
+/// Title track choice n -> (installed-mask bit, sequence entry) (FUN_102455a0).
+const TITLE_PICK: [(u32, usize); 6] = [(0, 1), (2, 2), (3, 3), (4, 4), (11, 5), (0, 6)];
+/// Title music option 0xaf -> (mode, n) (FFXiMain 0x1033cc48): mode 0 newest installed, 1 track n, 2 random.
+const TITLE_MODE: [(u8, u32); 8] = [(0, 0), (2, 0), (1, 0), (1, 1), (1, 2), (1, 3), (1, 4), (1, 5)];
+pub const TITLE_DEFAULT: u32 = 0x6c;
+
+/// The music change task: fade out, stop, start, optionally switch to a follow-up track.
+/// An event volume fade (FUN_10035a00 / tick FUN_10035940): the channel goes linearly from `from` to `to` over `total`
+/// ticks, and lands on `to` when it ends or a new fade replaces it (FUN_10035b00).
+#[derive(Clone, Copy)]
+struct Fade {
+    from: f32,
+    to: f32,
+    total: f32,
+    left: f32,
+}
+
+struct Task {
+    state: u8,
+    /// 0x34: save the outgoing track's position first.
+    save: bool,
+    /// 0x35: only fade out; the caller starts the music itself.
+    no_start: bool,
+    id: u32,
+    vol: i32,
+    vol2: i32,
+    fade_in: i32,
+    counter: i32,
+    seq: usize,
+    /// 0x15: no follow-up track.
+    single: bool,
+    wait: i32,
+}
+
+/// The ambient loop's voice handles (above the effect voices' handles): two, so the old loop can fade out while the
+/// new one fades in.
+const AMBIENT: u32 = 0xffff_ff00;
+/// The chat call's voice (FUN_100380f0's task keeps its handle at +0x38).
+const CALL: u32 = 0xffff_ff02;
+
+/// FUN_1024a1b0: a replaced flag-0x20 loop fades out over 0x96 sound steps (~2.5 s), in 60 Hz ticks for SeStop.
+const AMBIENT_FADE: i32 = 0x96 * 0x3c / 0x32;
+
+pub struct Audio {
+    /// Requests to the loader thread, which reads files and feeds the mixer in order.
+    tx: Sender<Req>,
+    pub status: Arc<Status>,
+    _out: output::Output,
+    /// Track wanted (DAT_10451008) and started (DAT_10451004).
+    wanted: u32,
+    playing: u32,
+    task: Option<Task>,
+    /// Music volume multipliers (DAT_10346650 x DAT_10346654) and the effects level factor (DAT_10346568).
+    music: f32,
+    effects: f32,
+    tick_acc: f32,
+    /// Event sound volumes (ops 0x69 / 0x6a): music (DAT_10346570) and effects (DAT_1034656c).
+    event_se: f32,
+    event_stream: f32,
+    event_ui: f32,
+    /// DAT_10351710: the chat call sounds' level (1 from the sound init; event op 0x69 mask 0x10).
+    call_level: f32,
+    /// Event mask 4: the zone's ambient loop; the loop's resource and the level it was last given.
+    event_zone: f32,
+    ambient_se: Option<u32>,
+    ambient_level: u8,
+    /// The running loop's handle (AMBIENT or AMBIENT + 1) and the scene it belongs to.
+    ambient_handle: u32,
+    ambient_scene: Option<u16>,
+    /// Fades running on event_se / event_stream / event_ui.
+    fades: [Option<Fade>; 4],
+    /// Voices started as the scheduler's stream.
+    streams: std::collections::HashSet<u32>,
+    /// Each running voice's level before the factors, and the factors last applied (FUN_100364e0 compares the
+    /// level after them: a factor change re-levels every voice).
+    raw_levels: std::collections::HashMap<u32, i32>,
+    applied: (f32, f32, f32),
+    /// Level of the track playing, for re-applying the event volume.
+    cur_vol: i32,
+    /// Config-tool 0029: effects at once; a new one is dropped while that many play (FUN_10037510).
+    pub max_se: u32,
+    /// Voices asked for and not yet taken by the mixer: they count as playing.
+    pending: std::cell::RefCell<std::collections::HashSet<u32>>,
+    /// The last op 0x5c 0xb1 restart sent: another waits until the mixer has the track or 2 s pass (the loader reads
+    /// the whole file per request, and the scripts ask every frame).
+    restarted: Option<std::time::Instant>,
+}
+
+impl Audio {
+    /// None when there is no output device; the game runs silent.
+    pub fn open(ffxi_dir: PathBuf, device: Option<&str>, music: f32, effects: f32) -> Option<Self> {
+        let status = Arc::new(Status::default());
+        let (mixer_tx, rx) = channel();
+        let st = status.clone();
+        match output::open(device, move |rate| Mixer::new(rx, rate, st)) {
+            Ok(out) => {
+                log::info!("audio: {} at {} Hz", out.host, out.rate);
+                let (tx, req) = channel();
+                let ls = status.clone();
+                std::thread::Builder::new()
+                    .name("audio-load".into())
+                    .spawn(move || loader(ffxi_dir, req, mixer_tx, ls))
+                    .ok()?;
+                Some(Self {
+                    tx,
+                    status,
+                    _out: out,
+                    wanted: 0,
+                    playing: 0,
+                    task: None,
+                    music,
+                    effects,
+                    tick_acc: 0.0,
+                    event_se: 1.0,
+                    event_stream: 1.0,
+                    event_ui: 1.0,
+                    call_level: 1.0,
+                    event_zone: 1.0,
+                    ambient_se: None,
+                    ambient_level: 0,
+                    ambient_handle: AMBIENT,
+                    ambient_scene: None,
+                    fades: [None; 4],
+                    streams: Default::default(),
+                    raw_levels: Default::default(),
+                    applied: (1.0, 1.0, 1.0),
+                    cur_vol: 0x7f,
+                    max_se: 12,
+                    pending: Default::default(),
+                    restarted: None,
+                })
+            }
+            Err(e) => {
+                log::warn!("audio disabled: {e:#}");
+                None
+            }
+        }
+    }
+
+    fn send(&self, c: Cmd) {
+        let _ = self.tx.send(Req::Cmd(c));
+    }
+
+    /// Volume level for a track volume (0..127) under the config multipliers.
+    fn level(&self, vol: i32) -> u8 {
+        ((vol as f32 * self.music) as i32).clamp(0, 127) as u8
+    }
+
+    fn start(&mut self, id: u32, vol: i32) {
+        self.cur_vol = vol;
+        log::info!("music: start {id} at level {}", self.level(vol));
+        let _ = self.tx.send(Req::Music { id, level: self.level(vol) });
+    }
+
+    /// FUN_10036530: change music through the fade task (ignored when `id` is already wanted).
+    pub fn change_music(&mut self, id: u32, vol: i32, vol2: i32, fade_in: i32, fade_out: i32, save: bool) {
+        self.change(id, vol, vol2, fade_in, fade_out, save, false, 0, false);
+    }
+
+    fn change(
+        &mut self,
+        id: u32,
+        vol: i32,
+        vol2: i32,
+        fade_in: i32,
+        fade_out: i32,
+        save: bool,
+        no_start: bool,
+        seq: usize,
+        single: bool,
+    ) {
+        if self.wanted == id {
+            return;
+        }
+        self.wanted = id;
+        self.task = Some(Task {
+            state: 0,
+            save,
+            no_start,
+            id,
+            vol,
+            vol2,
+            fade_in,
+            counter: fade_out.max(0x1e),
+            seq,
+            single,
+            wait: 0,
+        });
+    }
+
+    /// FUN_10036b40: fade the music out for a track the caller will start (creator race music).
+    pub fn prepare_music(&mut self, id: u32) {
+        self.change(id, 0x7f, 0x7f, 0, 0x1e, false, true, 0, false);
+    }
+
+    /// FUN_10036a90: start now (stopping a different track at once).
+    pub fn play_music_now(&mut self, id: u32) {
+        self.task = None;
+        if self.wanted != id {
+            self.send(Cmd::BgmFadeOut { ticks: 0 });
+            self.send(Cmd::BgmStop);
+        }
+        self.wanted = id;
+        self.start(id, 0x7f);
+        self.playing = id;
+    }
+
+    /// FUN_1023ae50 / FUN_10036980: title music for option 0xaf and the installed-content mask.
+    pub fn title_music(&mut self, option: u32, installed: u32) {
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u32)
+            .unwrap_or(0);
+        let (id, seq, single) = title_choice(option, installed, t);
+        self.change(id, 0x7f, 0x7f, 0, 0, false, false, seq, single);
+    }
+
+    /// New config factors (0..1): the playing track takes the new level over 10 ticks.
+    pub fn set_volumes(&mut self, music: f32, effects: f32) {
+        if (music - self.music).abs() > 1e-4 {
+            self.music = music;
+            let level = self.level(self.cur_vol);
+            self.send(Cmd::BgmVolume { level, ticks: 10 });
+        }
+        self.effects = effects;
+    }
+
+    pub fn stop_music(&mut self, ticks: i32) {
+        self.task = None;
+        self.wanted = 0;
+        self.send(Cmd::BgmFadeOut { ticks });
+    }
+
+    /// Unpositioned world effect at a level 0..127 before the config factor.
+    pub fn play_se(&mut self, id: u32, level: i32) {
+        self.se_at(id, level, self.event_se);
+    }
+
+    /// An interface sound (menus, targeting): the event volume's mask 2 / 8 level (DAT_10346568).
+    pub fn play_ui_se(&mut self, id: u32) {
+        self.se_at(id, 127, self.event_ui);
+    }
+
+    /// A chat `<call>` sound (FUN_100380f0): volume = DAT_10351710 x 127, its level (event op 0x69 mask 0x10), not
+    /// the interface sounds'. At 0 retail still starts it, silent; ours skips it. It plays under a separate handle
+    /// (ours), so its task can wait for it (`call_heard`).
+    pub fn play_call(&mut self, id: u32) {
+        if self.call_level <= 0.0 || self.status.voices.load(std::sync::atomic::Ordering::Relaxed) >= self.max_se {
+            return;
+        }
+        let level = ((127.0 * self.effects * self.call_level) as i32).clamp(0, 127) as u8;
+        self.pending.borrow_mut().insert(CALL);
+        let _ = self.tx.send(Req::Voice { id, level, pan: 0x40, handle: CALL, limit: 0 });
+    }
+
+    /// For the call's task (FUN_100381d0): the call level is on (DAT_10351710), and the call's voice still plays
+    /// (FUN_100367f0).
+    pub fn call_heard(&self) -> (bool, bool) {
+        (self.call_level > 0.0, self.alive().contains(&CALL))
+    }
+
+    fn se_at(&mut self, id: u32, level: i32, event: f32) {
+        if self.status.voices.load(std::sync::atomic::Ordering::Relaxed) >= self.max_se {
+            return;
+        }
+        let lv = ((level as f32 * self.effects * event) as i32).clamp(0, 127) as u8;
+        let _ = self.tx.send(Req::Se { id, level: lv });
+    }
+
+    /// A sound file's bytes (WAV or SeWave, a Lua mod's) at a level 0..127 before the effects factor.
+    pub fn play_bytes(&mut self, bytes: Arc<[u8]>, level: i32) {
+        if self.status.voices.load(std::sync::atomic::Ordering::Relaxed) >= self.max_se {
+            return;
+        }
+        let lv = ((level as f32 * self.effects) as i32).clamp(0, 127) as u8;
+        log::debug!("mod sound: {} bytes at level {lv}", bytes.len());
+        let Some(dec) = decoder(bytes, "mod sound", 0) else { return };
+        let _ = self.tx.send(Req::Cmd(Cmd::PlaySe { dec, level: lv, pan: 0x40, priority: 0, handle: 0, limit: 0 }));
+    }
+
+    /// A positioned effect voice (FUN_100370d0 -> FUN_10036130 -> cmd 2) under `handle`; level 0..127 before the
+    /// effects factor, pan 0..127. A full table (the 0029 limit) steals the oldest lower-priority voice (FUN_1023fb90)
+    /// rather than refusing, unlike the plain sound call FUN_10037510.
+    pub fn play_voice(&mut self, handle: u32, id: u32, level: i32, pan: u8, stream: bool) -> bool {
+        if stream {
+            self.streams.insert(handle);
+        }
+        let lv = self.voice_level_of(handle, level);
+        self.raw_levels.insert(handle, level);
+        self.pending.borrow_mut().insert(handle);
+        log::debug!("voice {handle:#x}: se {id} level {lv} pan {pan}");
+        let _ = self.tx.send(Req::Voice { id, level: lv, pan: pan & 0x7f, handle, limit: self.max_se as u8 });
+        true
+    }
+
+    /// A voice's level: world effects take the event's effect volume, the stream only mask 8.
+    fn voice_level_of(&self, handle: u32, level: i32) -> u8 {
+        if self.streams.contains(&handle) {
+            ((level as f32 * self.effects * self.event_stream) as i32).clamp(0, 127) as u8
+        } else {
+            self.se_level(level)
+        }
+    }
+
+    pub fn voice_level(&mut self, handle: u32, level: i32) {
+        self.raw_levels.insert(handle, level);
+        let lv = self.voice_level_of(handle, level);
+        self.send(Cmd::SeLevel { handle, level: lv });
+    }
+
+    pub fn voice_pan(&mut self, handle: u32, pan: u8) {
+        self.send(Cmd::SePan { handle, pan: pan & 0x7f });
+    }
+
+    /// Stop now (0) or fade out over 60 Hz ticks.
+    pub fn voice_stop(&mut self, handle: u32, ticks: i32) {
+        log::debug!("voice {handle:#x}: stop over {ticks}");
+        self.send(Cmd::SeStop { handle, ticks });
+    }
+
+    /// Handles of the voices still playing, and those the mixer has not taken yet (a voice on its way counts as
+    /// playing: our loader and mixer callback can take longer than retail's 3-pass grace).
+    pub fn alive(&self) -> Vec<u32> {
+        let mut pending = self.pending.borrow_mut();
+        if let Ok(mut t) = self.status.taken.lock() {
+            for h in t.drain(..) {
+                pending.remove(&h);
+            }
+        }
+        let mut v = self.status.alive.lock().map(|a| a.clone()).unwrap_or_default();
+        v.extend(pending.iter().copied());
+        v
+    }
+
+    fn se_level(&self, level: i32) -> u8 {
+        ((level as f32 * self.effects * self.event_se) as i32).clamp(0, 127) as u8
+    }
+
+    /// Event volume (0x69 set / 0x6a fade, FUN_100b5c30 / FUN_10034be0): mask 1 world effects, 2 interface, 4 the zone's
+    /// ambient loop (FUN_10035fb0), 8 all of them and the stream. The music is not among them: cutscenes mute the world
+    /// and keep the music.
+    /// A set (0 ticks) first ends a running fade on its target (FUN_10036020), then applies at once. Mask 0x10 (0x69
+    /// only; 0x6a ignores it) sets the chat call sounds' level DAT_10351710, which nothing resets but another 0x69.
+    pub fn event_volume(&mut self, mask: i32, level: f32, ticks: f32) {
+        let level = level.clamp(0.0, 1.0);
+        // The VM strips 0x10 from 0x6a, so it only reaches here from 0x69.
+        if mask & 0x10 != 0 {
+            self.call_level = level;
+        }
+        // FUN_100b5c30: 1 world effects (FUN_10035200), 8 everything and the stream (FUN_100350e0); 2 interface sounds
+        // (FUN_10035250).
+        for (i, bits) in [(0, 0x9), (1, 0x8), (2, 0xa), (3, 0xc)] {
+            if mask & bits == 0 {
+                continue;
+            }
+            if let Some(f) = self.fades[i].take() {
+                *self.channel(i) = f.to;
+            }
+            if ticks > 0.0 {
+                let from = *self.channel(i);
+                self.fades[i] = Some(Fade { from, to: level, total: ticks, left: ticks });
+            } else {
+                *self.channel(i) = level;
+            }
+        }
+    }
+
+    /// FUN_10035e80 / FUN_10035ec0 (a volume slider's apply): every channel's event level back to 1.0 at once, so a
+    /// slider move during a cutscene undoes the script's mute (batch 6 item 18).
+    pub fn reset_event_levels(&mut self) {
+        self.fades = [None; 4];
+        (self.event_se, self.event_stream, self.event_ui, self.event_zone) = (1.0, 1.0, 1.0, 1.0);
+    }
+
+    fn channel(&mut self, i: usize) -> &mut f32 {
+        match i {
+            0 => &mut self.event_se,
+            1 => &mut self.event_stream,
+            2 => &mut self.event_ui,
+            _ => &mut self.event_zone,
+        }
+    }
+
+    /// FUN_10035940: each fade steps by the frame's ticks; below 0 left it ends on its target.
+    fn step_fades(&mut self, ticks: f32) {
+        for i in 0..4 {
+            let Some(mut f) = self.fades[i] else { continue };
+            f.left -= ticks;
+            let v = if f.left < 0.0 {
+                self.fades[i] = None;
+                f.to
+            } else {
+                self.fades[i] = Some(f);
+                f.from + (f.to - f.from) * (1.0 - f.left / f.total)
+            };
+            *self.channel(i) = v;
+        }
+    }
+
+    /// Event ops 0x5d and 0x5c 0xa0 / 0xa1 (FUN_10037a30): the music fades to `vol` over `ticks`.
+    pub fn music_fade(&mut self, vol: i32, ticks: i32) {
+        self.cur_vol = vol;
+        let level = self.level(vol);
+        self.send(Cmd::BgmVolume { level, ticks: ticks.max(0) });
+    }
+
+    /// The mixer has a music track (FUN_10246710(0, -1): the stream's +0x94 is set).
+    pub fn music_playing(&self) -> bool {
+        self.status.bgm.load(std::sync::atomic::Ordering::Relaxed) != 0
+    }
+
+    /// Event op 0x5c 0xb1 (FUN_100378b0(DAT_10463940)): the track last started plays again when the mixer has none.
+    /// Ours skips it while a change is under way, which starts its track, and while its last restart is still
+    /// loading.
+    pub fn restart_music(&mut self) {
+        if self.music_playing()
+            || self.playing == 0
+            || self.task.is_some()
+            || self.restarted.is_some_and(|t| t.elapsed().as_secs_f32() < 2.0)
+        {
+            return;
+        }
+        self.restarted = Some(std::time::Instant::now());
+        self.start(self.playing, self.cur_vol);
+    }
+
+    /// A music change is still under way (event op 0x9a waits for it).
+    pub fn music_changing(&self) -> bool {
+        self.task.is_some()
+    }
+
+    pub fn ui(&mut self, s: Ui) {
+        self.play_ui_se(s as u32);
+    }
+
+    /// The zone's ambient loop (FUN_10036170): a different resource starts its SeSep centred (pan 0x40) at 127 x the
+    /// zone level (DAT_10351708, config x event mask 4), fading in over 150 steps. The old loop is not stopped there:
+    /// the sound engine fades it out over the same 150 steps (FUN_1024a1b0), so a time of day, weather or indoor change
+    /// crossfades. A scene change (the zone's SeSep released, FUN_10037ac0) or no loop at all keys it off at once
+    /// (FUN_10036170(0)). A start the voice limit refuses is not retried until the resource changes.
+    pub fn ambient(&mut self, se: Option<u32>, scene: Option<u16>) {
+        let moved = scene != self.ambient_scene;
+        self.ambient_scene = scene;
+        if self.ambient_se == se && !moved {
+            return;
+        }
+        log::info!("ambient loop: {se:?}{}", if moved { " (new scene)" } else { "" });
+        if self.ambient_se.is_some() {
+            let cut = moved || se.is_none();
+            self.send(Cmd::SeStop { handle: self.ambient_handle, ticks: if cut { 0 } else { AMBIENT_FADE } });
+            self.ambient_handle = if self.ambient_handle == AMBIENT { AMBIENT + 1 } else { AMBIENT };
+            // The other handle may still hold a loop fading out from a change moments ago (ours: cut, so the level
+            // commands below only reach the new loop).
+            self.send(Cmd::SeStop { handle: self.ambient_handle, ticks: 0 });
+        }
+        self.ambient_se = se;
+        let Some(id) = se else { return };
+        // The ambient voices just stopped or fading still count in the mixer; they do not keep the new loop out.
+        let ours = self.alive().iter().filter(|&&h| h == AMBIENT || h == AMBIENT + 1).count() as u32;
+        if self.status.voices.load(std::sync::atomic::Ordering::Relaxed).saturating_sub(ours) >= self.max_se {
+            return;
+        }
+        self.ambient_level = self.zone_level();
+        // Limit 0 in the mixer: the check above already applied the configured limit, so the loop takes any free slot
+        // while the one it replaces fades out there.
+        let _ = self.tx.send(Req::Voice {
+            id,
+            level: self.ambient_level,
+            pan: 0x40,
+            handle: self.ambient_handle,
+            limit: 0,
+        });
+    }
+
+    fn zone_level(&self) -> u8 {
+        ((127.0 * self.effects * self.event_zone) as i32).clamp(0, 127) as u8
+    }
+
+    /// Advances the music task by real time at the client's 60 Hz tick.
+    pub fn update(&mut self, dt: f32) {
+        if self.restarted.is_some() && self.music_playing() {
+            self.restarted = None;
+        }
+        self.step_fades(dt * 60.0);
+        // Running effect voices follow the effects factor and the event channels.
+        let factors = (self.effects, self.event_se, self.event_stream);
+        if factors != self.applied {
+            self.applied = factors;
+            let alive = self.alive();
+            self.raw_levels.retain(|h, _| alive.contains(h));
+            let levels: Vec<(u32, i32)> = self.raw_levels.iter().map(|(h, l)| (*h, *l)).collect();
+            for (handle, level) in levels {
+                let lv = self.voice_level_of(handle, level);
+                self.send(Cmd::SeLevel { handle, level: lv });
+            }
+        }
+        // FUN_10035fb0: the running ambient voice follows the zone level.
+        let lv = self.zone_level();
+        if self.ambient_se.is_some() && lv != self.ambient_level {
+            self.ambient_level = lv;
+            self.send(Cmd::SeLevel { handle: self.ambient_handle, level: lv });
+        }
+        self.tick_acc += dt * 60.0;
+        let ticks = self.tick_acc.floor().min(30.0) as i32;
+        self.tick_acc -= ticks as f32;
+        if self.tick_acc > 1.0 {
+            self.tick_acc = 0.0;
+        }
+        for _ in 0..ticks {
+            self.step();
+        }
+    }
+
+    /// One tick of FUN_100365e0.
+    fn step(&mut self) {
+        let Some(mut t) = self.task.take() else { return };
+        let mut done = false;
+        match t.state {
+            0 => {
+                if t.save {
+                    self.send(Cmd::SavePosition);
+                }
+                self.send(Cmd::BgmFadeOut { ticks: t.counter });
+                t.state = 1;
+            }
+            1 => {
+                t.counter -= 1;
+                if t.counter < 0 {
+                    self.send(Cmd::BgmFadeOut { ticks: 0 });
+                    t.counter = 4;
+                    t.state = 2;
+                }
+            }
+            2 => {
+                t.counter -= 1;
+                if t.counter < 0 {
+                    self.send(Cmd::BgmStop);
+                    t.state = 3;
+                }
+            }
+            3 => {
+                self.playing = t.id;
+                if !t.no_start {
+                    self.start(t.id, t.vol);
+                }
+                t.wait = if t.vol != t.vol2 { 10 } else { 0 };
+                t.state = 4;
+            }
+            4 => {
+                if t.wait != 0 {
+                    t.wait -= 1;
+                } else {
+                    if !t.no_start {
+                        self.send(Cmd::BgmVolume { level: self.level(t.vol2), ticks: t.fade_in });
+                    }
+                    let (_, wait, _) = SEQUENCE[t.seq];
+                    if wait != 0 && !t.single {
+                        t.counter = wait;
+                        t.state = 5;
+                    } else {
+                        done = true;
+                    }
+                }
+            }
+            5 => {
+                t.counter -= 1;
+                if t.counter < 0 {
+                    t.counter = 0x168;
+                    self.send(Cmd::BgmFadeOut { ticks: 0x168 });
+                    t.state = 6;
+                }
+            }
+            6 => {
+                t.counter -= 1;
+                if t.counter < 0 {
+                    self.send(Cmd::BgmFadeOut { ticks: 0 });
+                    t.counter = 4;
+                    t.state = 7;
+                }
+            }
+            7 => {
+                t.counter -= 1;
+                if t.counter < 0 {
+                    t.id = SEQUENCE[t.seq].2;
+                    self.wanted = t.id;
+                    self.send(Cmd::BgmStop);
+                    t.state = 8;
+                }
+            }
+            _ => {
+                self.start(t.id, t.vol2);
+                self.playing = t.id;
+                done = true;
+            }
+        }
+        if !done {
+            self.task = Some(t);
+        }
+    }
+
+    /// Cmd 11: forget saved music positions.
+    pub fn clear_positions(&mut self) {
+        self.send(Cmd::ClearPositions(None));
+    }
+}
+
+enum Req {
+    Cmd(Cmd),
+    Music { id: u32, level: u8 },
+    Se { id: u32, level: u8 },
+    Voice { id: u32, level: u8, pan: u8, handle: u32, limit: u8 },
+}
+
+/// FUN_100377a0's choice: (track, sequence entry, no follow-up) for option 0xaf;  stands for timeGetTime.
+pub fn title_choice(option: u32, installed: u32, t: u32) -> (u32, usize, bool) {
+    let (mode, n) = TITLE_MODE.get(option as usize).copied().unwrap_or((0, 0));
+    let (mut n, single) = match mode {
+        0 => (TITLE_PICK.len() as i32 - 1, false),
+        1 => (n as i32, true),
+        2 => ((t % TITLE_PICK.len() as u32) as i32, true),
+        _ => (0, false),
+    };
+    // An expansion not installed falls back to the next older one.
+    let mut seq = 0;
+    while n >= 0 {
+        let (bit, entry) = TITLE_PICK[n as usize];
+        if installed & (1 << bit) != 0 {
+            seq = entry;
+            break;
+        }
+        n -= 1;
+    }
+    let id = if SEQUENCE[seq].0 == 0 { TITLE_DEFAULT } else { SEQUENCE[seq].0 };
+    (id, seq, single)
+}
+
+/// The sound effects read lately, up to SE_BUDGET bytes (the least recently played go first: a voice keeps its
+/// Arc, so dropping one here never cuts a sound short); a file found missing stays known as missing.
+#[derive(Default)]
+struct SeCache {
+    files: HashMap<u32, (Option<Arc<[u8]>>, u64)>,
+    bytes: usize,
+    tick: u64,
+}
+
+/// About 550 effects at their average 116 KB (sound/win/se holds 9459, 1.1 GB).
+const SE_BUDGET: usize = 64 << 20;
+
+impl SeCache {
+    fn get(&mut self, id: u32, read: impl FnOnce() -> Option<Arc<[u8]>>) -> Option<Arc<[u8]>> {
+        self.tick += 1;
+        if let Some(e) = self.files.get_mut(&id) {
+            e.1 = self.tick;
+            return e.0.clone();
+        }
+        let bytes = read();
+        self.bytes += bytes.as_ref().map_or(0, |b| b.len());
+        self.files.insert(id, (bytes.clone(), self.tick));
+        while self.bytes > SE_BUDGET {
+            let Some((&old, _)) = self.files.iter().filter(|(k, e)| e.0.is_some() && **k != id).min_by_key(|e| e.1.1)
+            else {
+                break;
+            };
+            if let Some((Some(b), _)) = self.files.remove(&old) {
+                self.bytes -= b.len();
+            }
+        }
+        bytes
+    }
+}
+
+/// A sound file's decoder, made off the audio callback; None (logged) for a file it can't read.
+fn decoder(bytes: Arc<[u8]>, what: &str, id: u32) -> Option<Box<format::Decoder>> {
+    format::Decoder::new(bytes).map(Box::new).inspect_err(|e| log::warn!("{what} {id}: {e:#}")).ok()
+}
+
+/// Reads sound files off the UI thread, keeping command order (effects cached, SeCache).
+fn loader(dir: PathBuf, rx: Receiver<Req>, tx: Sender<Cmd>, status: Arc<Status>) {
+    // Mod packs change on restart, so the roots are listed once (each lookup read the config).
+    let roots = format::sound_dirs(&dir);
+    let mut effects = SeCache::default();
+    let read = |path: Option<PathBuf>, what: &str, id: u32| -> Option<Arc<[u8]>> {
+        let bytes = path.and_then(|p| std::fs::read(p).ok()).map(Arc::from);
+        if bytes.is_none() {
+            log::warn!("no {what} {id}");
+        }
+        bytes
+    };
+    for r in rx {
+        let cmd = match r {
+            Req::Cmd(c) => Some(c),
+            Req::Music { id, level } => read(format::music_in(&dir, &roots, id), "music", id)
+                .and_then(|bytes| decoder(bytes, "music", id))
+                .map(|dec| Cmd::PlayBgm { id, dec, level, ticks: 0 }),
+            Req::Se { id, level } => {
+                log::debug!("se {id} at level {level}");
+                effects
+                    .get(id, || read(format::se_in(&roots, id), "sound", id))
+                    .and_then(|bytes| decoder(bytes, "sound", id))
+                    .map(|dec| Cmd::PlaySe { dec, level, pan: 0x40, priority: 0, handle: 0, limit: 0 })
+            }
+            Req::Voice { id, level, pan, handle, limit } => {
+                let c = effects
+                    .get(id, || read(format::se_in(&roots, id), "sound", id))
+                    .and_then(|bytes| decoder(bytes, "sound", id))
+                    .map(|dec| Cmd::PlaySe { dec, level, pan, priority: 0, handle, limit });
+                // A failed read is taken too: the voice never comes.
+                if c.is_none()
+                    && let Ok(mut t) = status.taken.lock()
+                {
+                    t.push(handle);
+                }
+                c
+            }
+        };
+        if let Some(c) = cmd
+            && tx.send(c).is_err()
+        {
+            return;
+        }
+    }
+}
+
+/// What the player is doing, for the zone music choice.
+#[derive(Clone, Copy, Default)]
+pub struct MusicContext {
+    /// Own status (POS_HEAD 0x1F / 0x037).
+    pub status: u8,
+    /// Vana'diel hour 0..23.
+    pub hour: u32,
+    /// Party members including us (and our trusts).
+    pub party: u32,
+    /// DAT_10480aec: a monster claimed by our alliance within 45 (only with /battlebgm's bit 0 clear).
+    pub party_battle: bool,
+    /// In a Mog House other than Mog Garden (DAT_10482f44 && !DAT_1048098d): slot 6 before anything else.
+    pub myroom: bool,
+    /// The Goldfish Basket in the range slot (look 0xc): fishing keeps the zone's music.
+    pub basket: bool,
+}
+
+/// The zone's music slots (0x00A MusicNum[5] -> 0..4, death 0x6f -> 5, 0x05F any of 0..7) and the
+/// choice among them (FUN_100926a0).
+pub struct ZoneMusic {
+    pub slots: [u16; 8],
+    pub vols: [u16; 8],
+    last_id: u16,
+    last_slot: u8,
+    field_slot: u8,
+    /// Slots arrive with the first 0x00A; nothing is chosen before.
+    ready: bool,
+}
+
+impl Default for ZoneMusic {
+    fn default() -> Self {
+        Self { slots: [0; 8], vols: [0x7f; 8], last_id: 0xffff, last_slot: 0xff, field_slot: 0, ready: false }
+    }
+}
+
+/// A music change the selector asks for.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Change {
+    pub id: u32,
+    pub vol: i32,
+    pub fade_in: i32,
+    pub save: bool,
+    pub clear: bool,
+}
+
+impl ZoneMusic {
+    /// 0x00A: slots 0..4 from MusicNum, slot 5 the death track 0x6f.
+    pub fn zone_in(&mut self, music: [u16; 5]) {
+        self.slots[..5].copy_from_slice(&music);
+        self.slots[5] = 0x6f;
+        self.ready = true;
+    }
+
+    /// FUN_10094190 in Monstrosity: slots 2 / 3 (solo / party battle) = 0x46.
+    pub fn monstrosity(&mut self) {
+        self.slots[2] = 0x46;
+        self.slots[3] = 0x46;
+    }
+
+    /// FUN_10094190 in the Mog House: slot 6 = 0x7e (music126).
+    pub fn myroom(&mut self) {
+        self.slots[6] = 0x7e;
+    }
+
+    /// Event op 0x5c (FUN_100b6e30): slot `slot` plays `id`, started at `vol` (0x7f, or the 0x80..0x87 forms' operand,
+    /// at most 0xff); any 0x5c makes the selector choose again.
+    pub fn set_slot_vol(&mut self, slot: u16, id: u16, vol: u16) {
+        if slot < 8 {
+            self.vols[slot as usize] = vol.min(0xff);
+        }
+        self.set_slot(slot, id);
+    }
+
+    /// 0x05F {u16 slot @4, u16 track @6} (handler 0x10098150).
+    pub fn set_slot(&mut self, slot: u16, id: u16) {
+        if slot < 8 {
+            self.slots[slot as usize] = id;
+            self.last_id = 0xffff;
+        }
+    }
+
+    /// Forgets the track playing, so the next select picks the context's again (after a mod's override).
+    pub fn forget(&mut self) {
+        self.last_id = 0xffff;
+    }
+
+    pub fn select(&mut self, cx: MusicContext) -> Option<Change> {
+        if !self.ready {
+            return None;
+        }
+        let slot = match cx.status {
+            _ if cx.myroom => 6,
+            2 | 3 => 5,
+            5 | 0x55 if self.slots[4] != 0 => 4,
+            // Fishing fights use slot 7 when the zone has one (the 0x10c sub-state test is not modelled).
+            0x26 | 0x39 if !cx.basket => {
+                if self.slots[7] == 0 {
+                    return None;
+                }
+                7
+            }
+            _ if cx.status == 1 || cx.party_battle => {
+                if cx.party == 1 {
+                    2
+                } else {
+                    3
+                }
+            }
+            _ if cx.hour < 6 || cx.hour > 17 => 1,
+            _ => 0,
+        };
+        let id = self.slots[slot];
+        if self.last_id == id {
+            return None;
+        }
+        let save = self.last_slot <= 1;
+        if save {
+            self.field_slot = self.last_slot;
+        }
+        let back = self.field_slot as usize == slot && matches!(self.last_slot, 2 | 3 | 7);
+        self.last_id = id;
+        self.last_slot = slot as u8;
+        Some(Change {
+            id: id as u32,
+            vol: self.vols[slot] as i32,
+            fade_in: if back { 0x3c } else { 0 },
+            save,
+            clear: !back,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The effects cache keeps the recently played to its budget; the one just read always stays; misses stay known.
+    #[test]
+    fn se_cache_budget() {
+        let mut c = SeCache::default();
+        let big = |n: usize| move || Some(Arc::<[u8]>::from(vec![0u8; n]));
+        let half = SE_BUDGET / 2 + 1;
+        assert!(c.get(1, big(half)).is_some());
+        assert!(c.get(2, || None).is_none());
+        assert!(c.get(3, big(half)).is_some());
+        // 1 went (least recently played); 3 stays; the miss stays known (no second read).
+        assert!(!c.files.contains_key(&1) && c.files.contains_key(&3));
+        assert!(c.get(2, || panic!("read again")).is_none());
+        assert!(c.bytes <= SE_BUDGET);
+    }
+
+    #[test]
+    fn title_choice_follows_ffximain() {
+        // ROM2..ROM9 (this install) -> 0xfff; without ROM9 -> 0x7ff.
+        let all = crate::dat::installed_mask(|n| n <= 9);
+        assert_eq!(all, 0xfff);
+        assert_eq!(crate::dat::installed_mask(|n| n <= 8), 0x7ff);
+        assert_eq!(crate::dat::installed_mask(|n| n == 6 || n == 9), 0x801);
+        let pick = |o, m| title_choice(o, m, 0);
+        // Newest: track 34 (base game, entry 6) then 108; fixed 1..6 = 108, 242, 179, 140, 58, 34.
+        assert_eq!(pick(0, all), (34, 6, false));
+        assert_eq!([2, 3, 4, 5, 6, 7].map(|o| pick(o, all).0), [108, 242, 179, 140, 58, 34]);
+        assert!([2, 3, 4, 5, 6, 7].iter().all(|&o| pick(o, all).2));
+        // Random: timeGetTime % 6, falling back below a missing one.
+        assert_eq!((0..6).map(|t| title_choice(1, all, t).0).collect::<Vec<_>>(), [108, 242, 179, 140, 58, 34]);
+        assert_eq!(title_choice(1, 0x7ff, 4).0, 140);
+        // Without ROM9 Seekers' 58 falls back to 140; newest still needs only the base game.
+        assert_eq!(pick(0, 0x7ff), (34, 6, false));
+        assert_eq!(pick(6, 0x7ff).0, 140);
+        assert_eq!(pick(0, 1), (34, 6, false));
+    }
+
+    #[test]
+    fn battle_and_back_resumes_the_field_track() {
+        let mut z = ZoneMusic::default();
+        z.zone_in([101, 102, 103, 104, 0]);
+        let day = MusicContext { status: 0, hour: 12, party: 1, party_battle: false, myroom: false, basket: false };
+        assert_eq!(z.select(day), Some(Change { id: 101, vol: 0x7f, fade_in: 0, save: false, clear: true }));
+        assert_eq!(z.select(day), None);
+        let fight = MusicContext { status: 1, ..day };
+        assert_eq!(z.select(fight), Some(Change { id: 103, vol: 0x7f, fade_in: 0, save: true, clear: true }));
+        assert_eq!(z.select(day), Some(Change { id: 101, vol: 0x7f, fade_in: 0x3c, save: false, clear: false }));
+        let night = MusicContext { hour: 20, ..day };
+        assert_eq!(z.select(night).map(|c| c.id), Some(102));
+        assert_eq!(z.select(MusicContext { status: 3, ..day }).map(|c| c.id), Some(0x6f));
+        // Our party of 2+ engaged: slot 3; the party battle flag alone starts it too.
+        assert_eq!(z.select(MusicContext { status: 1, party: 2, ..day }).map(|c| c.id), Some(104));
+        assert_eq!(z.select(day).map(|c| c.id), Some(101));
+        assert_eq!(z.select(MusicContext { party_battle: true, ..day }).map(|c| c.id), Some(103));
+    }
+}

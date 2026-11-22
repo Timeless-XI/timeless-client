@@ -1,0 +1,750 @@
+//! Item records as FUN_1015b9e0 reads them: 0x1400 bytes per item (0xc00 in the 2019 build, and in the German and
+//! French files retail no longer updates), each byte rotated right by 5 (FUN_1015d7f0). The id range picks the file
+//! (table DAT_10372150, filled by FUN_1015b720 from language slots) and the field parser (FUN_1015c0a0 and the
+//! others). Strings follow FUN_1015be00, the icon is at +0x280 (size) / +0x284 (data). The wide records widen the
+//! flags to u32, so fields from +6 on sit 2 later (4 after an alignment gap before the jobs word).
+
+use super::DatIndex;
+use super::font::decode_sjis;
+use anyhow::{Context, Result};
+use std::io::{Read, Seek, SeekFrom};
+
+/// FFXiMain language codes (FUN_10250de0): 0 ja, 1 en, 2 de, 3 fr.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lang {
+    Ja = 0,
+    En = 1,
+    De = 2,
+    Fr = 3,
+}
+
+impl Lang {
+    pub fn parse(s: &str) -> Option<Lang> {
+        match s {
+            "ja" => Some(Lang::Ja),
+            "en" => Some(Lang::En),
+            "de" => Some(Lang::De),
+            "fr" => Some(Lang::Fr),
+            _ => None,
+        }
+    }
+}
+
+/// Record layout, one per parser function.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// FUN_101557b0
+    General,
+    /// FUN_10155920
+    Usable,
+    /// FUN_10155a90 (automaton attachments)
+    Automaton,
+    /// FUN_10155bf0
+    Armor,
+    /// FUN_10155da0
+    Weapon,
+    /// FUN_10155f70 (0x7000..)
+    K7000,
+    /// FUN_101560e0 (0x7400..)
+    K7400,
+    /// FUN_10156270: Records of Eminence objectives (grammar kinds 0x39-0x41 read id + 0xe000)
+    Objective,
+    /// FUN_101563d0 (no strings)
+    Keff8,
+    /// FUN_101564c0: monstrosity species
+    Monster,
+    /// FUN_10156630: the Records of Eminence categories (dat/roe.rs)
+    RoeCategory,
+    /// FUN_10156790 (no strings)
+    Kf600,
+    /// FUN_1015d310 (2019 FUN_10156a20): the Adventuring Primer's categories (guide00 rows, id - 0xf620)
+    Guide,
+    /// FUN_1015d1c0 (2019 FUN_101568d0): the Primer's topics (guide01 rows; +4 the image number, +5 the image count)
+    GuidePage,
+    /// FUN_10156b70: gil and other currencies
+    Currency,
+}
+
+/// (first id, end id, kind, file per language ja/en/de/fr), from DAT_103662e8 and the language tables.
+pub const RANGES: [(u32, u32, Kind, [u32; 4]); 18] = [
+    (0x0000, 0x1000, Kind::General, [4, 73, 55815, 56235]),
+    (0x2200, 0x2800, Kind::General, [55551, 55671, 55791, 56211]),
+    (0x1000, 0x2000, Kind::Usable, [5, 74, 55816, 56236]),
+    (0x2000, 0x2200, Kind::Automaton, [8, 77, 55819, 56239]),
+    (0x2800, 0x4000, Kind::Armor, [7, 76, 55818, 56238]),
+    (0x5a00, 0x7000, Kind::Armor, [55548, 55668, 55788, 56208]),
+    (0x4000, 0x5a00, Kind::Weapon, [6, 75, 55817, 56237]),
+    (0x7000, 0x7400, Kind::K7000, [55547, 55667, 55787, 56207]),
+    (0x7400, 0x7800, Kind::K7400, [55550, 55670, 55790, 56210]),
+    (0x7800, 0x7c00, Kind::General, [55555, 55675, 55675, 55675]),
+    (0xe000, 0xeff8, Kind::Objective, [55552, 55672, 55792, 56212]),
+    (0xeff8, 0xf000, Kind::Keff8, [95, 95, 95, 95]),
+    (0xf000, 0xf200, Kind::Monster, [55549, 55669, 55789, 56209]),
+    (0xf200, 0xf600, Kind::RoeCategory, [55553, 55673, 55793, 56213]),
+    (0xf600, 0xf614, Kind::Kf600, [55504, 55504, 55504, 55504]),
+    (0xf620, 0xf630, Kind::Guide, [55558, 55678, 55798, 56218]),
+    (0xf630, 0xf720, Kind::GuidePage, [55557, 55677, 55797, 56217]),
+    (0xffff, 0x1000f, Kind::Currency, [9, 91, 55820, 56240]),
+];
+
+/// A string-table field (FUN_1024cde0 / FUN_1024d0f0): text, or a number.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Field {
+    Text(String),
+    Num(u32),
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Item {
+    pub id: u32,
+    pub kind: Option<Kind>,
+    pub flags: u16,
+    pub stack: u16,
+    pub item_type: u16,
+    /// +0xa (icon / resource id).
+    pub resource: u16,
+    pub targets: u16,
+    pub level: u16,
+    /// Equipment slot bits.
+    pub slots: u16,
+    pub races: u16,
+    /// Job bits (bit n = job n).
+    pub jobs: u32,
+    pub superior_level: u16,
+    pub shield_size: u16,
+    pub damage: u16,
+    pub delay: u16,
+    pub dps: u16,
+    pub skill: u8,
+    pub max_charges: u8,
+    pub cast_time: u8,
+    pub use_delay: u16,
+    pub reuse_delay: u32,
+    /// Fields the parsers set whose use is not traced: (object offset, value).
+    pub extra: Vec<(u16, u32)>,
+    pub fields: Vec<Field>,
+    pub name: String,
+    /// English only (FUN_1014fda0): article type 0 "a", 1 "an", 2 "pair of", 3 "suit of".
+    pub article: u32,
+    pub singular: String,
+    pub plural: String,
+    pub description: String,
+    /// K7000 (Moblin Maze Mongers) record +0x14..+0x54 (FUN_1015c860's +0x1530): a tabula's 25 grid bytes, a voucher's
+    /// allowed-rune bits, a rune's element and shape (dat/maze.rs, client/maze.rs).
+    pub maze: Option<[u8; 64]>,
+    icon: Option<Vec<u8>>,
+}
+
+fn u16_at(r: &[u8], o: usize) -> u16 {
+    u16::from_le_bytes([r[o], r[o + 1]])
+}
+
+fn u32_at(r: &[u8], o: usize) -> u32 {
+    u32::from_le_bytes(r[o..o + 4].try_into().unwrap())
+}
+
+/// FUN_1024cdc0 / FUN_1024cde0: u32 count, (offset, type) pairs; type 0 text starts 0x1c bytes in
+/// after a u16 marker 1, type 1 is a u32.
+pub fn string_table(b: &[u8]) -> Vec<Field> {
+    let Some(n) = b.get(0..4).map(|x| u32::from_le_bytes(x.try_into().unwrap()) as usize) else { return Vec::new() };
+    let mut out = Vec::new();
+    for i in 0..n.min(64) {
+        let Some(e) = b.get(4 + i * 8..12 + i * 8) else { break };
+        let (off, ty) =
+            (u32::from_le_bytes(e[0..4].try_into().unwrap()) as usize, u32::from_le_bytes(e[4..8].try_into().unwrap()));
+        if ty == 0 {
+            let s = b.get(off + 0x1c..).unwrap_or_default();
+            let end = s.iter().position(|&c| c == 0).unwrap_or(s.len());
+            out.push(Field::Text(decode_sjis(&s[..end])));
+        } else {
+            out.push(Field::Num(b.get(off..off + 4).map_or(0, |x| u32::from_le_bytes(x.try_into().unwrap()))));
+        }
+    }
+    out
+}
+
+fn text(f: Option<&Field>) -> String {
+    match f {
+        Some(Field::Text(s)) => s.clone(),
+        _ => String::new(),
+    }
+}
+
+/// A 2019 record offset in this record: wide records (0x1400) put fields from +6 on 2 later, and those from the
+/// jobs word on (`jobs`, where the kind has one) 2 more.
+fn wide_at(wide: bool, jobs: Option<usize>, old: usize) -> usize {
+    if !wide || old < 6 { old } else { old + 2 + if jobs.is_some_and(|j| old >= j) { 2 } else { 0 } }
+}
+
+/// Decodes one decrypted record (`wide`: a 0x1400-byte record).
+pub fn parse(r: &[u8], kind: Kind, lang: Lang, wide: bool) -> Item {
+    // Kinds without the shared header keep their layout; the jobs word follows a gap in the wide ones.
+    let (shifted, jobs) = match kind {
+        Kind::Automaton => (true, Some(0x10)),
+        Kind::Armor | Kind::Weapon | Kind::K7400 => (true, Some(0x14)),
+        Kind::General | Kind::Usable | Kind::K7000 | Kind::Monster | Kind::Currency => (true, None),
+        _ => (false, None),
+    };
+    let at = |old: usize| wide_at(wide && shifted, jobs, old);
+    let r16 = |old: usize| u16_at(r, at(old));
+    let r32 = |old: usize| u32_at(r, at(old));
+    let r8 = |old: usize| r[at(old)];
+    let mut it = Item { id: u32_at(r, 0), kind: Some(kind), ..Default::default() };
+    let header = |it: &mut Item| {
+        it.flags = u16_at(r, 4);
+        it.stack = r16(6);
+        it.item_type = r16(8);
+        it.resource = r16(0xa);
+        it.targets = r16(0xc);
+    };
+    let x16 = |o: usize, old: usize| (o as u16, r16(old) as u32);
+    let x8 = |o: usize, old: usize| (o as u16, r8(old) as u32);
+    let x32 = |o: usize, old: usize| (o as u16, r32(old));
+    // (string table offset, description count, icon)
+    let (strings, descs, icon) = match kind {
+        Kind::General => {
+            header(&mut it);
+            it.extra = vec![x16(0xd10, 0xe), x16(0xd14, 0x10), x16(0xd34, 0x12), x8(0xd54, 0x15), x16(0xd58, 0x16)];
+            (Some(if wide { 0x1c } else { 0x18 }), 1, true)
+        }
+        Kind::Usable => {
+            header(&mut it);
+            it.extra = vec![
+                x16(0xd08, 0xe),
+                x16(0xd34, 0x10),
+                x8(0xd54, 0x13),
+                x16(0xd58, 0x14),
+                x8(0xd9c, 0x16),
+                x8(0xda0, 0x17),
+                x8(0xda4, 0x18),
+            ];
+            (Some(0x1c), 1, true)
+        }
+        Kind::Automaton => {
+            header(&mut it);
+            it.slots = r16(0xe);
+            it.jobs = r32(0x10);
+            it.level = r16(0x14);
+            it.extra = vec![x16(0xd34, 0x16)];
+            (Some(if wide { 0x1c } else { 0x18 }), 1, true)
+        }
+        Kind::Armor => {
+            header(&mut it);
+            it.level = r16(0xe);
+            it.slots = r16(0x10);
+            it.races = r16(0x12);
+            it.jobs = r32(0x14);
+            it.superior_level = r16(0x18);
+            it.shield_size = r16(0x1a);
+            it.max_charges = r8(0x1c);
+            it.cast_time = r8(0x1d);
+            it.use_delay = r16(0x1e);
+            it.reuse_delay = r32(0x20);
+            it.extra = vec![
+                x16(0xd34, 0x24),
+                x8(0xd50, 0x26),
+                x8(0xd4c, 0x27),
+                x8(0xd84, 0x28),
+                x8(0xd9c, 0x29),
+                x8(0xda0, 0x2a),
+                x8(0xda4, 0x2b),
+            ];
+            (Some(if wide { 0x30 } else { 0x2c }), 1, true)
+        }
+        Kind::Weapon => {
+            header(&mut it);
+            it.level = r16(0xe);
+            it.slots = r16(0x10);
+            it.races = r16(0x12);
+            it.jobs = r32(0x14);
+            it.superior_level = r16(0x18);
+            it.damage = r16(0x1c);
+            it.delay = r16(0x1e);
+            it.dps = r16(0x20);
+            it.skill = r8(0x22);
+            it.max_charges = r8(0x28);
+            it.cast_time = r8(0x29);
+            it.use_delay = r16(0x2a);
+            it.reuse_delay = r32(0x2c);
+            it.extra = vec![
+                x16(0xd18, 0x24),
+                x16(0xd34, 0x30),
+                x8(0xd50, 0x32),
+                x8(0xd4c, 0x33),
+                x8(0xd84, 0x34),
+                x8(0xd9c, 0x35),
+                x8(0xda0, 0x36),
+                x8(0xda4, 0x37),
+            ];
+            (Some(if wide { 0x3c } else { 0x38 }), 1, true)
+        }
+        Kind::K7000 => {
+            header(&mut it);
+            // The u32 at 0x14 is aligned in both layouts.
+            it.extra = vec![x16(0xd08, 0xe), x16(0xd34, 0x10), (0xd30, u32_at(r, 0x14))];
+            it.maze = r.get(0x14..0x54).and_then(|b| b.try_into().ok());
+            (Some(0x54), 1, true)
+        }
+        Kind::K7400 => {
+            header(&mut it);
+            it.level = r16(0xe);
+            it.slots = r16(0x10);
+            it.races = r16(0x12);
+            it.jobs = r32(0x14);
+            it.max_charges = r8(0x1a);
+            it.cast_time = r8(0x1b);
+            it.use_delay = r16(0x1c);
+            it.reuse_delay = r32(0x20);
+            it.extra = vec![x16(0xd2c, 0x18), x16(0xd34, 0x24)];
+            (Some(if wide { 0x2c } else { 0x28 }), 1, true)
+        }
+        Kind::Objective => {
+            it.extra = (0..7).map(|i| x32(0xd5c + i * 4, 4 + i * 4)).collect();
+            (Some(0x20), 2, false)
+        }
+        Kind::Keff8 => {
+            it.extra = vec![x32(0xd7c, 4), x32(0xd30, 8)];
+            (None, 0, false)
+        }
+        Kind::Monster => {
+            it.flags = u16_at(r, 4);
+            let n = &r[at(6)..at(0x26)];
+            it.name = decode_sjis(&n[..n.iter().position(|&c| c == 0).unwrap_or(n.len())]);
+            it.item_type = r16(0x26);
+            it.resource = r16(0x2a);
+            // +0x1548: 16 TP moves {u16 move, u8 unlock level, u8 form bits} (FUN_100997b0).
+            it.extra = vec![x16(0xd3c, 0x28), x16(0xd40, 0x2c), x16(0xd44, 0x2e)];
+            it.extra.extend((0..16).map(|i| (0xd48 + 4 * i as u16, u32_at(r, if wide { 0x34 } else { 0x30 } + 4 * i))));
+            // FUN_10155760: one string, the help line (FUN_101427a0); the name is +8 (FUN_1015cdb0).
+            (Some(if wide { 0x74 } else { 0x70 }), 0, true)
+        }
+        Kind::RoeCategory => {
+            it.extra = vec![x32(0xd78, 4), x32(0xd30, 8)];
+            (Some(0x238), 1, false)
+        }
+        Kind::Kf600 => {
+            it.extra = vec![x32(0xd80, 4)];
+            (None, 0, false)
+        }
+        Kind::Guide => {
+            it.extra = vec![x16(0xd90, 4), x16(0xd94, 6), x32(0xd98, 8)];
+            (Some(0x108), 1, false)
+        }
+        Kind::GuidePage => {
+            it.extra = vec![x8(0xd88, 4), x8(0xd8c, 5)];
+            (Some(8), 1, false)
+        }
+        Kind::Currency => {
+            header(&mut it);
+            it.extra = vec![x16(0xd34, 0xe)];
+            (Some(if wide { 0x14 } else { 0x10 }), 1, true)
+        }
+    };
+    if let Some(at) = strings {
+        it.fields = string_table(&r[at..]);
+        let f = &it.fields;
+        if kind == Kind::Monster {
+            it.description = text(f.first());
+        } else if !f.is_empty() {
+            it.name = text(f.first());
+        }
+        if lang == Lang::En && f.len() >= 4 + descs && kind != Kind::Monster {
+            it.article = if let Some(Field::Num(a)) = f.get(1) { *a } else { 0 };
+            it.singular = text(f.get(2));
+            it.plural = text(f.get(3));
+        }
+        if descs > 0 && f.len() > descs {
+            it.description = f[f.len() - descs..].iter().map(|x| text(Some(x))).collect::<Vec<_>>().join("\n");
+        }
+    }
+    if icon {
+        let size = u32_at(r, 0x280) as usize;
+        if (0x400..=r.len() - 0x284).contains(&size) {
+            it.icon = Some(r[0x284..0x284 + size].to_vec());
+        }
+    }
+    it
+}
+
+impl Item {
+    /// The 32x32 icon as RGBA: flag byte, 16-byte name, BITMAPINFOHEADER, 256 BGRA colours,
+    /// 8-bit pixels bottom-up. Palette alpha is 0..0x80.
+    pub fn icon_rgba(&self) -> Option<(u32, u32, Vec<u8>)> {
+        let d = self.icon.as_ref()?;
+        let h = d.get(0x11..0x11 + 40)?;
+        let (w, ht, bpp) = (u32_at(h, 4) as i32, u32_at(h, 8) as i32, u16_at(h, 14));
+        if bpp != 8 || !(1..=64).contains(&w) || ht == 0 {
+            return None;
+        }
+        let pal = d.get(0x11 + 40..0x11 + 40 + 1024)?;
+        let px = d.get(0x11 + 40 + 1024..)?;
+        let (wu, hu) = (w as usize, ht.unsigned_abs() as usize);
+        let mut out = vec![0u8; wu * hu * 4];
+        for y in 0..hu {
+            let sy = if ht > 0 { hu - 1 - y } else { y };
+            for x in 0..wu {
+                let c = *px.get(sy * wu + x)? as usize * 4;
+                let o = (y * wu + x) * 4;
+                out[o] = pal[c + 2];
+                out[o + 1] = pal[c + 1];
+                out[o + 2] = pal[c];
+                out[o + 3] = (pal[c + 3] as u32 * 2).min(255) as u8;
+            }
+        }
+        Some((wu as u32, hu as u32, out))
+    }
+
+    /// Equipment slot names (bit order of the equipment window).
+    pub fn slot_names(&self) -> Vec<&'static str> {
+        const S: [&str; 16] = [
+            "main", "sub", "range", "ammo", "head", "body", "hands", "legs", "feet", "neck", "waist", "ear1", "ear2",
+            "ring1", "ring2", "back",
+        ];
+        (0..16).filter(|i| self.slots & (1 << i) != 0).map(|i| S[i]).collect()
+    }
+}
+
+/// Item lookup for one language: reads records straight from the files, each file's record size by its length.
+pub struct Items {
+    lang: Lang,
+    paths: Vec<Option<(std::path::PathBuf, usize)>>,
+    /// `noun`'s answers: event and battle text ask on the UI thread.
+    nouns: std::sync::Mutex<std::collections::HashMap<u32, Option<super::names::Noun>>>,
+    recent: std::sync::Mutex<Recent>,
+    /// `Recent::inserted`, read without the lock (`holds`).
+    inserted: std::sync::atomic::AtomicU64,
+}
+
+/// The item record cache (DAT_10602620, 200 records; FUN_1015b5c0 fills it round robin from slot 1), ids and names
+/// only. `held`: an id's slot and the insertion that gave it.
+#[derive(Default)]
+struct Recent {
+    slots: Vec<(u32, String)>,
+    at: usize,
+    held: std::collections::HashMap<u32, (usize, u64)>,
+    inserted: u64,
+}
+
+/// The cache's slots.
+pub const RECENT: usize = 200;
+
+/// A name as the cache holds it: strncpy(.., 0x20), cut at +0x1d2, so 30 bytes.
+fn cut(name: &str) -> String {
+    let mut out = String::new();
+    let mut n = 0;
+    for ch in name.chars() {
+        n += super::font::encode_sjis(ch.encode_utf8(&mut [0u8; 4])).len();
+        if n > 30 {
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+impl Recent {
+    /// A lookup: a new id takes the next slot. The insertion that gave the id its slot; None for id 0.
+    fn touch(&mut self, id: u32, name: &str) -> Option<u64> {
+        if id == 0 {
+            return None;
+        }
+        if let Some(&(_, stamp)) = self.held.get(&id) {
+            return Some(stamp);
+        }
+        if self.slots.is_empty() {
+            self.slots = vec![(0, String::new()); RECENT];
+        }
+        self.at = (self.at + 1) % RECENT;
+        self.inserted += 1;
+        let old = std::mem::replace(&mut self.slots[self.at], (id, cut(name)));
+        self.held.remove(&old.0);
+        self.held.insert(id, (self.at, self.inserted));
+        Some(self.inserted)
+    }
+
+    fn name(&self, id: u32) -> Option<String> {
+        self.held.get(&id).map(|&(i, _)| self.slots[i].1.clone())
+    }
+}
+
+impl Items {
+    pub fn load(index: &DatIndex, lang: Lang) -> Result<Items> {
+        let stride = |p: &std::path::Path, n: u32| match std::fs::metadata(p).map(|m| m.len()) {
+            Ok(len) if len == n as u64 * 0x1400 => 0x1400,
+            _ => 0xc00,
+        };
+        let paths: Vec<_> = RANGES
+            .iter()
+            .map(|r| index.path(r.3[lang as usize]).map(|p| (stride(&p, r.1 - r.0), p)).map(|(n, p)| (p, n)))
+            .collect();
+        paths.iter().any(|p| p.is_some()).then_some(()).context("no item files")?;
+        Ok(Items { lang, paths, nouns: Default::default(), recent: Default::default(), inserted: Default::default() })
+    }
+
+    pub fn lang(&self) -> Lang {
+        self.lang
+    }
+
+    /// A Primer category's topic ids (FUN_1015d310: u16 count @6, u32 ids from @8).
+    pub fn guide_pages(&self, id: u32) -> Vec<u32> {
+        let Some((Kind::Guide, r)) = self.record(id) else { return Vec::new() };
+        let n = u16::from_le_bytes([r[6], r[7]]) as usize;
+        r[8..].as_chunks::<4>().0.iter().take(n.min(64)).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+    }
+
+    /// A Monstrosity instinct catalogue (FUN_1015ccc0, 0xeff8..0xefff): u16 count @4, then {u16 item, u16 cost} from @8.
+    pub fn catalogue(&self, id: u32) -> Vec<(u16, u16)> {
+        let Some((Kind::Keff8, r)) = self.record(id) else { return Vec::new() };
+        let n = u16::from_le_bytes([r[4], r[5]]) as usize;
+        r[8..]
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .take(n)
+            .map(|c| (u16::from_le_bytes([c[0], c[1]]), u16::from_le_bytes([c[2], c[3]])))
+            .collect()
+    }
+
+    /// Decrypted record bytes of `id`.
+    pub fn record(&self, id: u32) -> Option<(Kind, Vec<u8>)> {
+        let i = RANGES.iter().position(|r| (r.0..r.1).contains(&id))?;
+        let (path, size) = self.paths[i].as_ref()?;
+        let mut f = std::fs::File::open(path).ok()?;
+        f.seek(SeekFrom::Start((id - RANGES[i].0) as u64 * *size as u64)).ok()?;
+        let mut r = vec![0u8; *size];
+        f.read_exact(&mut r).ok()?;
+        r.iter_mut().for_each(|b| *b = b.rotate_right(5));
+        Some((RANGES[i].2, r))
+    }
+
+    /// FUN_1015d210: the record, which also takes a slot of the record cache.
+    pub fn item(&self, id: u32) -> Option<Item> {
+        let it = self.peek(id)?;
+        self.touch(id, &it.name);
+        Some(it)
+    }
+
+    /// The record without taking a slot of the record cache (a mod's reads, our scans over every id).
+    pub fn peek(&self, id: u32) -> Option<Item> {
+        let (kind, r) = self.record(id)?;
+        let it = parse(&r, kind, self.lang, r.len() == 0x1400);
+        (it.id == id).then_some(it)
+    }
+
+    /// A lookup one of our caches answered, `name` the record's: the record cache counts it as retail's would. The
+    /// insertion that gave the id its slot, for `holds`.
+    pub fn touch(&self, id: u32, name: &str) -> Option<u64> {
+        if id == 0 {
+            return None;
+        }
+        let mut r = self.recent.lock().ok()?;
+        let stamp = r.touch(id, name);
+        self.inserted.store(r.inserted, std::sync::atomic::Ordering::Release);
+        stamp
+    }
+
+    /// Whether an id given its slot at insertion `stamp` still holds it: a slot is reused `RECENT` insertions later.
+    pub fn holds(&self, stamp: u64) -> bool {
+        self.inserted.load(std::sync::atomic::Ordering::Acquire) < stamp + RECENT as u64
+    }
+
+    /// The record cache's name of an item (record +0x1b4), looked up as FUN_1015d210 does.
+    pub fn cached_name(&self, id: u32) -> Option<String> {
+        if id == 0 {
+            return None;
+        }
+        if let Some(n) = self.recent.lock().ok()?.name(id) {
+            return Some(n);
+        }
+        self.item(id)?;
+        self.recent.lock().ok()?.name(id)
+    }
+
+    /// `cached_name` for a mod: no slot is taken.
+    pub fn peek_name(&self, id: u32) -> Option<String> {
+        if id == 0 {
+            return None;
+        }
+        if let Some(n) = self.recent.lock().ok()?.name(id) {
+            return Some(n);
+        }
+        self.peek(id).map(|it| cut(&it.name))
+    }
+
+    /// The record cache's filled slots in slot order: (id, name).
+    pub fn recent(&self) -> Vec<(u32, String)> {
+        self.recent.lock().map(|r| r.slots.iter().filter(|s| s.0 != 0).cloned().collect()).unwrap_or_default()
+    }
+
+    /// The item's noun for message text (`names::item_noun`; the bare name outside English), read once. No slot of
+    /// the record cache: message text reads records through the raw record pool (30261006_0 FUN_100be6a0 ->
+    /// FUN_1015b9e0).
+    pub fn noun(&self, id: u32) -> Option<super::names::Noun> {
+        if let Some(n) = self.nouns.lock().ok().and_then(|c| c.get(&id).cloned()) {
+            return n;
+        }
+        let n = self.peek(id).map(|it| match self.lang {
+            Lang::En => super::names::item_noun(it),
+            _ => super::names::plain(it.name),
+        });
+        if let Ok(mut c) = self.nouns.lock() {
+            c.insert(id, n.clone());
+        }
+        n
+    }
+
+    pub fn icon(&self, id: u32) -> Option<(u32, u32, Vec<u8>)> {
+        self.item(id)?.icon_rgba()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FUN_1015b5c0: a new id takes the next slot round robin, from slot 1; a held id takes none; names stop at 30
+    /// bytes.
+    #[test]
+    fn record_cache_ring() {
+        let mut r = Recent::default();
+        assert_eq!(r.touch(5, "Five"), Some(1));
+        assert_eq!(r.touch(0, "none"), None);
+        r.touch(6, "A name that is longer than thirty bytes");
+        assert_eq!(r.touch(5, "Five"), Some(1));
+        assert_eq!(
+            (r.slots[1].clone(), r.slots[2].1.as_str()),
+            ((5, "Five".to_string()), "A name that is longer than thi")
+        );
+        assert_eq!(r.slots[0].0, 0);
+        for id in 100..100 + RECENT as u32 - 2 {
+            r.touch(id, "x");
+        }
+        // 200 ids fill the ring (slot 0 last); the next one takes slot 1 from the oldest.
+        assert_eq!((r.slots[0].0, r.slots[1].0, r.inserted), (297, 5, RECENT as u64));
+        assert_eq!(r.touch(1000, "new"), Some(RECENT as u64 + 1));
+        assert_eq!((r.slots[1].0, r.slots.iter().any(|s| s.0 == 5)), (1000, false));
+        // The slot index follows: the id pushed out is not held, so its next lookup takes a slot again.
+        assert_eq!((r.name(5), r.name(1000).as_deref(), r.held.len()), (None, Some("new"), RECENT));
+        r.touch(1000, "new");
+        assert_eq!(r.slots[2].0, 6);
+        r.touch(5, "Five");
+        assert_eq!((r.slots[2].0, r.name(5).as_deref(), r.name(6)), (5, Some("Five"), None));
+    }
+
+    /// `holds`: a stamp stays good for `RECENT` insertions; then the slot has gone to another id.
+    #[test]
+    fn stamps() {
+        let items = Items {
+            lang: Lang::En,
+            paths: Vec::new(),
+            nouns: Default::default(),
+            recent: Default::default(),
+            inserted: Default::default(),
+        };
+        let first = items.touch(7, "Seven").unwrap();
+        assert_eq!(items.touch(0, "none"), None);
+        for id in 1000..1000 + RECENT as u32 - 1 {
+            items.touch(id, "x");
+        }
+        assert!(items.holds(first) && items.recent.lock().unwrap().name(7).is_some());
+        items.touch(5000, "y");
+        assert!(!items.holds(first) && items.recent.lock().unwrap().name(7).is_none());
+        assert_eq!(items.touch(7, "Seven"), Some(RECENT as u64 + 2));
+    }
+
+    /// The Primer: "Basics" (0xf620) lists 56 topics from "Movement" (0xf631: image number 1, three images).
+    #[test]
+    fn primer_records() {
+        let cfg = crate::config::Config::load();
+        let Ok(index) = crate::dat::DatIndex::open(&cfg.ffxi_dir()) else { return };
+        let Ok(items) = Items::load(&index, Lang::En) else { return };
+        let pages = items.guide_pages(0xf620);
+        assert_eq!((pages.len(), pages.first()), (56, Some(&0xf631)));
+        assert_eq!(items.item(0xf620).map(|i| i.name), Some("Basics".to_string()));
+        let m = items.item(0xf631).unwrap();
+        let extra = |at: u16| m.extra.iter().find(|e| e.0 == at).map(|e| e.1);
+        assert_eq!((m.name.as_str(), extra(0xd88), extra(0xd8c)), ("Movement", Some(1), Some(3)));
+    }
+
+    /// The catalogues hold every instinct 0..0x35f once (0xeff8..0xeffd 127 entries, 0xeffe 102).
+    #[test]
+    fn catalogues() {
+        let cfg = crate::config::Config::load();
+        let Ok(index) = crate::dat::DatIndex::open(&cfg.ffxi_dir()) else { return };
+        let Ok(items) = Items::load(&index, Lang::En) else { return };
+        let all: Vec<(u16, u16)> = (0xeff8..0xefff).flat_map(|id| items.catalogue(id)).collect();
+        let mut ids: Vec<u16> = all.iter().map(|e| e.0).collect();
+        ids.sort();
+        assert_eq!(
+            (all.len(), items.catalogue(0xeffe).len(), ids.first(), ids.last()),
+            (864, 102, Some(&0x7400), Some(&0x775f))
+        );
+    }
+
+    /// Species records: the name at +8 (variants keep the base's), the help line from the string table.
+    #[test]
+    fn species_names() {
+        let cfg = crate::config::Config::load();
+        let Ok(index) = crate::dat::DatIndex::open(&cfg.ffxi_dir()) else { return };
+        let Ok(items) = Items::load(&index, Lang::En) else { return };
+        let get = |id: u32| items.item(id).map(|i| (i.name, i.description));
+        assert_eq!(get(0xf001), Some(("Rabbit".into(), "Rabbit".into())));
+        assert_eq!(get(0xf100), Some(("Rabbit".into(), "Onyx Rabbit".into())));
+        assert_eq!(get(0xf101), Some(("Rabbit".into(), "Alabaster Rabbit".into())));
+        assert_eq!(get(0xf102), Some(("Lapinion".into(), "Lapinion (Rabbit)".into())));
+        assert_eq!(get(0xf0fe).map(|n| n.0), Some("Slime".into()));
+    }
+
+    #[test]
+    fn table_fields() {
+        // count 3: text "Ab", number 1, text "c"
+        let mut b = vec![0u8; 0x80];
+        b[0] = 3;
+        let ent = [(0x1c, 0), (0x40, 1), (0x44, 0)];
+        for (i, (o, t)) in ent.iter().enumerate() {
+            b[4 + i * 8] = *o;
+            b[8 + i * 8] = *t;
+        }
+        b[0x1c] = 1;
+        b[0x38..0x3a].copy_from_slice(b"Ab");
+        b[0x40] = 1;
+        b[0x44] = 1;
+        b[0x60] = b'c';
+        assert_eq!(string_table(&b), vec![Field::Text("Ab".into()), Field::Num(1), Field::Text("c".into())]);
+    }
+
+    /// The records behind list cell kind 0x4d (30261102_0, fe_inven's rows FUN_10117e60: item 0x72f0 + n, the icon by
+    /// FUN_1015d340 and the name by cell kind 0x19): 31 celestites from 0x72f1, each with a name, an icon and the
+    /// level FUN_101181a0 compares with the main job's as the first byte of its +0x14 block.
+    #[test]
+    fn celestite_records() {
+        let Ok(index) = DatIndex::open(&crate::config::Config::load().ffxi_dir()) else { return };
+        let Ok(items) = Items::load(&index, Lang::En) else { return };
+        // Game files older than 30261102 hold empty records here.
+        if items.item(0x72f1).is_none_or(|i| i.name == ".") {
+            return;
+        }
+        let named = |id: u32| items.item(id).is_some_and(|i| i.name.starts_with("Celestite ("));
+        assert_eq!((0x72f0..0x73f0).filter(|&id| named(id)).collect::<Vec<_>>(), (0x72f1..0x7310).collect::<Vec<_>>());
+        for id in 0x72f1..0x7310 {
+            let i = items.item(id).unwrap();
+            assert_eq!((i.kind, i.icon_rgba().map(|p| (p.0, p.1))), (Some(Kind::K7000), Some((32, 32))), "{id:#x}");
+        }
+        let first = items.item(0x72f1).unwrap();
+        assert_eq!((first.name.as_str(), first.maze.map(|m| m[0])), ("Celestite (Acc.)", Some(99)));
+    }
+
+    #[test]
+    fn real_items() {
+        let Ok(index) = DatIndex::open(&crate::config::Config::load().ffxi_dir()) else { return };
+        let Ok(items) = Items::load(&index, Lang::En) else { return };
+        let s = items.item(0x4097).expect("bronze sword");
+        assert_eq!((s.name.as_str(), s.level, s.damage, s.delay, s.skill), ("Bronze Sword", 1, 6, 231, 3));
+        let b = items.item(1).expect("chocobo bedding");
+        assert_eq!(
+            (b.singular.as_str(), b.plural.as_str(), b.article),
+            ("pile of chocobo bedding", "piles of chocobo bedding", 0)
+        );
+        assert_eq!(b.icon_rgba().map(|i| (i.0, i.1)), Some((32, 32)));
+    }
+}

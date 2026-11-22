@@ -1,0 +1,1896 @@
+// Effect elements on the GPU (fx/elem.rs has the layout; constants are prepended from it). The compute pass is
+// the element update stream FUN_100499d0 plus the transforms of FUN_10043f00 / FUN_100440d0 / FUN_10044f00
+// (MODLOG "Effect generators"); the render pass draws each element's mesh with its TFACTOR colour.
+
+struct Params {
+    // dt (ticks), seconds, day fraction, element count
+    time: vec4<f32>,
+    // DAT_10469678 +0xb50, +0xb90, +0xd10, +0xd50, +0xc10, and inverse(+0xb90) (FUN_100691d0)
+    view: mat4x4<f32>,
+    view_rot: mat4x4<f32>,
+    d10: mat4x4<f32>,
+    d50: mat4x4<f32>,
+    c10: mat4x4<f32>,
+    inv_view_rot: mat4x4<f32>,
+    eye: vec4<f32>,
+    // moon phase, weekday, weather density (FUN_10002d80: config 0x3b, 1.0 under an event's op 0xab sub 9)
+    extra: vec4<f32>,
+    // the zone's area light (DAT_106175ac, MODLOG "Effect area-light tint")
+    area: vec4<f32>,
+    // FUN_100467e0's light: the background light's travel direction (world), w = the light count (0 or 1)
+    light: vec4<f32>,
+    // The scene projection (update op 0x53)
+    proj: mat4x4<f32>,
+    // focal length on the 384-line reference (cam +0x2f4), scene depth bound (1) or not (0)
+    screen: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> p: Params;
+@group(0) @binding(1) var<storage, read_write> el: array<u32>;
+@group(0) @binding(2) var<storage, read> ops: array<u32>;
+@group(0) @binding(3) var<storage, read> keys: array<vec2<f32>>;
+@group(0) @binding(4) var<storage, read> key_desc: array<vec2<u32>>;
+@group(0) @binding(5) var<storage, read> slots: array<u32>;
+@group(0) @binding(6) var<storage, read_write> outs: array<f32>;
+@group(0) @binding(7) var<storage, read_write> back: array<u32>;
+@group(0) @binding(8) var<storage, read> paths: array<vec4<f32>>;
+// The zone's point-light table (render/mod.rs LIGHTS x two vec4s).
+@group(0) @binding(9) var<storage, read_write> lights: array<vec4<f32>>;
+// This frame's scene depth (drawn before the update pass), for op 0x53.
+@group(0) @binding(10) var scene_depth: texture_depth_2d;
+
+// FUN_10044f10: the element's view-space position (+0x188) as the transform places it: camera-relative (flags bit 2)
+// elements are view_rot x pos (bit 3 too: pos itself), flag 0x20000 the parent's translation in view space plus pos
+// (y negated for a billboard), the rest view x the world position.
+fn view_pos(b: u32, parent: u32) -> vec3<f32> {
+    let flags = el[b + E_FLAGS];
+    let pos = ev3(b, E_POS);
+    if ((flags & 0x20000u) != 0u) {
+        var t = vec3<f32>(0.0);
+        if (parent != NONE && slots[parent * SLOT_WORDS + S_HAS_MATRIX] != 0u) { t = slot_mat(parent)[3].xyz; }
+        let bboard = (flags & 1u) != 0u && (flags & 0x1c0u) == 0u;
+        return (p.view * vec4<f32>(t, 1.0)).xyz + vec3<f32>(pos.x, select(pos.y, -pos.y, bboard), pos.z);
+    }
+    if ((flags & 4u) != 0u) {
+        if ((flags & 8u) != 0u) { return pos; }
+        return (p.view_rot * vec4<f32>(pos, 0.0)).xyz;
+    }
+    return (p.view * vec4<f32>(world_of(b, parent), 1.0)).xyz;
+}
+
+// Update op 0x53 (FUN_1004a980 0x1004afb4): the +-half cube around the element's view-space position (FUN_10044f10),
+// projected; a 16 x 16 grid over its screen rect clipped to the screen, each point tested at the cube centre's depth
+// against the scene (FUN_1006c300 / FUN_1006c530 / FUN_1006c8b0); the passing count *(inf: points tested at the
+// centre's depth, the screen clip without retail's 0x100 margin)*.
+fn occlusion_hits(c: vec3<f32>, half: f32) -> u32 {
+    let cc = p.proj * vec4<f32>(c, 1.0);
+    if (cc.w <= 0.0) { return 0u; }
+    let z = cc.z / cc.w;
+    var lo = vec2<f32>(1e30);
+    var hi = vec2<f32>(-1e30);
+    for (var k = 0u; k < 8u; k = k + 1u) {
+        let o = vec3<f32>(select(-half, half, (k & 1u) != 0u), select(-half, half, (k & 2u) != 0u), select(-half, half, (k & 4u) != 0u));
+        let q = p.proj * vec4<f32>(c + o, 1.0);
+        if (q.w <= 0.0) { continue; }
+        let n = q.xy / q.w;
+        lo = min(lo, n);
+        hi = max(hi, n);
+    }
+    let dims = vec2<f32>(textureDimensions(scene_depth));
+    let p0 = clamp(vec2<f32>((lo.x + 1.0) * 0.5, (1.0 - hi.y) * 0.5) * dims, vec2<f32>(0.0), dims);
+    let p1 = clamp(vec2<f32>((hi.x + 1.0) * 0.5, (1.0 - lo.y) * 0.5) * dims, vec2<f32>(0.0), dims);
+    if (p1.x - p0.x < 1.0 || p1.y - p0.y < 1.0) { return 0u; }
+    var hits = 0u;
+    for (var y = 0u; y < 16u; y = y + 1u) {
+        for (var x = 0u; x < 16u; x = x + 1u) {
+            let s = p0 + (vec2<f32>(f32(x), f32(y)) + 0.5) / 16.0 * (p1 - p0);
+            if (z <= textureLoad(scene_depth, vec2<i32>(min(s, dims - 1.0)), 0)) { hits = hits + 1u; }
+        }
+    }
+    return hits;
+}
+
+// FUN_10062c80 (fx/spline.rs eval): path `at` (first vec4 + 1) at u.
+fn path_at(at: u32, u: f32) -> vec3<f32> {
+    let h = at - 1u;
+    let n = bitcast<u32>(paths[h].x);
+    var acc = 0.0;
+    var j = n - 1u;
+    var t = 1.0;
+    for (var k = 0u; k < n; k = k + 1u) {
+        let len = paths[h + 1u + 4u * k + 1u].w;
+        acc = acc + len;
+        if (u <= acc) { j = k; t = (u - (acc - len)) / len; break; }
+    }
+    let q = h + 1u + 4u * j;
+    let t2 = t * t;
+    let t3 = t2 * t;
+    return paths[q].xyz * (2.0 * t3 - 3.0 * t2 + 1.0) + paths[q + 1u].xyz * (t3 - 2.0 * t2 + t) + paths[q + 2u].xyz * (3.0 * t2 - 2.0 * t3) + paths[q + 3u].xyz * (t3 - t2);
+}
+
+const PI: f32 = 3.141592;
+const IDENT: mat4x4<f32> = mat4x4<f32>(vec4<f32>(1.0, 0.0, 0.0, 0.0), vec4<f32>(0.0, 1.0, 0.0, 0.0), vec4<f32>(0.0, 0.0, 1.0, 0.0), vec4<f32>(0.0, 0.0, 0.0, 1.0));
+
+// Inverse of an affine matrix (rotation / scale / translation).
+fn inverse4(m: mat4x4<f32>) -> mat4x4<f32> {
+    let a = m[0].xyz;
+    let b = m[1].xyz;
+    let c = m[2].xyz;
+    let r0 = cross(b, c);
+    let r1 = cross(c, a);
+    let r2 = cross(a, b);
+    let det = dot(a, r0);
+    let inv_t = mat3x3<f32>(r0, r1, r2) * (1.0 / det);
+    let inv = transpose(inv_t);
+    let t = -(inv * m[3].xyz);
+    return mat4x4<f32>(vec4<f32>(inv[0], 0.0), vec4<f32>(inv[1], 0.0), vec4<f32>(inv[2], 0.0), vec4<f32>(t, 1.0));
+}
+
+fn ef(b: u32, i: u32) -> f32 { return bitcast<f32>(el[b + i]); }
+fn set_ef(b: u32, i: u32, v: f32) { el[b + i] = bitcast<u32>(v); }
+fn ev3(b: u32, i: u32) -> vec3<f32> { return vec3<f32>(ef(b, i), ef(b, i + 1u), ef(b, i + 2u)); }
+fn set_ev3(b: u32, i: u32, v: vec3<f32>) { set_ef(b, i, v.x); set_ef(b, i + 1u, v.y); set_ef(b, i + 2u, v.z); }
+fn sl(b: u32, s: u32) -> u32 { return el[b + E_SLOTS + min(s, E_SLOT_COUNT - 1u)]; }
+fn slf(b: u32, s: u32) -> f32 { return bitcast<f32>(sl(b, s)); }
+fn set_sl(b: u32, s: u32, v: u32) { if (s < E_SLOT_COUNT) { el[b + E_SLOTS + s] = v; } }
+fn set_slf(b: u32, s: u32, v: f32) { set_sl(b, s, bitcast<u32>(v)); }
+fn slv3(b: u32, s: u32) -> vec3<f32> { return vec3<f32>(slf(b, s), slf(b, s + 1u), slf(b, s + 2u)); }
+fn set_slv3(b: u32, s: u32, v: vec3<f32>) { set_slf(b, s, v.x); set_slf(b, s + 1u, v.y); set_slf(b, s + 2u, v.z); }
+fn opf(i: u32) -> f32 { return bitcast<f32>(ops[i]); }
+fn opv3(i: u32) -> vec3<f32> { return vec3<f32>(opf(i), opf(i + 1u), opf(i + 2u)); }
+
+// Colour byte k of the D3DCOLOR (0 B, 1 G, 2 R, 3 A).
+fn cb(b: u32, k: u32) -> u32 { return (el[b + E_COLOR] >> (8u * k)) & 0xffu; }
+fn set_cb(b: u32, k: u32, v: u32) {
+    let sh = 8u * k;
+    el[b + E_COLOR] = (el[b + E_COLOR] & ~(0xffu << sh)) | ((v & 0xffu) << sh);
+}
+// ftol of key * 255 into a byte (retail truncates and keeps the low byte).
+// Update ops 0x18..0x1b (0x1004bc69..: an explicit test) and 0x3c..0x3e (FUN_1004e220): below 0 stores 0.
+fn to_byte(v: f32) -> u32 { return pos_byte(v); }
+// FUN_1004e220: negative values store 0, larger ones wrap.
+fn pos_byte(v: f32) -> u32 { let x = v * 255.0; if (x < 0.0) { return 0u; } return u32(x) & 0xffu; }
+fn set_sb(b: u32, k: u32, v: u32) {
+    let sh = 8u * k;
+    el[b + E_SPEC_COL] = (el[b + E_SPEC_COL] & ~(0xffu << sh)) | ((v & 0xffu) << sh);
+}
+
+// FUN_10053550 (linear, x clamped) / FUN_100537f0 (eased) over keyframe `id`.
+fn key_sample(id: u32, x_in: f32, eased: bool) -> f32 {
+    return key_ov(id, x_in, eased, false, 0.0);
+}
+
+// FUN_10053520 / FUN_10053740: the same with the first key's value replaced by v0 when `ov`.
+fn key_ov(id: u32, x_in: f32, eased: bool, ov: bool, v0: f32) -> f32 {
+    if (id == NONE || id >= arrayLength(&key_desc)) { return 0.0; }
+    let d = key_desc[id];
+    if (d.y == 0u) { return 0.0; }
+    if (d.y == 1u) { return select(keys[d.x].y, v0, ov); }
+    var x = x_in;
+    if (!eased) { x = clamp(x, 0.0, 1.0); }
+    var i = 0u;
+    loop {
+        if (i + 2u >= d.y || x <= keys[d.x + i + 1u].x) { break; }
+        i = i + 1u;
+    }
+    var a = keys[d.x + i];
+    if (ov && i == 0u) { a.y = v0; }
+    let c = keys[d.x + i + 1u];
+    if (c.x == a.x) { return c.y; }
+    let f = (x - a.x) / (c.x - a.x);
+    if (!eased) { return a.y + (c.y - a.y) * f; }
+    if (f < 0.5) {
+        let g = 2.0 * f * f;
+        return c.y * g + a.y * (1.0 - g);
+    }
+    let g = 2.0 * (1.0 - f) * (1.0 - f);
+    return a.y * g + c.y * (1.0 - g);
+}
+
+// The slot's keyframe at x with its first value replaced by S[s+2] (FUN_1004d530 / FUN_10053520).
+fn key_t(b: u32, s: u32, x: f32) -> f32 {
+    return key_ov(sl(b, s), x, (sl(b, s + 1u) & 0xfu) != 0u, true, slf(b, s + 2u));
+}
+
+// The same with the first value forced to 0 (ops 0x0f..0x11 / 0x6b..0x6d push a literal 0).
+fn key_0(b: u32, s: u32, x: f32) -> f32 {
+    return key_ov(sl(b, s), x, (sl(b, s + 1u) & 0xfu) != 0u, true, 0.0);
+}
+
+// No override (FUN_10053550 / FUN_100537f0 called directly).
+fn key_n(b: u32, s: u32, x: f32) -> f32 {
+    return key_sample(sl(b, s), x, (sl(b, s + 1u) & 0xfu) != 0u);
+}
+
+// The slot's keyframe at the day fraction, no override.
+fn key_g(b: u32, s: u32) -> f32 {
+    return key_n(b, s, p.time.z);
+}
+
+// Op 0x3f: the day fraction repeated n = (param >> 5) & 0x1ff times a day when set (case 0x1004c63f).
+fn key_rep(b: u32, s: u32) -> f32 {
+    let n = (sl(b, s + 1u) >> 5u) & 0x1ffu;
+    var x = p.time.z;
+    if (n != 0u) { x = fract(x * f32(n)); }
+    return key_n(b, s, x);
+}
+
+fn fmod2(v: f32) -> f32 { return v - 2.0 * trunc(v / 2.0); }
+
+fn wrap_pi(a: f32) -> f32 {
+    if (a > PI) { return a - 2.0 * PI; }
+    if (a < -PI) { return a + 2.0 * PI; }
+    return a;
+}
+
+// FUN_1003d040: fmod(v, 2) * pi, wrapped into [-pi, pi].
+fn half_turns(v: f32) -> f32 {
+    var a = (v - 2.0 * trunc(v / 2.0)) * PI;
+    if (a > PI) { a = a - 2.0 * PI; } else if (a < -PI) { a = a + 2.0 * PI; }
+    return a;
+}
+
+fn rot_x(a: f32) -> mat3x3<f32> { let c = cos(a); let s = sin(a); return mat3x3<f32>(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, c, s), vec3<f32>(0.0, -s, c)); }
+fn rot_y(a: f32) -> mat3x3<f32> { let c = cos(a); let s = sin(a); return mat3x3<f32>(vec3<f32>(c, 0.0, -s), vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(s, 0.0, c)); }
+fn rot_z(a: f32) -> mat3x3<f32> { let c = cos(a); let s = sin(a); return mat3x3<f32>(vec3<f32>(c, s, 0.0), vec3<f32>(-s, c, 0.0), vec3<f32>(0.0, 0.0, 1.0)); }
+// Math vtable +0x58 (fx/math.rs euler): Rz·Ry·Rx in row vectors, i.e. Z first, X last.
+fn euler(r: vec3<f32>) -> mat3x3<f32> { return rot_x(r.x) * rot_y(r.y) * rot_z(r.z); }
+
+// Colour += 8.8 fixed deltas per tick (FUN_1003d6c0), channels in R, G, B, A order.
+fn color_step(b: u32, d: array<i32, 4>, dt: f32) {
+    let order = array<u32, 4>(2u, 1u, 0u, 3u);
+    for (var i = 0u; i < 4u; i = i + 1u) {
+        let k = order[i];
+        let c = i32(cb(b, k)) * 256 + i32(f32(d[i]) * dt);
+        set_cb(b, k, u32(clamp(c >> 8u, 0, 255)));
+    }
+}
+
+fn s16(v: u32, hi: bool) -> i32 {
+    var x = v & 0xffffu;
+    if (hi) { x = v >> 16u; }
+    return (i32(x) << 16u) >> 16u;
+}
+
+fn slot_mat(s: u32) -> mat4x4<f32> {
+    let o = s * SLOT_WORDS;
+    return mat4x4<f32>(
+        vec4<f32>(bitcast<f32>(slots[o]), bitcast<f32>(slots[o + 1u]), bitcast<f32>(slots[o + 2u]), bitcast<f32>(slots[o + 3u])),
+        vec4<f32>(bitcast<f32>(slots[o + 4u]), bitcast<f32>(slots[o + 5u]), bitcast<f32>(slots[o + 6u]), bitcast<f32>(slots[o + 7u])),
+        vec4<f32>(bitcast<f32>(slots[o + 8u]), bitcast<f32>(slots[o + 9u]), bitcast<f32>(slots[o + 10u]), bitcast<f32>(slots[o + 11u])),
+        vec4<f32>(bitcast<f32>(slots[o + 12u]), bitcast<f32>(slots[o + 13u]), bitcast<f32>(slots[o + 14u]), bitcast<f32>(slots[o + 15u])));
+}
+fn slot_v3(s: u32, k: u32) -> vec3<f32> {
+    let o = s * SLOT_WORDS + k;
+    return vec3<f32>(bitcast<f32>(slots[o]), bitcast<f32>(slots[o + 1u]), bitcast<f32>(slots[o + 2u]));
+}
+fn slot_f(s: u32, k: u32) -> f32 { return bitcast<f32>(slots[s * SLOT_WORDS + k]); }
+
+// FUN_10043e00: parent x (pos x scale A).
+// Ops 0x2e / 0x48's distance (vtable +0x44): |view position| (FUN_10044f10's, camera-relative elements in view space);
+// meshes and ground projections add |(r, 0, 0) x L| (FUN_10041a40: r their bounding radius, L the local matrix, so r x
+// scale x), the other classes (FUN_10045d00) give 0 behind the eye.
+fn fade_dist(b: u32, parent: u32) -> f32 {
+    let fl = el[b + E_FLAGS];
+    var v: vec3<f32>;
+    if ((fl & 4u) != 0u) {
+        if ((fl & 8u) != 0u) { v = ev3(b, E_POS); } else { v = (p.view_rot * vec4<f32>(ev3(b, E_POS), 0.0)).xyz; }
+    } else {
+        v = (p.view * vec4<f32>(world_of(b, parent), 1.0)).xyz;
+    }
+    let kind = el[b + E_KIND];
+    if (kind == DK_MESH || kind == DK_GROUND_PROJ) {
+        var kx = 1.0;
+        if (parent != NONE && slots[parent * SLOT_WORDS + S_SIZE_SCALED] != 0u) { kx = slot_v3(parent, S_SCALE_B).x; }
+        return length(v) + abs(ef(b, E_RADIUS) * ef(b, E_SCALE) * kx);
+    }
+    if (v.z > 0.0) { return 0.0; }
+    return length(v);
+}
+
+fn world_of(b: u32, parent: u32) -> vec3<f32> {
+    if (parent == NONE) { return ev3(b, E_POS); }
+    let wp = ev3(b, E_POS) * slot_v3(parent, S_SCALE_A);
+    if (slots[parent * SLOT_WORDS + S_HAS_MATRIX] == 0u) { return wp; }
+    return (slot_mat(parent) * vec4<f32>(wp, 1.0)).xyz;
+}
+
+// FUN_10045d00 (CMoD3bElem vtable +0x44): 0 behind the camera (view z > 0), else the eye distance.
+fn cam_dist(b: u32, parent: u32) -> f32 {
+    let wp = world_of(b, parent);
+    if ((p.view * vec4<f32>(wp, 1.0)).z > 0.0) { return 0.0; }
+    return distance(p.eye.xyz, wp);
+}
+
+// The op-0x6e crossfade factor (weight of key 0; key 1 gets 1 - f), the retail order of tests.
+fn crossfade(dd: f32, a: f32, nb: f32, c: f32, ee: f32) -> f32 {
+    if (dd < a) { return 0.0; }
+    if (dd < nb) { return 1.0 - (dd - nb) / (a - nb); }
+    if (dd < c) { return 1.0; }
+    if (dd < ee) { return 1.0 - (dd - c) / (ee - c); }
+    return 0.0;
+}
+
+@compute @workgroup_size(64)
+fn update(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= u32(p.time.w)) { return; }
+    let b = i * E_WORDS;
+    let ob = i * OUT_WORDS;
+    let bb = i * BACK_WORDS;
+    if ((el[b + E_STATE] & ST_ALIVE) == 0u) {
+        outs[ob + 23u] = 0.0;
+        back[bb + 1u] = 0u;
+        back[bb + 19u] = 0u;
+        return;
+    }
+    let dt = p.time.x;
+    // FUN_10043ca0: life counts down unless the CPU set it this frame.
+    if ((el[b + E_CTRL] & CTL_LIFE_SET) == 0u && ef(b, E_MAX_LIFE) != 0.0) {
+        set_ef(b, E_LIFE, ef(b, E_LIFE) - dt);
+        // Expired (the CPU deletes it this frame): never drawn at t >= 1.
+        if (ef(b, E_LIFE) < 1.0) {
+            el[b + E_CTRL] = 0u;
+            outs[ob + 23u] = 0.0;
+            back[bb + 19u] = 0u;
+            return;
+        }
+    }
+    // Spawned this frame with a life: t = 0, not drawn (ctl::BORN; inferred), unless the next decrement ends it.
+    let born = (el[b + E_CTRL] & CTL_BORN) != 0u && ef(b, E_MAX_LIFE) != 0.0 && ef(b, E_LIFE) - dt >= 1.0;
+    el[b + E_CTRL] = 0u;
+    set_ef(b, E_FADE, 1.0);
+    let parent = el[b + E_PARENT];
+    let old_pos = ev3(b, E_POS);
+    var kill = 0u;
+    // Op 0x60's additions to the screen flash (B, G, R bytes, saturating as FUN_10014f90 does).
+    var flash = vec3<u32>(0u);
+    // Op 0x44's key(t), written into op 0x2c's factor (word 1) for the 0x2c after it.
+    var drag = 0.0;
+    var drag_set = false;
+    var ip = el[b + E_STREAM];
+    var guard = 0u;
+    loop {
+        guard = guard + 1u;
+        if (guard > 256u || ip >= arrayLength(&ops)) { break; }
+        let w0 = ops[ip];
+        let code = w0 & 0xffu;
+        let len = (w0 >> 8u) & 0x1fu;
+        if (code == 0u || len == 0u) { break; }
+        let s = (w0 >> 13u) & 0x3fu;
+        let r = ip + 1u;
+        let life = ef(b, E_LIFE);
+        let maxl = ef(b, E_MAX_LIFE);
+        let t = ef(b, E_T);
+        switch code {
+            case 0x01u: { set_ev3(b, E_POS, ev3(b, E_POS) + opv3(r) * dt); }
+            case 0x02u: { set_ev3(b, E_POS, ev3(b, E_POS) + slv3(b, s) * dt); }
+            // Follow the path: u = t, or key(t) (no override, fmod 1 above 1); pos += p(u) - S[s+3..5].
+            case 0x34u: {
+                let at = sl(b, s + 7u);
+                if (at != 0u) {
+                    var u = t;
+                    if (sl(b, s) != NONE) {
+                        u = key_n(b, s, t);
+                        if (u > 1.0) { u = fract(u); }
+                    }
+                    let pp = path_at(at, u);
+                    set_ev3(b, E_POS, ev3(b, E_POS) + pp - slv3(b, s + 3u));
+                    set_slv3(b, s + 3u, pp);
+                }
+            }
+            case 0x03u: { if ((el[b + E_STATE] & ST_BATCHED) == 0u) { set_slv3(b, s, slv3(b, s) + opv3(r) * dt); } }
+            case 0x04u: { set_ev3(b, E_ROT, ev3(b, E_ROT) + opv3(r) * dt); }
+            case 0x05u: { set_ev3(b, E_ROT, ev3(b, E_ROT) + slv3(b, s) * dt); }
+            case 0x06u, 0x09u: { set_slv3(b, s, slv3(b, s) + opv3(r) * dt); }
+            case 0x07u: { set_ev3(b, E_SCALE, ev3(b, E_SCALE) + opv3(r) * dt); }
+            case 0x08u: { set_ev3(b, E_SCALE, ev3(b, E_SCALE) + slv3(b, s) * dt); }
+            case 0x0au: {
+                color_step(b, array<i32, 4>(s16(ops[r], false), s16(ops[r], true), s16(ops[r + 1u], false), s16(ops[r + 1u], true)), dt);
+            }
+            case 0x0bu: {
+                color_step(b, array<i32, 4>(s16(sl(b, s), false), s16(sl(b, s), true), s16(sl(b, s + 1u), false), s16(sl(b, s + 1u), true)), dt);
+            }
+            case 0x0cu: {
+                let sec = p.time.y;
+                for (var k = 0u; k < 4u; k = k + 1u) {
+                    let word = s + k / 2u;
+                    let hi = (k % 2u) == 1u;
+                    let cur = s16(sl(b, word), hi);
+                    let d = s16(ops[r + k / 2u], hi);
+                    let nv = u32(cur + i32(f32(d) * sec)) & 0xffffu;
+                    let sh = select(0u, 16u, hi);
+                    set_sl(b, word, (sl(b, word) & ~(0xffffu << sh)) | (nv << sh));
+                }
+            }
+            case 0x0du: {
+                if ((el[b + E_STATE] & ST_HAS_RES) != 0u) {
+                    var cd = ef(b, E_FRAME_CD) - dt;
+                    let period = ef(b, E_FRAME_PERIOD);
+                    var frame = el[b + E_FRAME];
+                    var n = 0u;
+                    loop {
+                        if (cd >= 0.0 || period == 0.0 || n > 64u) { break; }
+                        cd = cd + period;
+                        frame = frame + 1u;
+                        n = n + 1u;
+                    }
+                    set_ef(b, E_FRAME_CD, cd);
+                    el[b + E_FRAME] = frame;
+                }
+            }
+            case 0x0eu: { set_ef(b, E_T, select(1.0 - life / maxl, 0.0, maxl == 0.0)); }
+            case 0x0fu, 0x10u, 0x11u: { set_ef(b, E_POS + code - 0x0fu, slf(b, s + 2u) + key_0(b, s, t)); }
+            case 0x12u, 0x13u, 0x14u: { set_ef(b, E_ROT + code - 0x12u, half_turns(key_t(b, s, t))); }
+            case 0x15u, 0x16u, 0x17u: { set_ef(b, E_SCALE + code - 0x15u, key_t(b, s, t)); }
+            case 0x18u: { set_cb(b, 2u, to_byte(key_t(b, s, t))); }
+            case 0x19u: { set_cb(b, 1u, to_byte(key_t(b, s, t))); }
+            case 0x1au: { set_cb(b, 0u, to_byte(key_t(b, s, t))); }
+            case 0x1bu: { set_cb(b, 3u, to_byte(key_t(b, s, t))); }
+            // 0x1c / 0x1d: U / V = fmod(key, 2); 0x54 / 0x55 accumulate key x dt (no override), fmod 2.
+            case 0x1cu: { set_ef(b, E_UV, fmod2(key_t(b, s, t))); el[b + E_STATE] = el[b + E_STATE] | ST_SCROLL_U; }
+            case 0x1du: { set_ef(b, E_UV + 1u, fmod2(key_t(b, s, t))); el[b + E_STATE] = el[b + E_STATE] | ST_SCROLL_V; }
+            case 0x54u: { set_ef(b, E_UV, fmod2(ef(b, E_UV) + key_n(b, s, t) * dt)); el[b + E_STATE] = el[b + E_STATE] | ST_SCROLL_U; }
+            case 0x55u: { set_ef(b, E_UV + 1u, fmod2(ef(b, E_UV + 1u) + key_n(b, s, t) * dt)); el[b + E_STATE] = el[b + E_STATE] | ST_SCROLL_V; }
+            // D3b morph weights +0x194.. (class 0xf only; case 0x1004bf13): the slot keyframe at the day fraction with
+            // parameter bit 4, else at life t repeated (param >> 5) & 0x1ff times.
+            case 0x1eu, 0x1fu, 0x20u, 0x21u, 0x22u: {
+                if (el[b + E_KIND] == DK_MORPH) {
+                    let prm = sl(b, s + 1u);
+                    var x = t;
+                    let n = (prm >> 5u) & 0x1ffu;
+                    if ((prm & 0x10u) != 0u) {
+                        x = p.time.z;
+                    } else if (n != 0u) {
+                        x = fract(x * f32(n));
+                    }
+                    set_ef(b, E_MORPH_W + code - 0x1eu, key_t(b, s, x));
+                }
+            }
+            // FUN_100499d0 case 0x1004b181: keys 0 / 1 by camera distance (CMoD3bElem only, IsType 0xf).
+            case 0x6eu: {
+                if (el[b + E_KIND] == DK_MORPH) {
+                    let dd = cam_dist(b, parent);
+                    if (dd != 0.0) {
+                        let f = crossfade(dd, opf(r), opf(r + 1u), opf(r + 2u), opf(r + 3u));
+                        set_ef(b, E_MORPH_W, f);
+                        set_ef(b, E_MORPH_W + 1u, 1.0 - f);
+                    }
+                }
+            }
+            // Case 0x1004b249: the element's angle about the slot's centre S[s..s+2] against the direction (S[s+3], S[s+5])
+            // turns it by the op's factors (x / y / z), each wrapped to +-pi (ducks circling face their way).
+            case 0x64u: {
+                let dv = ev3(b, E_POS) - slv3(b, s);
+                let a = -atan2(slf(b, s + 5u), slf(b, s + 3u));
+                let tt = atan2(dv.x * sin(a) + dv.z * cos(a), dv.x * cos(a) - dv.z * sin(a));
+                if (opf(r) != 0.0) { set_ef(b, E_ROT, wrap_pi(tt * opf(r))); }
+                if (opf(r + 1u) != 0.0) { set_ef(b, E_ROT + 1u, wrap_pi(tt * opf(r + 1u))); }
+                if (opf(r + 2u) != 0.0) { set_ef(b, E_ROT + 2u, wrap_pi(tt * opf(r + 2u))); }
+                // 0x1004b249: this frame's position and step become the next frame's reference.
+                set_slv3(b, s, ev3(b, E_POS));
+                set_slf(b, s + 3u, dv.x);
+                set_slf(b, s + 4u, dv.y);
+                set_slf(b, s + 5u, dv.z);
+            }
+            // The moon (FUN_10184dc0): frame = phase, rotation z = pi/2.
+            case 0x45u: {
+                if ((el[b + E_STATE] & ST_HAS_RES) != 0u) {
+                    el[b + E_FRAME] = u32(p.extra.x);
+                    set_ef(b, E_ROT + 2u, PI / 2.0);
+                }
+            }
+            // 0x4e: colour bytes (R, G, B, A) from an 8-entry weekday table at op+8; 0x4f: the colour times a 12-entry
+            // moon-phase table / 128 (FUN_1003d290). Both lerp from the previous entry in the day's first minute.
+            case 0x4eu, 0x4fu: {
+                let n = select(8u, 12u, code == 0x4fu);
+                let idx = select(u32(p.extra.y), u32(p.extra.x), code == 0x4fu) % n;
+                let prev = (idx + n - 1u) % n;
+                let minute = p.time.z * 1440.0;
+                let lerp = minute < 1.0;
+                let cur = ops[r + 1u + idx];
+                let old = ops[r + 1u + prev];
+                let order = array<u32, 4>(2u, 1u, 0u, 3u);
+                for (var q = 0u; q < 4u; q = q + 1u) {
+                    let cv = f32((cur >> (8u * q)) & 0xffu);
+                    let ov = f32((old >> (8u * q)) & 0xffu);
+                    let v = select(cv, ov + (cv - ov) * minute, lerp);
+                    let k = order[q];
+                    if (code == 0x4eu) {
+                        set_cb(b, k, u32(v));
+                    } else {
+                        set_cb(b, k, u32(max(f32(cb(b, k)) * v / 128.0, 0.0)));
+                    }
+                }
+            }
+            case 0x26u: {
+                let m = euler(vec3<f32>(opf(r + 2u), opf(r + 1u), opf(r)));
+                set_slv3(b, s, m * slv3(b, s));
+            }
+            case 0x27u: { set_ef(b, E_UV, ef(b, E_UV) + opf(r) * dt); el[b + E_STATE] = el[b + E_STATE] | ST_SCROLL_U; }
+            case 0x28u: { set_ef(b, E_UV + 1u, ef(b, E_UV + 1u) + opf(r) * dt); el[b + E_STATE] = el[b + E_STATE] | ST_SCROLL_V; }
+            // Cases 0x1004b627 / b683 / b6c1: a sine sway at sin(elapsed / 60 x f1 + f2) x dt, amplitudes S[s..s+2], heading
+            // S[s+3]: 0x29 along (cos, sin) in x / z, 0x2a in y, 0x2b along (sin, cos) (fish in Buburimu).
+            case 0x29u, 0x2au, 0x2bu: {
+                let v = sin((maxl - life) * opf(r) / 60.0 + opf(r + 1u)) * slf(b, s + code - 0x29u) * dt;
+                let h = slf(b, s + 3u);
+                var d = vec3<f32>(0.0, v, 0.0);
+                if (code == 0x29u) { d = vec3<f32>(cos(h), 0.0, sin(h)) * v; }
+                if (code == 0x2bu) { d = vec3<f32>(sin(h), 0.0, cos(h)) * v; }
+                set_ev3(b, E_POS, ev3(b, E_POS) + d);
+            }
+            // FUN_100499d0 case 0x1004a0a2: d == 0 hides; below near kept, to far faded, else 0 (expire on bit 0).
+            // 0x1004afb4 (any class): the occlusion test; word 2 = 0: FADE = 0 when no point passes (FUN_1004a870), else
+            // FADE x= the passing fraction (count / 256, FUN_1004e630) x word 2. Without a scene depth it is skipped.
+            case 0x53u: {
+                if (p.screen.y > 0.0) {
+                    let c = view_pos(b, parent);
+                    let hits = occlusion_hits(c, opf(r));
+                    let fr = opf(r + 1u);
+                    if (fr == 0.0) {
+                        if (hits == 0u) { set_ef(b, E_FADE, 0.0); }
+                    } else {
+                        set_ef(b, E_FADE, ef(b, E_FADE) * f32(hits) / 256.0 * fr);
+                    }
+                }
+            }
+            // 0x1004abd3 (any class): the screen flash. Skipped unless last frame's sort key +0x12c is in 0..far and FADE
+            // is not 0; f = 1 within r_in (squared, on the 384-line reference) of the screen centre, falling to 0 at
+            // r_out, x the eye-distance falloff from near to far, x the player factor (FUN_1003c7d0, as op 0x82); the
+            // colour bytes x f are added to the frame's flash (FUN_10014f70), drawn additively over the scene.
+            case 0x60u: {
+                let near = opf(r);
+                let far = opf(r + 1u);
+                let kp = ef(b, E_KEY_PREV);
+                // The eye distance takes the raw position as a world point even for camera-relative elements
+                // (FUN_10044c40), as retail does.
+                let wp = world_of(b, parent);
+                let v = view_pos(b, parent);
+                var z = -v.z;
+                if (far >= kp && kp >= 0.0 && ef(b, E_FADE) != 0.0 && z >= 0.0) {
+                    z = max(z, 1.0);
+                    let k = p.screen.x / z;
+                    let sx = k * v.x;
+                    let sy = k * -v.y;
+                    let r2 = sx * sx + sy * sy;
+                    let rin = opf(r + 2u);
+                    let rout = opf(r + 3u);
+                    var f = -1.0;
+                    if (r2 <= rin) { f = 1.0; } else if (r2 <= rout) { f = 1.0 - (r2 - rin) / (rout - rin); }
+                    let d = distance(wp, p.eye.xyz);
+                    if (d > far) { f = -1.0; } else if (f >= 0.0 && d > near) { f = f * (1.0 - (d - near) / (far - near)); }
+                    if (f > 0.0) {
+                        let fl = ops[r + 5u];
+                        let me = el[b + E_ME];
+                        let isme = ((fl & 2u) == 0u && (me & 1u) != 0u) || ((fl & 4u) == 0u && (me & 2u) != 0u);
+                        let pf = opf(r + 4u);
+                        var pl = 1.0;
+                        if ((fl & 1u) == 0u) {
+                            if (!isme) { pl = select(0.5, pf, pf != 0.0); }
+                        } else if (isme && pf != 0.0) {
+                            pl = pf;
+                        }
+                        f = f * pl;
+                        // Whole-vector maths: FXC cannot index a local vector inside the op loop.
+                        let add = vec3<u32>(max(vec3<f32>(f32(cb(b, 0u)), f32(cb(b, 1u)), f32(cb(b, 2u))) * f, vec3<f32>(0.0)));
+                        flash = min(flash + add, vec3<u32>(255u));
+                    }
+                }
+            }
+            case 0x2eu: {
+                let d = fade_dist(b, parent);
+                let near = opf(r);
+                let far = opf(r + 1u);
+                if (d == 0.0) {
+                    set_ef(b, E_FADE, 0.0);
+                } else if (d >= near) {
+                    if (d <= far) {
+                        set_ef(b, E_FADE, ef(b, E_FADE) * (1.0 - (d - near) / (far - near)));
+                    } else {
+                        set_ef(b, E_FADE, 0.0);
+                        if ((ops[r + 2u] & 1u) != 0u) { kill = 1u; }
+                    }
+                }
+            }
+            // Same case, 'H': 0 below rec1, in to rec2, kept to rec3, out to rec4, else 0 (expire on rec5 bit 0).
+            case 0x48u: {
+                let d = fade_dist(b, parent);
+                if (d == 0.0) {
+                    set_ef(b, E_FADE, 0.0);
+                } else if (d >= opf(r) && d < opf(r + 1u)) {
+                    set_ef(b, E_FADE, ef(b, E_FADE) * (1.0 - (d - opf(r + 1u)) / (opf(r) - opf(r + 1u))));
+                } else if (d >= opf(r) && d >= opf(r + 2u) && d < opf(r + 3u)) {
+                    set_ef(b, E_FADE, ef(b, E_FADE) * (1.0 - (d - opf(r + 2u)) / (opf(r + 3u) - opf(r + 2u))));
+                } else if (d < opf(r) || d >= opf(r + 3u)) {
+                    set_ef(b, E_FADE, 0.0);
+                    if ((ops[r + 4u] & 1u) != 0u) { kill = 1u; }
+                }
+            }
+            // Drag on the slot vector: S *= rec[1]^dt (__CIpow; MODLOG "Effect generators").
+            case 0x2cu: { set_slv3(b, s, slv3(b, s) * pow(select(opf(r), drag, drag_set), dt)); }
+            // 0x1004bfdf: with a keyframe in S[s] and emission 0x69's op-0x2c record in S[s+2], the record's factor =
+            // key(t). Every generator using it runs it just before its 0x2c.
+            case 0x44u: { if (sl(b, s) != NONE && sl(b, s + 2u) != 0u) { drag = key_n(b, s, t); drag_set = true; } }
+            // 0x1004c48f: the slot keeps its speed, pointed along the element's rotated +X.
+            case 0x2fu: { set_slv3(b, s, euler(ev3(b, E_ROT)) * vec3<f32>(length(slv3(b, s)), 0.0, 0.0)); }
+            // Point-light fields: 0x5b / 0x5c life keys (first value S[s+2]), 0x5d / 0x5e plain, 0x49 the day.
+            case 0x5bu: { if (el[b + E_KIND] == DK_LIGHT) { set_ef(b, E_L_INT, key_t(b, s, t)); } }
+            case 0x5cu: { if (el[b + E_KIND] == DK_LIGHT) { set_ef(b, E_L_RANGE, key_t(b, s, t)); } }
+            case 0x5du: { if (el[b + E_KIND] == DK_LIGHT) { set_ef(b, E_L_ISCALE, key_n(b, s, t)); } }
+            case 0x5eu: { if (el[b + E_KIND] == DK_LIGHT) { set_ef(b, E_L_RSCALE, key_n(b, s, t)); } }
+            case 0x49u: { if (el[b + E_KIND] == DK_LIGHT) { set_ef(b, E_L_INT, key_g(b, s)); } }
+            // Colour R, G, B = the slot's bytes 2 / 1 / 0 (op 0x91's base) x the zone light; ftol, wrapping.
+            case 0x69u: {
+                let sc = sl(b, s);
+                set_cb(b, 2u, u32(max(f32((sc >> 16u) & 0xffu) * p.area.x, 0.0)) & 0xffu);
+                set_cb(b, 1u, u32(max(f32((sc >> 8u) & 0xffu) * p.area.y, 0.0)) & 0xffu);
+                set_cb(b, 0u, u32(max(f32(sc & 0xffu) * p.area.z, 0.0)) & 0xffu);
+            }
+            // vtable +0x34(key(t)): CMoDist +0x194 (0 without a keyframe).
+            case 0x24u: { if (el[b + E_KIND] == DK_DIST || el[b + E_KIND] == DK_DIST_MODEL || el[b + E_KIND] == DK_DIST_MORPH) { set_ef(b, E_DIST_OFF, select(0.0, key_t(b, s, t), sl(b, s) != NONE)); } }
+            case 0x30u, 0x31u, 0x32u: {
+                let k = el[b + E_OP2_SLOT];
+                if (k != NONE) { set_slf(b, k + code - 0x30u, slf(b, s + 2u) + key_t(b, s, t)); }
+            }
+            case 0x3cu: { set_cb(b, 2u, to_byte(key_g(b, s))); }
+            case 0x3du: { set_cb(b, 1u, to_byte(key_g(b, s))); }
+            case 0x3eu: { set_cb(b, 0u, to_byte(key_g(b, s))); }
+            case 0x3fu: { set_ef(b, E_FADE, ef(b, E_FADE) * key_rep(b, s)); }
+            case 0x40u, 0x41u, 0x42u: { set_ef(b, E_SCALE + code - 0x40u, key_g(b, s)); }
+            // The specular fields (+0x19c.., +0x1ac; no IsType check in retail, ours meshes only): angles from the life
+            // keys, colour bytes R, G, B, A from the life keys (0x38..0x3b) or the day (0x4a..0x4d).
+            case 0x35u, 0x36u, 0x37u: { if (el[b + E_KIND] == DK_MESH) { set_ef(b, E_SPEC_ANG + code - 0x35u, select(0.0, half_turns(key_t(b, s, t)), sl(b, s) != NONE)); } }
+            case 0x38u, 0x39u, 0x3au, 0x3bu: { if (el[b + E_KIND] == DK_MESH) { set_sb(b, array<u32, 4>(2u, 1u, 0u, 3u)[code - 0x38u], pos_byte(key_t(b, s, t))); } }
+            case 0x4au, 0x4bu, 0x4cu, 0x4du: { if (el[b + E_KIND] == DK_MESH) { set_sb(b, array<u32, 4>(2u, 1u, 0u, 3u)[code - 0x4au], pos_byte(key_g(b, s))); } }
+            case 0x50u: { if (parent != NONE) { set_ef(b, E_FADE, ef(b, E_FADE) * slot_f(parent, S_WEATHER)); } }
+            // FUN_10046c00 / FUN_1003d0d0: rot += wrap(fmod(key, 2) pi) dt, wrapped again.
+            case 0x56u, 0x57u, 0x58u: { set_ef(b, E_ROT + code - 0x56u, wrap_pi(ef(b, E_ROT + code - 0x56u) + half_turns(key_n(b, s, t)) * dt)); }
+            case 0x61u, 0x62u, 0x63u: { set_ef(b, E_ROT + code - 0x61u, wrap_pi(ef(b, E_ROT + code - 0x61u) + half_turns(key_g(b, s)) * dt)); }
+            case 0x66u, 0x67u, 0x68u: { set_ef(b, E_ROT + code - 0x66u, half_turns(key_g(b, s))); }
+            // 0x1004af85: roll by last frame's sort key, rot.z = fmod(key w1 + w2, 2 pi) - pi.
+            case 0x59u: { set_ef(b, E_ROT + 2u, (ef(b, E_KEY_PREV) * opf(r) + opf(r + 1u)) % 6.283184 - PI); }
+            // 0x1004af16: scale = w1..3, plus (key - w4) w5 once last frame's sort key is past w4.
+            case 0x5au: {
+                let k = ef(b, E_KEY_PREV) - opf(r + 3u);
+                let w = vec3<f32>(opf(r), opf(r + 1u), opf(r + 2u));
+                let sc = select(w, w + vec3<f32>(k * opf(r + 4u)), k > 0.0);
+                set_ef(b, E_SCALE, sc.x);
+                set_ef(b, E_SCALE + 1u, sc.y);
+                set_ef(b, E_SCALE + 2u, sc.z);
+            }
+            case 0x6bu, 0x6cu, 0x6du: { set_ef(b, E_POS + code - 0x6bu, slf(b, s + 2u) + key_0(b, s, p.time.z)); }
+            default: {}
+        }
+        ip = ip + len;
+    }
+
+    // Transforms (MODLOG "Effect generators"). Local L = scale then rotation; orientation modes; world and view
+    // position.
+    let flags = el[b + E_FLAGS];
+    var a = vec3<f32>(1.0);
+    var ks = vec3<f32>(1.0);
+    var pm = IDENT;
+    var has_p = false;
+    if (parent != NONE) {
+        a = slot_v3(parent, S_SCALE_A);
+        if (slots[parent * SLOT_WORDS + S_SIZE_SCALED] != 0u) { ks = slot_v3(parent, S_SCALE_B); }
+        if (slots[parent * SLOT_WORDS + S_HAS_MATRIX] != 0u) { pm = slot_mat(parent); has_p = true; }
+    }
+    let rv = ev3(b, E_ROT);
+    var rot = euler(rv);
+    if ((flags & 0x200u) != 0u) { rot = rot_z(rv.z) * rot_y(rv.y) * rot_x(rv.x); }
+    let sc = ev3(b, E_SCALE) * ks;
+    let ssc = mat3x3<f32>(vec3<f32>(sc.x, 0.0, 0.0), vec3<f32>(0.0, sc.y, 0.0), vec3<f32>(0.0, 0.0, sc.z));
+    var l3 = rot * ssc;
+    if ((flags & 2u) != 0u) { l3 = ssc * rot; }
+    if ((el[b + E_STATE] & ST_GROUND) != 0u) {
+        l3 = mat3x3<f32>(ev3(b, E_GROUND), ev3(b, E_GROUND + 3u), ev3(b, E_GROUND + 6u)) * l3;
+    }
+    let pos = ev3(b, E_POS);
+    // FUN_10045190: orientation modes 1 / 2 face the motion, 3 faces the camera.
+    let omode = (flags >> 6u) & 7u;
+    var degenerate = false;
+    if (omode >= 1u && omode <= 3u) {
+        var dv = pos - old_pos;
+        let am = (el[b + E_GEN_BITS] >> 16u) & 0x1fu;
+        // Attach modes 3 / 6: the step through the parent frame, back through its row-normalised rotation Pn.
+        let pn = mat4x4<f32>(vec4<f32>(normalize(pm[0].xyz), 0.0), vec4<f32>(normalize(pm[1].xyz), 0.0), vec4<f32>(normalize(pm[2].xyz), 0.0), vec4<f32>(0.0, 0.0, 0.0, 1.0));
+        if (omode != 3u && (am == 3u || am == 6u) && has_p) {
+            dv = (inverse4(pn) * vec4<f32>(mat3x3<f32>(pm[0].xyz, pm[1].xyz, pm[2].xyz) * (dv * a), 0.0)).xyz;
+        }
+        if (omode == 3u) {
+            var eye_l = p.eye.xyz;
+            if (has_p) { eye_l = (inverse4(pm) * vec4<f32>(eye_l, 1.0)).xyz / a; }
+            dv = eye_l - pos;
+        }
+        if (omode != 3u && (flags & 1u) != 0u) {
+            // Bit 0: rows X = |d|, Y = |d x v|, Z = (0, 0, 1) x X (as coded), v = (0, 0, -1) through the view
+            // back into the element's frame. No zero guard: a still element gets a NaN matrix (inferred: not drawn).
+            let v0 = vec4<f32>(0.0, 0.0, -1.0, 1.0);
+            var v: vec3<f32>;
+            if (am == 3u || am == 6u) {
+                var pn4 = IDENT;
+                if (has_p) { pn4 = pn; }
+                let q = inverse4(pn4 * p.view) * v0;
+                v = q.xyz / q.w;
+            } else if (am == 0u || am == 0xeu || am == 0xfu || am == 0x14u) {
+                let q = p.c10 * v0;
+                v = q.xyz / q.w;
+            } else {
+                var pr = IDENT;
+                if (has_p) { pr = mat4x4<f32>(pm[0], pm[1], pm[2], vec4<f32>(0.0, 0.0, 0.0, 1.0)); }
+                let q = inverse4(pr * p.view_rot) * v0;
+                v = q.xyz / q.w;
+            }
+            let c = cross(dv, v);
+            if (dot(dv, dv) > 0.0 && dot(c, c) > 0.0) {
+                let x = normalize(dv);
+                l3 = mat3x3<f32>(x, normalize(c), vec3<f32>(-x.y, x.x, 0.0)) * l3;
+            } else {
+                degenerate = true;
+            }
+        } else if (dot(dv, dv) > 0.0) {
+            // Retail takes any motion, however small: a Stoneskin spike's 1e-6 drift only gives it its outward heading.
+            let yaw = -atan2(dv.z, dv.x);
+            var o = rot_y(yaw);
+            if (omode != 2u) { o = rot_y(yaw) * rot_z(atan2(dv.y, length(dv.xz))); }
+            l3 = o * l3;
+        }
+    }
+    var wpos = pos;
+    if (has_p) { wpos = (pm * vec4<f32>(pos * a, 1.0)).xyz; }
+    let bboard = (flags & 1u) != 0u && (flags & 0x1c0u) == 0u;
+    let screen = (flags & 4u) != 0u && (flags & 8u) != 0u;
+    var e: vec3<f32>;
+    if ((flags & 0x20000u) != 0u) {
+        var t = vec3<f32>(0.0);
+        if (has_p) { t = pm[3].xyz; }
+        e = (p.view * vec4<f32>(t, 1.0)).xyz + vec3<f32>(pos.x, select(pos.y, -pos.y, bboard), pos.z);
+    } else if ((flags & 4u) != 0u) {
+        if ((flags & 8u) != 0u) { e = pos; } else { e = (p.view_rot * vec4<f32>(pos, 0.0)).xyz; }
+    } else {
+        e = (p.view * vec4<f32>(wpos, 1.0)).xyz;
+    }
+    // FUN_10044e10: the base matrix by bits 13/14 (identity with bit 3).
+    let sel = (flags >> 13u) & 3u;
+    var xm = p.view_rot;
+    if ((flags & 8u) != 0u) { xm = IDENT; } else if (sel == 1u) { xm = p.d10; } else if (sel == 2u) { xm = p.d50; } else if (sel == 3u) { xm = p.c10; }
+    var mv: mat4x4<f32>;
+    if (bboard || screen) {
+        var m3: mat3x3<f32>;
+        if (!screen) {
+            m3 = rot_x(PI) * l3;
+        } else {
+            m3 = mat3x3<f32>(l3[0], -l3[1], l3[2]);
+        }
+        var t = e;
+        var c0 = m3[0];
+        var c1 = m3[1];
+        if (screen && abs(t.z) >= 0.2) {
+            t.z = -t.z;
+            t.y = -t.y;
+        } else if (abs(t.z) < 0.2 && t.z != 0.0) {
+            // Near clamp, as coded (only _11 / _22 scale).
+            let q = 0.2 / t.z;
+            t.z = -0.2;
+            c0.x = c0.x * q;
+            c1.y = c1.y * q;
+            t.x = t.x * q;
+            t.y = -q * t.y;
+        }
+        mv = mat4x4<f32>(vec4<f32>(c0, 0.0), vec4<f32>(c1, 0.0), vec4<f32>(m3[2], 0.0), vec4<f32>(t, 1.0));
+    } else if ((flags & 4u) != 0u) {
+        mv = xm * mat4x4<f32>(vec4<f32>(l3[0], 0.0), vec4<f32>(l3[1], 0.0), vec4<f32>(l3[2], 0.0), vec4<f32>(pos, 1.0));
+    } else if ((flags & 0x20000u) != 0u) {
+        mv = mat4x4<f32>(vec4<f32>(l3[0], 0.0), vec4<f32>(l3[1], 0.0), vec4<f32>(l3[2], 0.0), vec4<f32>(e, 1.0));
+    } else {
+        var base = l3;
+        if (sel == 0u && has_p) { base = mat3x3<f32>(pm[0].xyz, pm[1].xyz, pm[2].xyz) * l3; }
+        let x3 = mat3x3<f32>(xm[0].xyz, xm[1].xyz, xm[2].xyz) * base;
+        mv = mat4x4<f32>(vec4<f32>(x3[0], 0.0), vec4<f32>(x3[1], 0.0), vec4<f32>(x3[2], 0.0), vec4<f32>(e, 1.0));
+    }
+    // Sort key +0x12c (FUN_100440d0; asm 100450cf..1004516a).
+    let bias = ef(b, E_BIAS);
+    var key = bias;
+    if ((flags & 0x400000u) == 0u) {
+        key = bias - e.z;
+        if (screen && abs(bias) > 0.03) { key = (1.0 - bias) - e.z; }
+    }
+    // Flag 0x8000000 then overwrites the key with bias - z + 400, with or without 0x400000: Port San d'Oria's dark
+    // underwater sheet (`t_sa/effe/wate/down`, flags 0x08401000) draws first, under the water colour, not over it.
+    if ((flags & 0x8000000u) != 0u) { key = bias - e.z + 400.0; }
+    // Projection depth bias (FUN_10045230 step 4).
+    var pbias = 0.0;
+    if (bias != 0.0 && (flags & 0x8400000u) == 0u) {
+        let z = abs(mv[3].z);
+        if (z <= 32.0) {
+            let tt = 1.0 - z / 32.0;
+            pbias = tt * tt * tt * 0.03 * bias;
+        }
+    }
+    let fade = ef(b, E_FADE);
+    let drawn = fade >= 0.01 && !degenerate;
+    let kind = el[b + E_KIND];
+    // FUN_10055450 from the common draw: pos = +0x54 raw, range = +0x1a8 x +0x19c, I = max(0, +0x1a0) x +0x1a4 x
+    // +0x138; FUN_10171640: colour rgb / 128 (black when I <= 0), attenuation 1 / (d^2 / I).
+    if (drawn && kind == DK_LIGHT && el[b + E_L_SLOT] != NONE) {
+        let ls = el[b + E_L_SLOT];
+        let li = max(max(0.0, ef(b, E_L_INT)) * ef(b, E_L_ISCALE) * fade, 0.0);
+        let rgb = vec3<f32>(f32(cb(b, 2u)), f32(cb(b, 1u)), f32(cb(b, 0u))) / 128.0;
+        lights[2u * ls] = vec4<f32>(ev3(b, E_POS), ef(b, E_L_RSCALE) * ef(b, E_L_RANGE));
+        lights[2u * ls + 1u] = vec4<f32>(select(rgb, vec3<f32>(0.0), li <= 0.0), li);
+    }
+    // D3a frame wrap at draw time (FUN_1003dad0 / FUN_1003e2f0): a reset, not a modulo.
+    if (drawn && (kind == DK_SPRITE || kind == DK_BATCHED) && el[b + E_FRAME] >= el[b + E_FRAMES]) {
+        el[b + E_FRAME] = 0u;
+    }
+    for (var k = 0u; k < 4u; k = k + 1u) {
+        outs[ob + 4u * k] = mv[k].x;
+        outs[ob + 4u * k + 1u] = mv[k].y;
+        outs[ob + 4u * k + 2u] = mv[k].z;
+        outs[ob + 4u * k + 3u] = mv[k].w;
+    }
+    // TFACTOR (FUN_1003d4f0): A x (fade x +0x134) only when that is below 1; modes 0x62 / 0x64 / 0x68 replace A.
+    let kf = fade * ef(b, E_ALPHA);
+    var alpha = cb(b, 3u);
+    if (kf < 1.0) { alpha = u32(max(f32(alpha) * kf, 0.0)) & 0xffu; }
+    let mode = el[b + E_BLEND];
+    if ((mode & 0xffu) == 0x62u) { alpha = (mode >> 8u) & 0xffu; }
+    if ((mode & 0xffu) == 0x64u || (mode & 0xffu) == 0x68u) { alpha = min(2u * ((mode >> 8u) & 0xffu), 255u); }
+    outs[ob + 16u] = f32(cb(b, 2u)) / 255.0;
+    outs[ob + 17u] = f32(cb(b, 1u)) / 255.0;
+    outs[ob + 18u] = f32(cb(b, 0u)) / 255.0;
+    outs[ob + 19u] = f32(alpha) / 255.0;
+    let st = el[b + E_STATE];
+    outs[ob + 20u] = select(0.0, ef(b, E_UV), (st & ST_SCROLL_U) != 0u);
+    outs[ob + 21u] = select(0.0, ef(b, E_UV + 1u), (st & ST_SCROLL_V) != 0u);
+    outs[ob + 22u] = f32(el[b + E_FRAME]);
+    // FUN_1003fbb0 (D3b), FUN_10040ba0 (D3m), FUN_10043320 (DistModel): nothing drawn from a generator with +0xde
+    // bit 7 while the weather density is 0.
+    let weather_off = (el[b + E_GEN_BITS] & 0x8000u) != 0u && p.extra.z == 0.0 && (kind == DK_MESH || kind == DK_MORPH || kind == DK_DIST_MODEL);
+    outs[ob + 23u] = select(0.0, 1.0, drawn && !weather_off && !born);
+    outs[ob + 24u] = pbias;
+    // FUN_1003ea60: morph weights divided by their sum; none -> the largest of last frame's gets 1.0. A DistMorph's
+    // weights never move (ops 0x1e..0x22 are D3b-only), so it shows key 0.
+    if (kind == DK_MORPH || kind == DK_DIST_MORPH) {
+        let kk = min(el[b + E_FRAMES], 5u);
+        var sum = 0.0;
+        for (var q = 0u; q < kk; q = q + 1u) { sum = sum + ef(b, E_MORPH_W + q); }
+        var best = 0u;
+        for (var q = 1u; q < kk; q = q + 1u) {
+            if (ef(b, E_MORPH_PREV + q) > ef(b, E_MORPH_PREV + best)) { best = q; }
+        }
+        for (var q = 0u; q < 5u; q = q + 1u) {
+            var wq = 0.0;
+            if (q < kk) {
+                if (sum < 1.17549435e-38) { wq = select(0.0, 1.0, q == best); } else { wq = ef(b, E_MORPH_W + q) / sum; }
+            }
+            outs[ob + 32u + q] = wq;
+            set_ef(b, E_MORPH_PREV + q, ef(b, E_MORPH_W + q));
+        }
+    }
+    // FUN_100467e0 (op-1 flag 16 on a D3b or D3m): the light matrix B = the element's view rotation (+0xa0's base),
+    // with a parent (generator +0xdf bit 1 clear) B Ry(3 pi / 2) P^-1, or for orientation 1 / 2 with bit 0
+    // rot(V_b50) Ry(pi); the light's travel direction through it with the translation added (math +0x50).
+    if ((flags & 0x10000u) != 0u && (kind == DK_MORPH || kind == DK_MESH) && p.light.w > 0.0) {
+        var bm = mat4x4<f32>(vec4<f32>(xm[0].xyz, 0.0), vec4<f32>(xm[1].xyz, 0.0), vec4<f32>(xm[2].xyz, 0.0), vec4<f32>(0.0, 0.0, 0.0, 1.0));
+        let r3 = rot_y(4.712389);
+        if (has_p && (el[b + E_GEN_BITS] & 2u) == 0u) {
+            bm = inverse4(pm) * mat4x4<f32>(vec4<f32>(r3[0], 0.0), vec4<f32>(r3[1], 0.0), vec4<f32>(r3[2], 0.0), vec4<f32>(0.0, 0.0, 0.0, 1.0)) * bm;
+        }
+        if (omode >= 1u && omode <= 2u && (flags & 1u) != 0u) {
+            let ry = rot_y(PI) * mat3x3<f32>(p.view[0].xyz, p.view[1].xyz, p.view[2].xyz);
+            bm = mat4x4<f32>(vec4<f32>(ry[0], 0.0), vec4<f32>(ry[1], 0.0), vec4<f32>(ry[2], 0.0), vec4<f32>(0.0, 0.0, 0.0, 1.0));
+        }
+        let l = normalize((bm * vec4<f32>(p.light.xyz, 1.0)).xyz);
+        outs[ob + 37u] = l.x;
+        outs[ob + 38u] = l.y;
+        outs[ob + 39u] = l.z;
+    }
+    // CMoD3mSpecularElem (FUN_100412b0): the specular stage's texture matrix (bit 0: Rz(-a2) Ry(-(a1 + pi/2)) Rx(-a0),
+    // times the camera rotation with bit 1; else Ry(-pi/2)) and its gain: the colour C (bit 0 clear: rgb = element x
+    // specular / 128 per byte, wrapping) as 2 C over a 2D image, 1 when C is 0x80808080, 0 over a cube (its tinted copy
+    // samples face -Z with 2D coordinates: black).
+    if (kind == DK_MESH && (el[b + E_SPEC_BITS] & 32u) != 0u) {
+        let sb = el[b + E_SPEC_BITS];
+        var ms = rot_y(-1.5707964);
+        if ((sb & 1u) != 0u) {
+            let a = ev3(b, E_SPEC_ANG);
+            ms = euler(vec3<f32>(-a.x, -(a.y + 1.5707964), -a.z));
+            if ((sb & 2u) != 0u) { ms = mat3x3<f32>(p.view_rot[0].xyz, p.view_rot[1].xyz, p.view_rot[2].xyz) * ms; }
+        }
+        var c = el[b + E_SPEC_COL];
+        if ((sb & 1u) == 0u) {
+            var m = c & 0xff000000u;
+            for (var k = 0u; k < 3u; k = k + 1u) {
+                m = m | ((((cb(b, k) * ((c >> (8u * k)) & 0xffu)) >> 7u) & 0xffu) << (8u * k));
+            }
+            c = m;
+        }
+        var g = vec3<f32>(1.0);
+        if (c != 0x80808080u) {
+            g = select(2.0 * vec3<f32>(f32((c >> 16u) & 0xffu), f32((c >> 8u) & 0xffu), f32(c & 0xffu)) / 255.0, vec3<f32>(0.0), (sb & 16u) != 0u);
+        }
+        for (var k = 0u; k < 3u; k = k + 1u) {
+            outs[ob + 32u + 3u * k] = ms[k].x;
+            outs[ob + 33u + 3u * k] = ms[k].y;
+            outs[ob + 34u + 3u * k] = ms[k].z;
+        }
+        outs[ob + 41u] = g.x;
+        outs[ob + 42u] = g.y;
+        outs[ob + 43u] = g.z;
+    }
+    // The ground projection: its local 3x3 (elem +0x60) for the image, its world position for the decal.
+    if (kind == DK_GROUND_PROJ) {
+        for (var k = 0u; k < 3u; k = k + 1u) {
+            outs[ob + 32u + 3u * k] = l3[k].x;
+            outs[ob + 33u + 3u * k] = l3[k].y;
+            outs[ob + 34u + 3u * k] = l3[k].z;
+        }
+        outs[ob + 25u] = wpos.x;
+        outs[ob + 26u] = wpos.y;
+        outs[ob + 27u] = wpos.z;
+    }
+    // Batched particles (MODLOG "Effect generators"): count, t, placement M1 = parent rotation x inverse(V_b90).
+    if (kind == DK_BATCHED) {
+        let nn = el[b + E_PART_N];
+        var n = nn;
+        // FUN_10063c80: N from 20 up on a weather generator (+0xde bit 0) is N x the weather density x 0.5.
+        if (nn >= 20u && ((el[b + E_GEN_BITS] >> 8u) & 1u) != 0u) { n = u32(f32(nn) * p.extra.z * 0.5); }
+        // 6 vertices a particle but 4n - 2 strip triangles from vertex 1: the first (2n + 1) / 3 show (as coded).
+        let shown = select(0u, (2u * n + 1u) / 3u, n > 0u);
+        outs[ob + 25u] = f32(shown);
+        outs[ob + 26u] = ef(b, E_PART_T);
+        outs[ob + 27u] = ef(b, E_DRAG);
+        let g = ev3(b, E_GRAVITY);
+        outs[ob + 28u] = g.x;
+        outs[ob + 29u] = g.y;
+        outs[ob + 30u] = g.z;
+        var prot = IDENT;
+        if (has_p) { prot = mat4x4<f32>(pm[0], pm[1], pm[2], vec4<f32>(0.0, 0.0, 0.0, 1.0)); }
+        let m1 = p.inv_view_rot * prot;
+        for (var k = 0u; k < 3u; k = k + 1u) {
+            outs[ob + 32u + 4u * k] = m1[k].x;
+            outs[ob + 33u + 4u * k] = m1[k].y;
+            outs[ob + 34u + 4u * k] = m1[k].z;
+        }
+        if (drawn && n > 0u) { set_ef(b, E_PART_T, ef(b, E_PART_T) + dt); }
+    }
+    back[bb] = bitcast<u32>(key);
+    back[bb + 1u] = kill | select(0u, B_DRAWN, drawn);
+    back[bb + 2u] = bitcast<u32>(wpos.x);
+    back[bb + 3u] = bitcast<u32>(wpos.y);
+    back[bb + 4u] = bitcast<u32>(wpos.z);
+    back[bb + 5u] = bitcast<u32>(rv.x);
+    back[bb + 6u] = bitcast<u32>(rv.y);
+    back[bb + 7u] = bitcast<u32>(rv.z);
+    back[bb + 8u] = bitcast<u32>(sc.x);
+    back[bb + 9u] = bitcast<u32>(sc.y);
+    back[bb + 10u] = bitcast<u32>(sc.z);
+    back[bb + 11u] = el[b + E_COLOR];
+    back[bb + 12u] = el[b + E_SERIAL];
+    let lp = ev3(b, E_POS);
+    back[bb + 13u] = bitcast<u32>(lp.x);
+    back[bb + 14u] = bitcast<u32>(lp.y);
+    back[bb + 15u] = bitcast<u32>(lp.z);
+    let k2 = el[b + E_OP2_SLOT];
+    let vel = select(vec3<f32>(0.0), slv3(b, k2), k2 != NONE);
+    back[bb + 16u] = bitcast<u32>(vel.x);
+    back[bb + 17u] = bitcast<u32>(vel.y);
+    back[bb + 18u] = bitcast<u32>(vel.z);
+    back[bb + 19u] = flash.x | (flash.y << 8u) | (flash.z << 16u);
+    back[bb + 20u] = el[b + E_UV];
+    back[bb + 21u] = el[b + E_UV + 1u];
+    back[bb + 22u] = el[b + E_BIAS];
+    let lit = el[b + E_KIND] == DK_LIGHT;
+    back[bb + 23u] = select(0u, el[b + E_L_INT], lit);
+    back[bb + 24u] = select(0u, el[b + E_L_RANGE], lit);
+    let gb = el[b + E_GEN_BITS];
+    var bst = 0u;
+    if ((gb & (1u << 23u)) != 0u) {
+        let k = (gb >> 24u) & 0x3fu;
+        let n = gb >> 30u;
+        back[bb + 25u] = sl(b, k + n);
+        back[bb + 26u] = sl(b, k + 3u);
+        bst = 4u | (n << 8u);
+    }
+    if (lit) { bst = bst | 16u; }
+    back[bb + 1u] = back[bb + 1u] | bst;
+    set_ef(b, E_KEY_PREV, key);
+}
+
+// ---- Drawing ----
+
+struct Draw {
+    proj: mat4x4<f32>,
+    fog_color: vec4<f32>,
+    // fog start, end, linearize (1 = sRGB target: the gamma-space result is converted), soft (1: scene_depth holds
+    // the scene's depth, which glows fade against; ours)
+    fog: vec4<f32>,
+    // near, far, scene target width, height
+    clip: vec4<f32>,
+    // "menu    dmgnum" glyphs 0..10: UV rect, then (width, height, 0, 0) in units
+    glyphs: array<vec4<f32>, 22>,
+    // the scene view (world to view), for the ground projection's decal
+    view: mat4x4<f32>,
+    // FUN_100467e0's light colour (the eased background light x its scale; w = the light count) and AMBIENT
+    // (FUN_10188e00: trunc(min(a, 1) x 128) / 255)
+    light_col: vec4<f32>,
+    ambient: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> d: Draw;
+@group(0) @binding(1) var<storage, read> douts: array<f32>;
+@group(0) @binding(2) var<storage, read> dels: array<u32>;
+@group(0) @binding(3) var<storage, read> parts: array<f32>;
+@group(0) @binding(4) var<storage, read> sverts: array<u32>;
+@group(0) @binding(5) var<storage, read> sframes: array<vec2<u32>>;
+@group(0) @binding(6) var<storage, read> mdata: array<u32>;
+@group(0) @binding(7) var scene_depth: texture_depth_2d;
+@group(1) @binding(0) var tex: texture_2d<f32>;
+@group(1) @binding(1) var samp: sampler;
+@group(2) @binding(0) var spec2d: texture_2d<f32>;
+@group(2) @binding(1) var speccube: texture_cube<f32>;
+@group(2) @binding(2) var spec_samp: sampler;
+// fx/trail.rs gpu_words: per after-image a 32-word header and 80 samples of 8 words.
+@group(3) @binding(0) var<storage, read> trails: array<u32>;
+
+// Instances are element x 512 + (particle, or the shading variant for meshes).
+const PER_ELEM: u32 = 512u;
+
+struct VIn {
+    @location(0) pos: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) color: vec4<f32>,
+    @location(3) uv: vec2<f32>,
+};
+
+struct VOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) color: vec4<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) @interpolate(flat) tf: vec4<f32>,
+    @location(3) depth: f32,
+    // flags, blend mode, shading variant (0 D3m, 1 D3m untextured, 2 MMB, 3 MMB untextured, 4 D3a)
+    @location(4) @interpolate(flat) mode: vec3<u32>,
+    // The specular stage (vs_mesh_spec): the texture direction, and the gain rgb with w = 1 for a cube.
+    @location(5) sd: vec3<f32>,
+    @location(6) @interpolate(flat) sk: vec4<f32>,
+};
+
+fn out_mat(o: u32) -> mat4x4<f32> {
+    return mat4x4<f32>(
+        vec4<f32>(douts[o], douts[o + 1u], douts[o + 2u], douts[o + 3u]),
+        vec4<f32>(douts[o + 4u], douts[o + 5u], douts[o + 6u], douts[o + 7u]),
+        vec4<f32>(douts[o + 8u], douts[o + 9u], douts[o + 10u], douts[o + 11u]),
+        vec4<f32>(douts[o + 12u], douts[o + 13u], douts[o + 14u], douts[o + 15u]));
+}
+
+// View position to clip space with the projection depth bias (near and far pulled by f) and sky meshes past the
+// far plane kept at it. ZBIAS 15 is the pipelines' depth bias (render/effects.rs ZBIAS).
+fn to_clip(vp: vec3<f32>, f: f32) -> vec4<f32> {
+    var c = d.proj * vec4<f32>(vp, 1.0);
+    if (f != 0.0) {
+        let n = d.clip.x - f;
+        let fr = d.clip.y - f;
+        c.z = vp.z * fr / (n - fr) + n * fr / (n - fr);
+    }
+    c.z = min(c.z, c.w * 0.999999);
+    return c;
+}
+
+fn vout(e: u32, vp: vec3<f32>, color: vec4<f32>, uv: vec2<f32>, variant: u32) -> VOut {
+    let o = e * OUT_WORDS;
+    var out: VOut;
+    out.clip = to_clip(vp, douts[o + 24u]);
+    out.color = color;
+    out.uv = uv + vec2<f32>(douts[o + 20u], douts[o + 21u]);
+    out.tf = vec4<f32>(douts[o + 16u], douts[o + 17u], douts[o + 18u], douts[o + 19u]);
+    out.depth = -vp.z;
+    let eb = e * E_WORDS;
+    out.mode = vec3<u32>(dels[eb + E_FLAGS], dels[eb + E_BLEND], variant);
+    return out;
+}
+
+fn hidden() -> VOut {
+    var out: VOut;
+    out.clip = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    return out;
+}
+
+// D3D8 fixed function for a lit D3b / D3m or MMB stand-in (op-1 flag 16; FUN_1017c840 leaves LIGHTING as set): COLORVERTEX with the diffuse and ambient material from
+// the vertex colour, NORMALIZENORMALS off, so the normal goes through +0xa0's inverse transpose unnormalised (VIEW is
+// the identity during effects); one directional light from the update pass, AMBIENT from the env.
+fn fx_lit(e: u32, mv: mat4x4<f32>, n: vec3<f32>, cv: vec4<f32>) -> vec4<f32> {
+    let eb = e * E_WORDS;
+    let k = dels[eb + E_KIND];
+    if (d.light_col.w <= 0.0 || (dels[eb + E_FLAGS] & 0x10000u) == 0u || (k != DK_MORPH && k != DK_MESH)) { return cv; }
+    let o = e * OUT_WORDS;
+    let m = mat3x3<f32>(mv[0].xyz, mv[1].xyz, mv[2].xyz);
+    let cof = mat3x3<f32>(cross(m[1], m[2]), cross(m[2], m[0]), cross(m[0], m[1]));
+    let det = dot(m[0], cof[0]);
+    let nv = select(vec3<f32>(0.0), cof * n / det, det != 0.0);
+    let l = vec3<f32>(douts[o + 37u], douts[o + 38u], douts[o + 39u]);
+    let s = d.ambient.rgb + d.light_col.rgb * max(dot(nv, -l), 0.0);
+    return vec4<f32>(clamp(cv.rgb * s, vec3<f32>(0.0), vec3<f32>(1.0)), cv.a);
+}
+
+@vertex
+fn vs_mesh(v: VIn, @builtin(instance_index) inst: u32) -> VOut {
+    let e = inst / PER_ELEM;
+    let o = e * OUT_WORDS;
+    if (douts[o + 23u] < 0.5) { return hidden(); }
+    var mv = out_mat(o);
+    let gb = dels[e * E_WORDS + E_GEN_BITS];
+    if ((gb & (1u << 21u)) != 0u && mmb_culled(e, mv)) { return hidden(); }
+    // Zone 237's listed MMBs: the world matrix's last row + (0, -0.8, 0, 0), after the cull.
+    if ((gb & (1u << 22u)) != 0u) { mv[3].y = mv[3].y - 0.8; }
+    let vp = (mv * vec4<f32>(v.pos, 1.0)).xyz;
+    let variant = inst % PER_ELEM;
+    var col = v.color;
+    if (variant <= 3u) { col = fx_lit(e, mv, v.normal, v.color); }
+    return vout(e, vp, col, v.uv, variant);
+}
+
+// FUN_10183760 / FUN_10182070: the MMB's 8 box corners through the element's model-view; culled when all share an
+// outcode of x / y outside |w| or a view depth under 0.2 (no far test).
+fn mmb_culled(e: u32, mv: mat4x4<f32>) -> bool {
+    let eb = e * E_WORDS;
+    let c = vec3<f32>(bitcast<f32>(dels[eb + E_MMB_BOX]), bitcast<f32>(dels[eb + E_MMB_BOX + 1u]), bitcast<f32>(dels[eb + E_MMB_BOX + 2u]));
+    let hx = bitcast<f32>(dels[eb + E_MMB_BOX + 3u]);
+    let hy = bitcast<f32>(dels[eb + E_MMB_BOX + 4u]);
+    let r = bitcast<f32>(dels[eb + E_RADIUS]);
+    let hz = sqrt(max(r * r - hx * hx - hy * hy, 0.0));
+    var all = 0x1fu;
+    for (var k = 0u; k < 8u; k = k + 1u) {
+        let s = vec3<f32>(select(-1.0, 1.0, (k & 1u) != 0u), select(-1.0, 1.0, (k & 2u) != 0u), select(-1.0, 1.0, (k & 4u) != 0u));
+        let vp = (mv * vec4<f32>(c + s * vec3<f32>(hx, hy, hz), 1.0)).xyz;
+        let q = d.proj * vec4<f32>(vp, 1.0);
+        let aw = abs(q.w);
+        var oc = 0u;
+        if (q.x > aw) { oc = oc | 1u; }
+        if (q.x < -aw) { oc = oc | 2u; }
+        if (q.y > aw) { oc = oc | 4u; }
+        if (q.y < -aw) { oc = oc | 8u; }
+        if (-vp.z < 0.2) { oc = oc | 16u; }
+        all = all & oc;
+    }
+    return all != 0u;
+}
+
+fn svert(i: u32) -> VIn {
+    let b = i * 9u;
+    var v: VIn;
+    v.pos = vec3<f32>(bitcast<f32>(sverts[b]), bitcast<f32>(sverts[b + 1u]), bitcast<f32>(sverts[b + 2u]));
+    let c = sverts[b + 6u];
+    v.color = vec4<f32>(f32(c & 0xffu), f32((c >> 8u) & 0xffu), f32((c >> 16u) & 0xffu), f32(c >> 24u)) / 255.0;
+    v.uv = vec2<f32>(bitcast<f32>(sverts[b + 7u]), bitcast<f32>(sverts[b + 8u]));
+    return v;
+}
+
+// D3a: the element's frame (CMoD3aElem), or for a batched element the frame's first quad at every particle
+// (CMoVuAnmElem).
+@vertex
+fn vs_sprite(@builtin(vertex_index) k: u32, @builtin(instance_index) inst: u32) -> VOut {
+    let e = inst / PER_ELEM;
+    let pi = inst % PER_ELEM;
+    let o = e * OUT_WORDS;
+    if (douts[o + 23u] < 0.5) { return hidden(); }
+    let eb = e * E_WORDS;
+    let fr = sframes[dels[eb + E_SFRAMES] + u32(douts[o + 22u])];
+    if (k >= fr.y * 6u) { return hidden(); }
+    let v = svert(fr.x + k);
+    let mv = out_mat(o);
+    if (dels[eb + E_KIND] != DK_BATCHED) {
+        return vout(e, (mv * vec4<f32>(v.pos, 1.0)).xyz, v.color, v.uv, 4u);
+    }
+    if (f32(pi) >= douts[o + 25u] || k >= 6u) { return hidden(); }
+    let pb = (dels[eb + E_PART_BASE] + pi) * PART_WORDS;
+    let p0 = vec3<f32>(parts[pb], parts[pb + 1u], parts[pb + 2u]);
+    let dir = vec3<f32>(parts[pb + 3u], parts[pb + 4u], parts[pb + 5u]);
+    let vel = vec3<f32>(parts[pb + 6u], parts[pb + 7u], parts[pb + 8u]);
+    let t = douts[o + 26u];
+    let tt = 0.5 * t * t;
+    let g = vec3<f32>(douts[o + 28u], douts[o + 29u], douts[o + 30u]);
+    let pp = p0 + vel * t + tt * g + (tt * douts[o + 27u]) * dir;
+    let m1 = mat3x3<f32>(vec3<f32>(douts[o + 32u], douts[o + 33u], douts[o + 34u]), vec3<f32>(douts[o + 36u], douts[o + 37u], douts[o + 38u]), vec3<f32>(douts[o + 40u], douts[o + 41u], douts[o + 42u]));
+    let r = mat3x3<f32>(mv[0].xyz, mv[1].xyz, mv[2].xyz);
+    let vp = r * v.pos + m1 * pp + mv[3].xyz;
+    return vout(e, vp, v.color, v.uv, 4u);
+}
+
+// Lens flare (FUN_1003ddb0): every group's quads in screen space along the line from the light (sx, sy) through the
+// centre to (W - sx, H - sy); file units are W/16 x H/16 pixels; alpha x vis / 256. The group t is in normal.x.
+@vertex
+fn vs_flare(@builtin(vertex_index) k: u32, @builtin(instance_index) inst: u32) -> VOut {
+    let e = inst / PER_ELEM;
+    let o = e * OUT_WORDS;
+    let vis = douts[o + 27u];
+    if (douts[o + 23u] < 0.5 || vis <= 0.0) { return hidden(); }
+    let eb = e * E_WORDS;
+    let fr = sframes[dels[eb + E_SFRAMES]];
+    if (k >= fr.y * 6u) { return hidden(); }
+    let v = svert(fr.x + k);
+    let t = bitcast<f32>(sverts[(fr.x + k) * 9u + 3u]);
+    let w = d.clip.z;
+    let h = d.clip.w;
+    let sx = douts[o + 25u];
+    let sy = douts[o + 26u];
+    let x = v.pos.x * w / 16.0 + (w - 2.0 * sx) * t + sx;
+    let y = v.pos.y * h / 16.0 + (h - 2.0 * sy) * t + sy;
+    var out: VOut;
+    out.clip = vec4<f32>(x / w * 2.0 - 1.0, 1.0 - y / h * 2.0, 0.5, 1.0);
+    let a = f32(min(255u, (u32(round(v.color.a * 255.0)) * u32(vis)) >> 8u)) / 255.0;
+    out.color = vec4<f32>(v.color.rgb, a);
+    out.uv = v.uv;
+    out.tf = vec4<f32>(douts[o + 16u], douts[o + 17u], douts[o + 18u], douts[o + 19u]);
+    out.depth = 0.0;
+    out.mode = vec3<u32>(dels[eb + E_FLAGS], dels[eb + E_BLEND], 5u);
+    return out;
+}
+
+// The screen glare of a flare (FUN_10053920 step 7 -> FUN_100125c0): g = max(0, 1 - r 2/3) from the screen
+// centre, f = g x 0.5 x (vis >> 3) / 128, the op 0x4b colour x f added to the whole view.
+@vertex
+fn vs_glare(@builtin(vertex_index) k: u32, @builtin(instance_index) inst: u32) -> VOut {
+    let e = inst / PER_ELEM;
+    let o = e * OUT_WORDS;
+    let vis = douts[o + 27u];
+    if (douts[o + 23u] < 0.5 || vis <= 0.0) { return hidden(); }
+    let hw = floor(d.clip.z / 2.0);
+    let hh = floor(d.clip.w / 2.0);
+    let nx = (hw - douts[o + 25u]) / hw;
+    let ny = (hh - douts[o + 26u]) / hh;
+    let g = max(0.0, 1.0 - sqrt(nx * nx + ny * ny) * (2.0 / 3.0));
+    let f = g * 0.5 * floor(vis / 8.0) / 128.0;
+    var c = dels[e * E_WORDS + E_GLARE];
+    if (c == 0u) { c = 0x80808080u; }
+    let rgb = vec3<f32>(floor(f32((c >> 16u) & 0xffu) * f), floor(f32((c >> 8u) & 0xffu) * f), floor(f32(c & 0xffu) * f)) / 255.0;
+    let p = array<vec2<f32>, 3>(vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
+    var out: VOut;
+    out.clip = vec4<f32>(p[min(k, 2u)], 0.5, 1.0);
+    out.color = vec4<f32>(rgb, 1.0);
+    out.uv = vec2<f32>(0.0);
+    out.tf = vec4<f32>(1.0);
+    out.depth = 0.0;
+    out.mode = vec3<u32>(0x2000000u, 0x48u, 6u);
+    return out;
+}
+
+// CMoDist's cross point i ((0,0,0), (-1,0,0), (0,-1,0), (1,0,0), (0,1,0)) on the screen as FUN_100426f0 projects it
+// (FUN_1006e7d0: through +0xa0 and the plain projection, |w| with 0 -> 1): X = (x / w + 1) W / 2, Y = (1 - y / w) H / 2.
+fn dist_screen(o: u32, i: u32) -> vec2<f32> {
+    let cross = array<vec3<f32>, 5>(vec3<f32>(0.0), vec3<f32>(-1.0, 0.0, 0.0), vec3<f32>(0.0, -1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0));
+    let c = d.proj * (out_mat(o) * vec4<f32>(cross[i], 1.0));
+    var w = abs(c.w);
+    if (w == 0.0) { w = 1.0; }
+    return vec2<f32>((c.x / w + 1.0) * 0.5 * d.clip.z, (1.0 - c.y / w) * 0.5 * d.clip.w);
+}
+
+// FUN_100426f0's box over the five points: (min X, min Y, kx, ky), k = 255 / extent when the extent is 256 or more,
+// else 1. Point i lands in the 256x256 copy at (P - min) k.
+fn dist_box(o: u32) -> vec4<f32> {
+    var lo = dist_screen(o, 0u);
+    var hi = lo;
+    for (var i = 1u; i < 5u; i = i + 1u) {
+        let q = dist_screen(o, i);
+        lo = min(lo, q);
+        hi = max(hi, q);
+    }
+    let ext = hi - lo;
+    let k = select(vec2<f32>(1.0), vec2<f32>(255.0) / ext, ext >= vec2<f32>(256.0));
+    return vec4<f32>(lo, k);
+}
+
+// FUN_100426f0's copy pass: the four tips (strip 1, 2, 4, 3) as XYZRHW vertices at (P - min) k in the 256x256 target,
+// each with uv P / (W, H) into the scene (linear, MIRROR). Ours rasterises a pixel at its centre (+0.5) where D3D8
+// uses the corner, and our scene holds a point half a pixel left of and above D3D8's, hence the two half-pixel terms.
+@vertex
+fn vs_dist_copy(@builtin(vertex_index) k: u32, @builtin(instance_index) inst: u32) -> VOut {
+    let e = inst / PER_ELEM;
+    let o = e * OUT_WORDS;
+    if (douts[o + 23u] < 0.5 || k >= 6u) { return hidden(); }
+    let strip = array<u32, 4>(1u, 2u, 4u, 3u);
+    let tri = array<u32, 6>(0u, 1u, 2u, 1u, 2u, 3u);
+    let p = dist_screen(o, strip[tri[k]]);
+    let b = dist_box(o);
+    let t = (p - b.xy) * b.zw + 0.5;
+    var out = hidden();
+    out.clip = vec4<f32>(t.x / 128.0 - 1.0, 1.0 - t.y / 128.0, 0.5, 1.0);
+    out.uv = (p - 0.5) / d.clip.zw;
+    return out;
+}
+
+// TSS 0x10353028: colour the scene texel, alpha TFACTOR 0x80; no fog (RS 0x103530d0).
+@fragment
+fn fs_dist_copy(i: VOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(textureSampleLevel(tex, samp, i.uv, 0.0).rgb, 128.0 / 255.0);
+}
+
+// CMoDist (FUN_100426f0, pass 2): a fan of the cross through +0xa0 with its view translation shifted by (off, off),
+// sampling the 256x256 copy at (P - min) k / 255 of the unshifted points (MIRROR, linear; 256 / 255 of the copy's
+// scale, so the lookup drifts up to a pixel across the box); the centre has the element colour (alpha x fade),
+// the tips 0x00808080. Variant 9.
+@vertex
+fn vs_dist(@builtin(vertex_index) k: u32, @builtin(instance_index) inst: u32) -> VOut {
+    let e = inst / PER_ELEM;
+    let o = e * OUT_WORDS;
+    if (douts[o + 23u] < 0.5 || k >= 12u) { return hidden(); }
+    let cross = array<vec3<f32>, 5>(vec3<f32>(0.0), vec3<f32>(-1.0, 0.0, 0.0), vec3<f32>(0.0, -1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0));
+    let tri = k / 3u;
+    let c = k % 3u;
+    var pi = 0u;
+    if (c == 1u) { pi = tri + 1u; } else if (c == 2u) { pi = (tri + 1u) % 4u + 1u; }
+    let mv = out_mat(o);
+    let vp = (mv * vec4<f32>(cross[pi], 1.0)).xyz;
+    let off = bitcast<f32>(dels[e * E_WORDS + E_DIST_OFF]);
+    var out = vout(e, vp + vec3<f32>(off, off, 0.0), vec4<f32>(0.0), vec2<f32>(0.0), 9u);
+    let b = dist_box(o);
+    out.uv = (dist_screen(o, pi) - b.xy) * b.zw / 255.0;
+    if (pi == 0u) { out.color = out.tf; } else { out.color = vec4<f32>(vec3<f32>(128.0 / 255.0), 0.0); }
+    return out;
+}
+
+// The scene copy's lookup at a view point (FUN_10042d00 / FUN_1006eb70: through the projection with |w|, the copy
+// flipped back; top-left origin).
+fn screen_uv(vp: vec3<f32>) -> vec2<f32> {
+    let c = d.proj * vec4<f32>(vp, 1.0);
+    var w = abs(c.w);
+    if (w == 0.0) { w = 1.0; }
+    return vec2<f32>(0.5 + 0.5 * c.x / w, 0.5 - 0.5 * c.y / w);
+}
+
+// D3m + 0x200000 (FUN_10040e70 / FUN_10054d70): the mesh with its local matrix only (no translation), scaled 0.25,
+// seen from 2 above looking down (LookAtRH, up (0, 0, -1)) through the scene's projection, into a 256x256 image.
+@vertex
+fn vs_mesh_rt(v: VIn, @builtin(instance_index) inst: u32) -> VOut {
+    let e = inst / PER_ELEM;
+    let o = e * OUT_WORDS;
+    if (douts[o + 23u] < 0.5) { return hidden(); }
+    let l3 = mat3x3<f32>(vec3<f32>(douts[o + 32u], douts[o + 33u], douts[o + 34u]), vec3<f32>(douts[o + 35u], douts[o + 36u], douts[o + 37u]), vec3<f32>(douts[o + 38u], douts[o + 39u], douts[o + 40u]));
+    let q = 0.25 * (l3 * v.pos);
+    let vp = vec3<f32>(-q.x, -q.z, -2.0 - q.y);
+    var out = vout(e, vp, v.color, v.uv, inst % PER_ELEM);
+    out.clip = d.proj * vec4<f32>(vp, 1.0);
+    return out;
+}
+
+// FUN_10182700: the collision faces around the element, diffuse 0xff808080, UV = (world xz - c xz) x 0.1 + 0.5 over the
+// image (CLAMP), the blend of op 0x43 (+0x198) and the TFACTOR of the image's draw ('D' rule of +0x16c). Variant 13.
+struct DIn {
+    @location(0) pos: vec3<f32>,
+};
+
+@vertex
+fn vs_decal(v: DIn, @builtin(instance_index) inst: u32) -> VOut {
+    let e = inst / PER_ELEM;
+    let o = e * OUT_WORDS;
+    if (douts[o + 23u] < 0.5) { return hidden(); }
+    let c = vec3<f32>(douts[o + 25u], douts[o + 26u], douts[o + 27u]);
+    let vp = (d.view * vec4<f32>(v.pos, 1.0)).xyz;
+    var out = vout(e, vp, vec4<f32>(128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0, 1.0), vec2<f32>(0.0), 13u);
+    out.uv = (v.pos.xz - c.xz) * 0.1 + 0.5;
+    let eb = e * E_WORDS;
+    if ((dels[eb + E_BLEND] & 0xffu) == 0x44u && out.tf.a > 126.0 / 255.0) { out.tf.a = 1.0; }
+    out.mode.y = dels[eb + E_GP_BLEND];
+    return out;
+}
+
+// CMoD3mSpecularElem (FUN_100412b0): the specular stage reads the camera-space normal (NORMALIZENORMALS, the
+// inverse transpose of the element's model-view) through its texture matrix (COUNT3, no scale or bias).
+@vertex
+fn vs_mesh_spec(v: VIn, @builtin(instance_index) inst: u32) -> VOut {
+    let e = inst / PER_ELEM;
+    let o = e * OUT_WORDS;
+    if (douts[o + 23u] < 0.5) { return hidden(); }
+    let mv = out_mat(o);
+    var out = vout(e, (mv * vec4<f32>(v.pos, 1.0)).xyz, v.color, v.uv, inst % PER_ELEM);
+    let m = mat3x3<f32>(mv[0].xyz, mv[1].xyz, mv[2].xyz);
+    let cof = mat3x3<f32>(cross(m[1], m[2]), cross(m[2], m[0]), cross(m[0], m[1]));
+    let n = cof * v.normal * sign(dot(m[0], cof[0]));
+    let nc = select(vec3<f32>(0.0), normalize(n), dot(n, n) > 0.0);
+    let ms = mat3x3<f32>(vec3<f32>(douts[o + 32u], douts[o + 33u], douts[o + 34u]), vec3<f32>(douts[o + 35u], douts[o + 36u], douts[o + 37u]), vec3<f32>(douts[o + 38u], douts[o + 39u], douts[o + 40u]));
+    out.sd = ms * nc;
+    let cube = (dels[e * E_WORDS + E_SPEC_BITS] & 16u) != 0u;
+    out.sk = vec4<f32>(douts[o + 41u], douts[o + 42u], douts[o + 43u], select(0.0, 1.0, cube));
+    return out;
+}
+
+// TSS 0x103529c8 (groups, variant 10): base 2 x T0 x D, then x TFACTOR x 2 (alpha x 4, or a0 alone for mode 0x64 /
+// flag 0x10000000), plus a1 x the specular texel; 0x103528f0 (no groups, 11): 2 x D x TF, alpha 4 x D a x TF a, plus
+// a0 x specular; 0x10352c78 (the untextured tail, 12): no specular. No mode-0x44 alpha rule, no fog.
+@fragment
+fn fs_spec(i: VOut) -> @location(0) vec4<f32> {
+    let flags = i.mode.x;
+    let variant = i.mode.z;
+    let dd = i.color;
+    let f = i.tf;
+    let t0 = textureSample(tex, samp, i.uv);
+    let s2 = textureSample(spec2d, spec_samp, i.sd.xy);
+    let sc = textureSample(speccube, spec_samp, i.sd);
+    let sp = sat3(select(s2.rgb, sc.rgb, i.sk.w > 0.5) * i.sk.rgb);
+    var rgb: vec3<f32>;
+    var a: f32;
+    if (variant == 10u) {
+        let c0 = sat3(2.0 * dd.rgb * t0.rgb);
+        let a0 = sat(dd.a * t0.a);
+        var a1 = sat(4.0 * a0 * f.a);
+        if ((i.mode.y & 0xffu) == 0x64u || (flags & 0x10000000u) != 0u) { a1 = a0; }
+        rgb = sat3(sat3(2.0 * c0 * f.rgb) + a1 * sp);
+        a = a1;
+    } else if (variant == 11u) {
+        let a0 = sat(4.0 * dd.a * f.a);
+        rgb = sat3(sat3(2.0 * dd.rgb * f.rgb) + a0 * sp);
+        a = a0;
+    } else {
+        rgb = sat3(2.0 * dd.rgb * f.rgb);
+        a = sat(4.0 * dd.a * f.a);
+    }
+    if (d.fog.z > 0.5) { rgb = pow(rgb, vec3<f32>(2.2)); }
+    return vec4<f32>(rgb, a);
+}
+
+// CMoDistModelElem (FUN_10043320): the mesh drawn unshifted; each vertex samples the 256x256 copy (flipped,
+// FUN_10042d00) at the screen point of pos + (off, off, 0) in model space through the element matrix; the UV scroll
+// slides the lookup. Variant 11.
+@vertex
+fn vs_distmodel(v: VIn, @builtin(instance_index) inst: u32) -> VOut {
+    let e = inst / PER_ELEM;
+    let o = e * OUT_WORDS;
+    if (douts[o + 23u] < 0.5) { return hidden(); }
+    let mv = out_mat(o);
+    let off = bitcast<f32>(dels[e * E_WORDS + E_DIST_OFF]);
+    let vp = (mv * vec4<f32>(v.pos, 1.0)).xyz;
+    let su = (mv * vec4<f32>(v.pos + vec3<f32>(off, off, 0.0), 1.0)).xyz;
+    var out = vout(e, vp, v.color, vec2<f32>(0.0), 11u);
+    let s = screen_uv(su);
+    out.uv = vec2<f32>(s.x, 1.0 - s.y) + vec2<f32>(douts[o + 20u], douts[o + 21u]);
+    return out;
+}
+
+// CMoDistRingElem (FUN_10043720): a closed S-gon per ring pair (angle (q mod S) 2 pi / S), each vertex sampling the
+// scene copy at its screen point (no offset, no scroll); the ring colour per byte x the faded element colour >> 7,
+// wrapping. Variant 12 (TSS 0x10353378, MIRROR).
+@vertex
+fn vs_distring(@builtin(vertex_index) k: u32, @builtin(instance_index) inst: u32) -> VOut {
+    let e = inst / PER_ELEM;
+    let o = e * OUT_WORDS;
+    if (douts[o + 23u] < 0.5) { return hidden(); }
+    let eb = e * E_WORDS;
+    let sr = dels[eb + E_RING_SR];
+    let segs = sr & 0xffu;
+    let rings = (sr >> 8u) & 0xffu;
+    if (segs == 0u || rings < 2u) { return hidden(); }
+    let per = 6u * segs;
+    let p = k / per;
+    if (p + 1u >= rings) { return hidden(); }
+    let j = (k % per) / 3u + k % 3u;
+    let ang = f32((j / 2u) % segs) * 6.2831853 / f32(segs);
+    let ring = p + j % 2u;
+    let r = bitcast<f32>(dels[eb + E_RING_R + ring]);
+    let vp = (out_mat(o) * vec4<f32>(sin(ang) * r, cos(ang) * r, 0.0, 1.0)).xyz;
+    let c = dels[eb + E_RING_C + ring];
+    let tf = vec4<u32>(round(vec4<f32>(douts[o + 16u], douts[o + 17u], douts[o + 18u], douts[o + 19u]) * 255.0));
+    let cb = vec4<u32>((c >> 16u) & 0xffu, (c >> 8u) & 0xffu, c & 0xffu, c >> 24u);
+    let dc = vec4<f32>(((cb * tf) >> vec4<u32>(7u)) & vec4<u32>(0xffu)) / 255.0;
+    var out = vout(e, vp, dc, vec2<f32>(0.0), 12u);
+    // The 256x256 copy is flipped: v = (H - 0.5 - sy) / H at the vertex's screen point (FUN_10042d00).
+    let s = screen_uv(vp);
+    out.uv = vec2<f32>(s.x, 1.0 - s.y);
+    return out;
+}
+
+// RingProg (FUN_100555f0): per ring pair p a triangle strip of 2S + 2 vertices, as triangles (strip index t + c);
+// strip pair q at angle 0 for q 0 and S, else (q - 1) 2 pi / S (the literal degenerate first pair); even strip
+// vertices on ring p, odd on ring p + 1, at (sin a r, cos a r, 0) with that ring's colour. Colour diffuse x TFACTOR
+// x 2, alpha x 4 (TSS 0x10348678, variant 3), TFACTOR the raw element colour (+0xf8, no fade). Untextured.
+@vertex
+fn vs_ring(@builtin(vertex_index) k: u32, @builtin(instance_index) inst: u32) -> VOut {
+    let e = inst / PER_ELEM;
+    let o = e * OUT_WORDS;
+    if (douts[o + 23u] < 0.5) { return hidden(); }
+    let eb = e * E_WORDS;
+    let sr = dels[eb + E_RING_SR];
+    let segs = sr & 0xffu;
+    let rings = (sr >> 8u) & 0xffu;
+    if (segs == 0u || rings < 2u) { return hidden(); }
+    let per = 6u * segs;
+    let p = k / per;
+    if (p + 1u >= rings) { return hidden(); }
+    let j = (k % per) / 3u + k % 3u;
+    let q = j / 2u;
+    var ang = 0.0;
+    if (q != 0u && q != segs) { ang = f32(q - 1u) * 6.2831853 / f32(segs); }
+    let ring = p + j % 2u;
+    let r = bitcast<f32>(dels[eb + E_RING_R + ring]);
+    let mv = out_mat(o);
+    let vp = (mv * vec4<f32>(sin(ang) * r, cos(ang) * r, 0.0, 1.0)).xyz;
+    let c = dels[eb + E_RING_C + ring];
+    let dc = vec4<f32>(f32((c >> 16u) & 0xffu), f32((c >> 8u) & 0xffu), f32(c & 0xffu), f32(c >> 24u)) / 255.0;
+    var out = vout(e, vp, dc, vec2<f32>(0.0), 3u);
+    let t = dels[eb + E_COLOR];
+    out.tf = vec4<f32>(f32((t >> 16u) & 0xffu), f32((t >> 8u) & 0xffu), f32(t & 0xffu), f32(t >> 24u)) / 255.0;
+    return out;
+}
+
+// DamValueProg (FUN_10041af0 / FUN_10041c20): glyph k / 6 of the number as a screen quad. The element's view origin
+// passes the name-plate test and scale (FUN_100830c0), is pulled 1 unit toward the camera and projected; glyphs
+// are centred on it, each [x, x + w] x [-(h / 2), h / 2] units of (W, H) x scale x 0.00234375 px. Diffuse = the
+// element colour, the message colour where that is grey 0x808080. Variant 10.
+@vertex
+fn vs_damv(@builtin(vertex_index) k: u32, @builtin(instance_index) inst: u32) -> VOut {
+    let e = inst / PER_ELEM;
+    let o = e * OUT_WORDS;
+    if (douts[o + 23u] < 0.5) { return hidden(); }
+    let eb = e * E_WORDS;
+    let info = dels[eb + E_GLARE];
+    let n = min(info >> 24u, 16u);
+    let g = k / 6u;
+    if (g >= n) { return hidden(); }
+    let vo = out_mat(o)[3].xyz;
+    let dist = -vo.z;
+    if (dist < 1.0) { return hidden(); }
+    let zi = i32(4096.0 * 65535.0 / (65535.0 - 0.1) * (1.0 - 0.1 / dist));
+    if (zi > 4100) { return hidden(); }
+    var scale = 1.0;
+    if (zi >= 4020) { scale = f32(4100 - zi) / 80.0; }
+    let hw = floor(d.clip.z / 2.0);
+    let hh = floor(d.clip.w / 2.0);
+    let s = vec2<f32>(d.clip.z, d.clip.w) * scale * 0.00234375;
+    let c = to_clip(vo + vec3<f32>(0.0, 0.0, 1.0), douts[o + 24u]);
+    let zn = c.z / c.w;
+    if (zn < 0.0 || zn >= 1.0) { return hidden(); }
+    let px = (c.x / c.w + 1.0) * hw - 0.5;
+    let py = (1.0 - c.y / c.w) * hh - 0.5;
+    var total = 0;
+    var x0 = 0;
+    var id = 0u;
+    for (var q = 0u; q < n; q = q + 1u) {
+        let gq = (dels[eb + E_MORPH_W + q / 8u] >> (4u * (q % 8u))) & 0xfu;
+        let wq = i32(d.glyphs[2u * min(gq, 10u) + 1u].x);
+        if (q < g) { x0 = x0 + wq; }
+        if (q == g) { id = min(gq, 10u); }
+        total = total + wq;
+    }
+    let gw = i32(d.glyphs[2u * id + 1u].x);
+    let gh = i32(d.glyphs[2u * id + 1u].y);
+    let x = -(total / 2) + x0;
+    let corner = array<u32, 6>(0u, 1u, 2u, 2u, 1u, 3u)[k % 6u];
+    let right = (corner & 1u) != 0u;
+    let bottom = corner >= 2u;
+    let ux = f32(select(x, x + gw, right));
+    let uy = f32(select(-(gh / 2), gh / 2, bottom));
+    let sp = vec2<f32>(px, py) + vec2<f32>(ux, uy) * s;
+    let r = d.glyphs[2u * id];
+    var out = vout(e, vo, vec4<f32>(0.0), vec2<f32>(0.0), 10u);
+    out.clip = vec4<f32>((sp.x + 0.5) / hw - 1.0, 1.0 - (sp.y + 0.5) / hh, zn, 1.0);
+    out.uv = vec2<f32>(select(r.x, r.z, right), select(r.y, r.w, bottom));
+    let tf = out.tf;
+    var rgb = tf.rgb;
+    if (all(round(tf.rgb * 255.0) == vec3<f32>(128.0))) {
+        rgb = vec3<f32>(f32((info >> 16u) & 0xffu), f32((info >> 8u) & 0xffu), f32(info & 0xffu)) / 255.0;
+    }
+    out.color = vec4<f32>(rgb, tf.a);
+    return out;
+}
+
+// D3b morph (FUN_1003e600): corner k of the element's mesh, its position blended from the key meshes by the
+// normalised weights; colours come doubled from the loader. Variant 7 (8 with the alpha test).
+// A D3b corner k: the blended position (weights douts 32..36), the raw corner colour, its UV.
+struct MorphV {
+    ok: bool,
+    pos: vec3<f32>,
+    color: vec4<f32>,
+    uv: vec2<f32>,
+    normal: vec3<f32>,
+};
+
+fn morph_vertex(e: u32, o: u32, k: u32) -> MorphV {
+    var m: MorphV;
+    let base = dels[e * E_WORDS + E_SFRAMES];
+    let kk = mdata[base];
+    let nv = mdata[base + 1u];
+    let nt = mdata[base + 3u];
+    m.ok = k < nt * 3u;
+    if (!m.ok) { return m; }
+    let c = base + 4u + k * 5u;
+    let pi = mdata[c];
+    let keys = base + 4u + nt * 15u;
+    m.pos = vec3<f32>(0.0);
+    for (var q = 0u; q < min(kk, 5u); q = q + 1u) {
+        let a = keys + (q * nv + pi) * 3u;
+        m.pos = m.pos + douts[o + 32u + q] * vec3<f32>(bitcast<f32>(mdata[a]), bitcast<f32>(mdata[a + 1u]), bitcast<f32>(mdata[a + 2u]));
+    }
+    // FUN_1003f8a0: the normal blended the same way from the packed key normals (10 bits each / 512), not renormalised.
+    let nn = mdata[base + 2u];
+    let ni = mdata[c + 1u];
+    let norms = keys + kk * nv * 3u;
+    m.normal = vec3<f32>(0.0);
+    if (ni < nn) {
+        for (var q = 0u; q < min(kk, 5u); q = q + 1u) {
+            let w = mdata[norms + q * nn + ni];
+            let v = vec3<f32>(f32(i32(w << 22u) >> 22u), f32(i32(w << 12u) >> 22u), f32(i32(w << 2u) >> 22u)) / 512.0;
+            m.normal = m.normal + douts[o + 32u + q] * v;
+        }
+    }
+    let col = mdata[c + 2u];
+    m.color = vec4<f32>(f32(col & 0xffu), f32((col >> 8u) & 0xffu), f32((col >> 16u) & 0xffu), f32(col >> 24u)) / 255.0;
+    m.uv = vec2<f32>(bitcast<f32>(mdata[c + 3u]), bitcast<f32>(mdata[c + 4u]));
+    return m;
+}
+
+@vertex
+fn vs_morph(@builtin(vertex_index) k: u32, @builtin(instance_index) inst: u32) -> VOut {
+    let e = inst / PER_ELEM;
+    let o = e * OUT_WORDS;
+    if (douts[o + 23u] < 0.5) { return hidden(); }
+    let m = morph_vertex(e, o, k);
+    if (!m.ok) { return hidden(); }
+    let atest = select(7u, 8u, (dels[e * E_WORDS + E_GLARE] & 1u) != 0u);
+    let mv = out_mat(o);
+    let vp = (mv * vec4<f32>(m.pos, 1.0)).xyz;
+    // The D3b draw doubles the corner colour (clamped), then lights it.
+    return vout(e, vp, fx_lit(e, mv, m.normal, min(2.0 * m.color, vec4<f32>(1.0))), m.uv, atest);
+}
+
+// CMoDistMorphElem (FUN_10043590): the morph drawn shifted by (off, off, 0) in model space, each vertex sampling the
+// 256x256 copy (flipped, FUN_10042d00; WRAP) at the screen point of its unshifted position, the UV scroll sliding the
+// lookup; the raw corner colour. Variants 14 / 15 (alpha test).
+@vertex
+fn vs_distmorph(@builtin(vertex_index) k: u32, @builtin(instance_index) inst: u32) -> VOut {
+    let e = inst / PER_ELEM;
+    let o = e * OUT_WORDS;
+    if (douts[o + 23u] < 0.5) { return hidden(); }
+    let m = morph_vertex(e, o, k);
+    if (!m.ok) { return hidden(); }
+    let eb = e * E_WORDS;
+    let mv = out_mat(o);
+    let off = bitcast<f32>(dels[eb + E_DIST_OFF]);
+    let vp = (mv * vec4<f32>(m.pos + vec3<f32>(off, off, 0.0), 1.0)).xyz;
+    var out = vout(e, vp, m.color, vec2<f32>(0.0), select(14u, 15u, (dels[eb + E_GLARE] & 1u) != 0u));
+    let s = screen_uv((mv * vec4<f32>(m.pos, 1.0)).xyz);
+    out.uv = vec2<f32>(s.x, 1.0 - s.y) + vec2<f32>(douts[o + 20u], douts[o + 21u]);
+    return out;
+}
+
+// The weapon after-image (op 0x2c, CYyAfterImage; fx/trail.rs). One sample after (aged - birth) agings of
+// FUN_1001c260 in closed form: the rails close along their line (A by p, B by q, swapping once they cross), alpha
+// down per aging, RGB down per aging after the delay; colours as the bytes retail draws (floored).
+const TRAIL_WORDS: u32 = 672u;
+struct TrailRails {
+    a: vec3<f32>,
+    b: vec3<f32>,
+    col_a: vec4<f32>,
+    col_b: vec4<f32>,
+    void_a: bool,
+    void_b: bool,
+};
+
+fn trail_f(o: u32) -> f32 { return bitcast<f32>(trails[o]); }
+fn trail_v4(o: u32) -> vec4<f32> { return vec4<f32>(trail_f(o), trail_f(o + 1u), trail_f(o + 2u), trail_f(o + 3u)); }
+
+fn trail_rails(slot: u32, k: u32) -> TrailRails {
+    let h = slot * TRAIL_WORDS;
+    let aged = trails[h + 2u];
+    let fade_from = trails[h + 3u];
+    let si = h + 32u + ((trails[h + 1u] + 79u - k) % 80u) * 8u;
+    let a0 = vec3<f32>(trail_f(si), trail_f(si + 1u), trail_f(si + 2u));
+    let birth = trails[si + 3u];
+    let b0 = vec3<f32>(trail_f(si + 4u), trail_f(si + 5u), trail_f(si + 6u));
+    let p = trail_f(h + 20u);
+    let q = trail_f(h + 21u);
+    let n = f32(aged - min(birth, aged));
+    let d = a0 - b0;
+    let l0 = length(d);
+    var sa = l0;
+    var sb = 0.0;
+    if (p + q > 0.0 && l0 > 0.0) {
+        let n1 = floor(l0 / (p + q));
+        if (n <= n1) {
+            sa = l0 - n * p;
+            sb = n * q;
+        } else {
+            let sa1 = l0 - n1 * p;
+            let sb1 = n1 * q;
+            let l1 = sa1 - sb1;
+            let x = sa1 - min(p, l1);
+            let y = sb1 + min(q, l1);
+            if ((u32(n - n1 - 1.0) & 1u) == 0u) { sa = x; sb = y; } else { sa = y; sb = x; }
+        }
+    }
+    var u0 = vec3<f32>(0.0);
+    if (l0 > 0.0) { u0 = d / l0; }
+    var m = 0.0;
+    if (fade_from != 0xffffffffu && aged >= fade_from) { m = f32(aged - max(birth, fade_from - 1u)); }
+    let ca = trail_v4(h + 8u);
+    let cb = trail_v4(h + 12u);
+    let dec = trail_v4(h + 16u);
+    var r: TrailRails;
+    r.a = b0 + u0 * sa;
+    r.b = b0 + u0 * sb;
+    r.col_a = floor(clamp(vec4<f32>(ca.xyz - m * dec.xyz, ca.w - n * dec.w), vec4<f32>(0.0), vec4<f32>(255.0))) / 255.0;
+    r.col_b = floor(clamp(vec4<f32>(cb.xyz - m * dec.xyz, cb.w - n * trail_f(h + 22u)), vec4<f32>(0.0), vec4<f32>(255.0))) / 255.0;
+    r.void_a = birth < trails[h + 5u];
+    r.void_b = birth < trails[h + 6u];
+    return r;
+}
+
+struct TrailOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) col: vec4<f32>,
+};
+
+// The draw callback 0x1001c930: newest first, one strip (A_k, B_k) in colours A / B, or with the split flag two
+// strips (mid_k, A_k) all in colour A and (mid_k in colour A, B_k in colour B); D3D strip order, a triangle with a
+// NaN corner (retail's void rails) not drawn. World space, additive, no texture, no fog.
+@vertex
+fn vs_trail(@builtin(vertex_index) v: u32, @builtin(instance_index) slot: u32) -> TrailOut {
+    let split = trails[slot * TRAIL_WORDS + 4u];
+    let per = 6u * (1u + split);
+    let seg = v / per;
+    let half = (v % per) / 6u;
+    let corner = array<u32, 6>(0u, 1u, 2u, 1u, 2u, 3u)[v % 6u];
+    let r0 = trail_rails(slot, seg);
+    let r1 = trail_rails(slot, seg + 1u);
+    // X / Y void per sample: split 0 X = A, Y = B; split 1 X = mid, Y = A (half 0) or B (half 1).
+    let xv0 = select(r0.void_a, r0.void_a || r0.void_b, split == 1u);
+    let xv1 = select(r1.void_a, r1.void_a || r1.void_b, split == 1u);
+    let yv0 = select(r0.void_b, select(r0.void_a, r0.void_b, half == 1u), split == 1u);
+    let yv1 = select(r1.void_b, select(r1.void_a, r1.void_b, half == 1u), split == 1u);
+    let tri0 = (v % 6u) < 3u;
+    if ((tri0 && (xv0 || yv0 || xv1)) || (!tri0 && (yv0 || xv1 || yv1))) {
+        var off: TrailOut;
+        off.clip = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+        return off;
+    }
+    var r = r0;
+    if ((corner >> 1u) == 1u) { r = r1; }
+    var pos = r.a;
+    var col = r.col_a;
+    let is_y = (corner & 1u) == 1u;
+    if (split == 0u) {
+        if (is_y) { pos = r.b; col = r.col_b; }
+    } else if (!is_y) {
+        pos = 0.5 * (r.a + r.b);
+    } else if (half == 1u) {
+        pos = r.b;
+        col = r.col_b;
+    }
+    var out: TrailOut;
+    out.clip = d.proj * d.view * vec4<f32>(pos, 1.0);
+    out.col = col;
+    return out;
+}
+
+@fragment
+fn fs_trail(i: TrailOut) -> @location(0) vec4<f32> {
+    var rgb = i.col.rgb;
+    if (d.fog.z > 0.5) { rgb = pow(rgb, vec3<f32>(2.2)); }
+    return vec4<f32>(rgb, i.col.a);
+}
+
+fn sat(x: f32) -> f32 { return clamp(x, 0.0, 1.0); }
+fn sat3(x: vec3<f32>) -> vec3<f32> { return clamp(x, vec3<f32>(0.0), vec3<f32>(1.0)); }
+
+// FUN_10042d00's copy pass leaves FOGENABLE as the element's draw state set it (FUN_100467e0: on unless flag 25), so
+// with table fog its pre-transformed quad (rhw 1, W fog: depth 1) takes the fog factor (end - 1) / (end - start);
+// mode 0x48's fog colour is black (FUN_10045950). Fogging a texel before the bilinear lookup equals fogging after.
+fn copy_fog(t: vec3<f32>, flags: u32, mode: u32) -> vec3<f32> {
+    if ((flags & 0x2000000u) != 0u) { return t; }
+    let ff = sat((d.fog.y - 1.0) / (d.fog.y - d.fog.x));
+    return mix(select(d.fog_color.rgb, vec3<f32>(0.0), mode == 0x48u), t, ff);
+}
+
+// The texture stages of each path (MODLOG "Effect generators"). Texture alpha comes
+// doubled from the upload (0x80 = 1.0), so retail's 2 x Ta is `t.a` here.
+@fragment
+fn fs(i: VOut) -> @location(0) vec4<f32> {
+    let flags = i.mode.x;
+    let mode = i.mode.y & 0xffu;
+    let variant = i.mode.z;
+    let dd = i.color;
+    var f = i.tf;
+    var rgb: vec3<f32>;
+    var a: f32;
+    let vonly = (flags & 0x10000000u) != 0u;
+    if ((variant <= 1u || variant == 11u) && mode == 0x44u && f.a > 126.0 / 255.0) { f.a = 1.0; }
+    if (variant == 0u) {
+        let t = textureSample(tex, samp, i.uv);
+        rgb = sat3(sat3(2.0 * dd.rgb * t.rgb) * 2.0 * f.rgb);
+        a = sat(sat(dd.a * t.a) * 4.0 * f.a);
+        if (vonly) { a = sat(dd.a * 4.0 * f.a); }
+        if (mode == 0x49u) { rgb = vec3<f32>(1.0); }
+    } else if (variant == 1u) {
+        rgb = sat3(2.0 * dd.rgb * f.rgb);
+        a = sat(select(4.0, 2.0, mode == 0x44u) * dd.a * f.a);
+    } else if (variant == 2u) {
+        let t = textureSample(tex, samp, i.uv);
+        if (mode == 0x64u || vonly) {
+            rgb = sat3(sat3(t.rgb * dd.rgb) * f.rgb * 4.0);
+            a = sat(4.0 * dd.a * f.a);
+        } else {
+            rgb = sat3(sat3(t.rgb * f.rgb) * dd.rgb * 4.0);
+            a = sat(sat(t.a * f.a) * dd.a * 4.0);
+        }
+    } else if (variant == 3u) {
+        rgb = sat3(2.0 * dd.rgb * f.rgb);
+        a = sat(4.0 * dd.a * f.a);
+    } else if (variant == 5u) {
+        // Flare stages: colour diffuse x texture x 2 (TFACTOR rgb not applied), alpha x TFACTOR x 2.
+        let t = textureSample(tex, samp, i.uv);
+        rgb = sat3(2.0 * dd.rgb * t.rgb);
+        a = sat(sat(dd.a * t.a) * f.a * 2.0);
+    } else if (variant == 6u) {
+        rgb = dd.rgb;
+        a = 1.0;
+    } else if (variant == 9u) {
+        // TSS 0x10347f68: colour = texture x diffuse x 2, alpha = diffuse x TFACTOR (0x80, left by pass 1) x 4.
+        var t = textureSample(tex, samp, i.uv).rgb;
+        if (d.fog.z > 0.5) { t = pow(t, vec3<f32>(1.0 / 2.2)); }
+        rgb = sat3(2.0 * dd.rgb * t);
+        a = sat(dd.a * (128.0 / 255.0) * 4.0);
+    } else if (variant == 11u) {
+        // DistModel (TSS 0x10352740, 0x10352848 for 0x44): the copy's colour; alpha k x copy alpha (0x80) x stage 0's
+        // 2 x diffuse x TFACTOR, k 2 for 0x44 else 4. The mesh texture is never bound.
+        var t = textureSample(tex, samp, i.uv).rgb;
+        if (d.fog.z > 0.5) { t = pow(t, vec3<f32>(1.0 / 2.2)); }
+        t = copy_fog(t, flags, mode);
+        rgb = t;
+        a = sat(select(4.0, 2.0, mode == 0x44u) * (128.0 / 255.0) * sat(2.0 * dd.a * f.a));
+    } else if (variant == 14u || variant == 15u) {
+        // DistMorph (TSS 0x10352258): copy x raw diffuse x 2, then x TFACTOR x 2; alpha the copy's 0x80 x diffuse x 2,
+        // then x TFACTOR x 4; alpha test GREATER 0x60 with res byte 2 bit 7.
+        var t = textureSample(tex, samp, i.uv).rgb;
+        if (d.fog.z > 0.5) { t = pow(t, vec3<f32>(1.0 / 2.2)); }
+        t = copy_fog(t, flags, mode);
+        let s0 = sat3(2.0 * t * dd.rgb);
+        let s0a = sat(2.0 * (128.0 / 255.0) * dd.a);
+        rgb = sat3(2.0 * s0 * f.rgb);
+        a = sat(4.0 * s0a * f.a);
+        if (variant == 15u && a <= 96.0 / 255.0) { discard; }
+    } else if (variant == 13u) {
+        // The ground decal: the image draw's stages (0x103524a8) over the image, which is not alpha-doubled.
+        let t = textureSample(tex, samp, i.uv);
+        rgb = sat3(2.0 * sat3(2.0 * dd.rgb * t.rgb) * f.rgb);
+        a = sat(4.0 * sat(2.0 * dd.a * t.a) * f.a);
+    } else if (variant == 12u) {
+        // DistRing: colour 2 x diffuse x copy, alpha 4 x diffuse a x copy alpha (0x80).
+        var t = textureSample(tex, samp, i.uv).rgb;
+        if (d.fog.z > 0.5) { t = pow(t, vec3<f32>(1.0 / 2.2)); }
+        t = copy_fog(t, flags, mode);
+        rgb = sat3(2.0 * dd.rgb * t);
+        a = sat(4.0 * dd.a * (128.0 / 255.0));
+    } else if (variant == 7u || variant == 8u) {
+        // D3b stages (TSS 0x103470b8): texture x diffuse x 2, then x TFACTOR x 2 (alpha x 4).
+        let t = textureSample(tex, samp, i.uv);
+        let s0 = sat3(2.0 * dd.rgb * t.rgb);
+        rgb = sat3(2.0 * s0 * f.rgb);
+        a = sat(4.0 * sat(dd.a * t.a) * f.a);
+        if (variant == 8u && a <= 96.0 / 255.0) { discard; }
+    } else {
+        let t = textureSample(tex, samp, i.uv);
+        let s0 = sat3(2.0 * dd.rgb * t.rgb);
+        var s0a = sat(dd.a * t.a);
+        if (vonly) { s0a = dd.a; }
+        rgb = sat3(2.0 * s0 * f.rgb);
+        a = sat(4.0 * s0a * f.a);
+        if (mode == 0x40u) { a = f.a; }
+    }
+    // Scenery fog on view depth unless flag 25; black in mode 0x48 (FUN_10045950). D3a turns fog off.
+    if ((variant < 4u || variant == 7u || variant == 8u || variant >= 11u) && (flags & 0x2000000u) == 0u) {
+        let ff = sat((d.fog.y - i.depth) / (d.fog.y - d.fog.x));
+        var fc = d.fog_color.rgb;
+        if (mode == 0x48u) { fc = vec3<f32>(0.0); }
+        rgb = mix(fc, rgb, ff);
+    }
+    if (d.fog.z > 0.5) { rgb = pow(rgb, vec3<f32>(2.2)); }
+    // Ours: a glow or light volume (flag 27) fades out within a yalm of the scenery behind it, so it no longer cuts
+    // straight into walls and pillars. The scene depth is NDC z of the plain projection (near d.clip.x, far d.clip.y).
+    if (d.fog.w > 0.5 && (flags & 0x8000000u) != 0u) {
+        let z = textureLoad(scene_depth, vec2<i32>(i.clip.xy), 0);
+        let k = d.clip.y / (d.clip.x - d.clip.y);
+        let scene = d.clip.x * k / (z + k);
+        a = a * sat(scene - i.depth);
+    }
+    return vec4<f32>(rgb, a);
+}

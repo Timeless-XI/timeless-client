@@ -1,0 +1,2010 @@
+{
+"format": "timeless-pewter-v1",
+"note": "Timeless View, Pewter Hairline: menu / misc icons and controls (tools/timeless/pewter). rect = x, y, w, h in the atlas; size = logical px.",
+"items": {
+"controls/arrow_down": {
+"rect": [
+1,
+1363,
+40,
+40
+],
+"size": [
+20,
+20
+]
+},
+"controls/arrow_left": {
+"rect": [
+43,
+1363,
+40,
+40
+],
+"size": [
+20,
+20
+]
+},
+"controls/arrow_right": {
+"rect": [
+85,
+1363,
+40,
+40
+],
+"size": [
+20,
+20
+]
+},
+"controls/arrow_up": {
+"rect": [
+945,
+1297,
+40,
+40
+],
+"size": [
+20,
+20
+]
+},
+"controls/button_confirm": {
+"rect": [
+323,
+391,
+320,
+80
+],
+"size": [
+160,
+40
+]
+},
+"controls/button_danger": {
+"rect": [
+1,
+391,
+320,
+80
+],
+"size": [
+160,
+40
+]
+},
+"controls/button_disabled": {
+"rect": [
+323,
+309,
+320,
+80
+],
+"size": [
+160,
+40
+]
+},
+"controls/button_hover": {
+"rect": [
+461,
+171,
+320,
+80
+],
+"size": [
+160,
+40
+]
+},
+"controls/button_normal": {
+"rect": [
+139,
+171,
+320,
+80
+],
+"size": [
+160,
+40
+]
+},
+"controls/button_pressed": {
+"rect": [
+1,
+309,
+320,
+80
+],
+"size": [
+160,
+40
+]
+},
+"controls/button_selected": {
+"rect": [
+645,
+309,
+320,
+80
+],
+"size": [
+160,
+40
+]
+},
+"controls/checkbox_off": {
+"rect": [
+595,
+1297,
+48,
+48
+],
+"size": [
+24,
+24
+]
+},
+"controls/checkbox_on": {
+"rect": [
+645,
+1297,
+48,
+48
+],
+"size": [
+24,
+24
+]
+},
+"controls/close": {
+"rect": [
+695,
+1297,
+48,
+48
+],
+"size": [
+24,
+24
+]
+},
+"controls/drag": {
+"rect": [
+795,
+1297,
+48,
+48
+],
+"size": [
+24,
+24
+]
+},
+"controls/input_focused": {
+"rect": [
+1,
+547,
+512,
+72
+],
+"size": [
+256,
+36
+]
+},
+"controls/input_invalid": {
+"rect": [
+1,
+621,
+512,
+72
+],
+"size": [
+256,
+36
+]
+},
+"controls/input_normal": {
+"rect": [
+1,
+473,
+512,
+72
+],
+"size": [
+256,
+36
+]
+},
+"controls/item_slot_drop_invalid": {
+"rect": [
+817,
+1,
+136,
+136
+],
+"size": [
+68,
+68
+]
+},
+"controls/item_slot_drop_valid": {
+"rect": [
+679,
+1,
+136,
+136
+],
+"size": [
+68,
+68
+]
+},
+"controls/item_slot_hover": {
+"rect": [
+265,
+1,
+136,
+136
+],
+"size": [
+68,
+68
+]
+},
+"controls/item_slot_invalid": {
+"rect": [
+541,
+1,
+136,
+136
+],
+"size": [
+68,
+68
+]
+},
+"controls/item_slot_locked": {
+"rect": [
+1,
+171,
+136,
+136
+],
+"size": [
+24,
+24
+]
+},
+"controls/item_slot_normal": {
+"rect": [
+127,
+1,
+136,
+136
+],
+"size": [
+68,
+68
+]
+},
+"controls/item_slot_selected": {
+"rect": [
+403,
+1,
+136,
+136
+],
+"size": [
+68,
+68
+]
+},
+"controls/move": {
+"rect": [
+895,
+1297,
+48,
+48
+],
+"size": [
+24,
+24
+]
+},
+"controls/resize": {
+"rect": [
+745,
+1297,
+48,
+48
+],
+"size": [
+24,
+24
+]
+},
+"controls/scroll_thumb_empty": {
+"rect": [
+1,
+1,
+40,
+168
+],
+"size": [
+20,
+84
+]
+},
+"controls/scroll_thumb_full": {
+"rect": [
+85,
+1,
+40,
+168
+],
+"size": [
+20,
+84
+]
+},
+"controls/scroll_thumb_half": {
+"rect": [
+43,
+1,
+40,
+168
+],
+"size": [
+20,
+84
+]
+},
+"controls/search": {
+"rect": [
+845,
+1297,
+48,
+48
+],
+"size": [
+24,
+24
+]
+},
+"controls/tab_active": {
+"rect": [
+259,
+695,
+256,
+72
+],
+"size": [
+128,
+36
+]
+},
+"controls/tab_disabled": {
+"rect": [
+517,
+695,
+256,
+72
+],
+"size": [
+128,
+36
+]
+},
+"controls/tab_hover": {
+"rect": [
+1,
+695,
+256,
+72
+],
+"size": [
+128,
+36
+]
+},
+"controls/tab_normal": {
+"rect": [
+515,
+621,
+256,
+72
+],
+"size": [
+128,
+36
+]
+},
+"icons/abilities": {
+"rect": [
+907,
+695,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/aggro": {
+"rect": [
+661,
+1099,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/ammo": {
+"rect": [
+925,
+901,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/assist": {
+"rect": [
+793,
+1099,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/attack": {
+"rect": [
+1,
+967,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/auction": {
+"rect": [
+331,
+1165,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/back": {
+"rect": [
+793,
+901,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/body": {
+"rect": [
+265,
+901,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/bow": {
+"rect": [
+859,
+901,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/cancel": {
+"rect": [
+595,
+1231,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/cast_interrupt": {
+"rect": [
+67,
+1297,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/chat": {
+"rect": [
+859,
+1033,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/check": {
+"rect": [
+397,
+1297,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/claim": {
+"rect": [
+595,
+1099,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/claimed": {
+"rect": [
+595,
+967,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/companion": {
+"rect": [
+529,
+1297,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/config": {
+"rect": [
+529,
+769,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/confirm": {
+"rect": [
+661,
+1231,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/cooldown": {
+"rect": [
+331,
+1099,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/craft": {
+"rect": [
+265,
+1165,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/cure": {
+"rect": [
+463,
+967,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/currency": {
+"rect": [
+133,
+901,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/cursor": {
+"rect": [
+793,
+1231,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/dark": {
+"rect": [
+199,
+835,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/delivery": {
+"rect": [
+397,
+1165,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/deposit": {
+"rect": [
+925,
+967,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/disengage": {
+"rect": [
+463,
+1297,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/distance": {
+"rect": [
+331,
+1297,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/drag_drop": {
+"rect": [
+925,
+1231,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/ear": {
+"rect": [
+595,
+901,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/earth": {
+"rect": [
+925,
+769,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/elemental": {
+"rect": [
+463,
+835,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/emote": {
+"rect": [
+67,
+1099,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/enfeebling": {
+"rect": [
+397,
+835,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/enhancing": {
+"rect": [
+331,
+835,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/enmity": {
+"rect": [
+265,
+1297,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/equip_set": {
+"rect": [
+529,
+1033,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/equipment": {
+"rect": [
+67,
+769,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/failure": {
+"rect": [
+727,
+1165,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/favorites": {
+"rect": [
+925,
+1165,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/feet": {
+"rect": [
+463,
+901,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/filter": {
+"rect": [
+859,
+1165,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/find": {
+"rect": [
+463,
+769,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/fire": {
+"rect": [
+727,
+769,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/follow": {
+"rect": [
+859,
+1099,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/food": {
+"rect": [
+793,
+835,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/gear_swap": {
+"rect": [
+1,
+1297,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/geomancy": {
+"rect": [
+595,
+835,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/hands": {
+"rect": [
+331,
+901,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/haste": {
+"rect": [
+133,
+967,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/head": {
+"rect": [
+199,
+901,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/healing": {
+"rect": [
+265,
+835,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/help": {
+"rect": [
+793,
+1165,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/ice": {
+"rect": [
+793,
+769,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/inspect": {
+"rect": [
+331,
+1231,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/invisible": {
+"rect": [
+67,
+1165,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/items": {
+"rect": [
+775,
+695,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/job": {
+"rect": [
+1,
+769,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/key": {
+"rect": [
+1,
+901,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/keybind": {
+"rect": [
+199,
+1099,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/legs": {
+"rect": [
+397,
+901,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/light": {
+"rect": [
+133,
+835,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/lightning": {
+"rect": [
+1,
+835,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/line_of_sight": {
+"rect": [
+529,
+1099,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/linkshell": {
+"rect": [
+265,
+769,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/linkshell_chat": {
+"rect": [
+1,
+1099,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/lock": {
+"rect": [
+595,
+1033,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/macro": {
+"rect": [
+67,
+1231,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/magic": {
+"rect": [
+841,
+695,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/magic_burst": {
+"rect": [
+133,
+1297,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/map": {
+"rect": [
+397,
+769,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/materials": {
+"rect": [
+925,
+835,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/medicine": {
+"rect": [
+859,
+835,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/mog_case": {
+"rect": [
+397,
+1033,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/mog_house": {
+"rect": [
+67,
+1033,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/mog_locker": {
+"rect": [
+199,
+1033,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/mog_sack": {
+"rect": [
+331,
+1033,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/mog_safe": {
+"rect": [
+133,
+1033,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/mog_satchel": {
+"rect": [
+265,
+1033,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/mount": {
+"rect": [
+925,
+1099,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/neck": {
+"rect": [
+661,
+901,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/ninjutsu": {
+"rect": [
+661,
+835,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/notification": {
+"rect": [
+529,
+1165,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/party": {
+"rect": [
+199,
+769,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/party_invite": {
+"rect": [
+199,
+1231,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/party_target": {
+"rect": [
+727,
+1099,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/pin": {
+"rect": [
+727,
+1033,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/poison": {
+"rect": [
+67,
+967,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/protect": {
+"rect": [
+199,
+967,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/quest": {
+"rect": [
+67,
+901,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/quest_log": {
+"rect": [
+133,
+1099,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/raise": {
+"rect": [
+133,
+1165,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/range": {
+"rect": [
+463,
+1099,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/recast": {
+"rect": [
+397,
+1099,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/recent": {
+"rect": [
+1,
+1231,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/refresh": {
+"rect": [
+397,
+967,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/rest": {
+"rect": [
+199,
+1165,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/ring": {
+"rect": [
+529,
+901,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/scroll": {
+"rect": [
+859,
+1231,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/settings": {
+"rect": [
+463,
+1165,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/shield": {
+"rect": [
+661,
+769,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/silence": {
+"rect": [
+331,
+967,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/skillchain": {
+"rect": [
+199,
+1297,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/sleep": {
+"rect": [
+265,
+967,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/sneak": {
+"rect": [
+1,
+1165,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/songs": {
+"rect": [
+727,
+835,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/sort": {
+"rect": [
+727,
+967,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/split": {
+"rect": [
+859,
+967,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/stack": {
+"rect": [
+793,
+967,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/status": {
+"rect": [
+133,
+769,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/subjob": {
+"rect": [
+133,
+1231,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/success": {
+"rect": [
+661,
+1165,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/summoning": {
+"rect": [
+529,
+835,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/sword": {
+"rect": [
+595,
+769,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/system": {
+"rect": [
+331,
+769,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/target_nearest": {
+"rect": [
+397,
+1231,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/target_next": {
+"rect": [
+463,
+1231,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/target_previous": {
+"rect": [
+529,
+1231,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/tell": {
+"rect": [
+925,
+1033,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/timer": {
+"rect": [
+265,
+1099,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/trade": {
+"rect": [
+661,
+967,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/trade_request": {
+"rect": [
+265,
+1231,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/transfer": {
+"rect": [
+727,
+1231,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/unlock": {
+"rect": [
+661,
+1033,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/unpin": {
+"rect": [
+793,
+1033,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/waist": {
+"rect": [
+727,
+901,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/wardrobe": {
+"rect": [
+463,
+1033,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/warning": {
+"rect": [
+595,
+1165,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/water": {
+"rect": [
+67,
+835,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/weaponskill": {
+"rect": [
+529,
+967,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/wind": {
+"rect": [
+859,
+769,
+64,
+64
+],
+"size": [
+64,
+64
+]
+},
+"icons/withdraw": {
+"rect": [
+1,
+1033,
+64,
+64
+],
+"size": [
+64,
+64
+]
+}
+}
+}

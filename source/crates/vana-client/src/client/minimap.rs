@@ -1,0 +1,143 @@
+//! The minimap's view (not retail; the Windower / Ashita minimap add-ons): the Minimap mod's window (panel "minimap")
+//! with its `map` element: the zone map in a frame in a corner, north up and centred on us, our marker, and the mod's
+//! dots. The wheel over it goes to the mod (`wheel`), which sets the zoom (the client option minimap_span). Nothing
+//! without the map's key item, as the map window.
+
+use super::game_ui::GameUi;
+use super::map::{Overlay, Region};
+use super::{World, event};
+
+/// The sides of Small / Medium / Large (layout pixels; user, 2026-10-25: 20 % over the first 128 / 176 / 224).
+pub const SIZES: [f32; 3] = [154.0, 211.0, 269.0];
+/// Map pixels across: the wheel's range (the whole map is 512).
+pub const SPAN: (f32, f32) = (48.0, 512.0);
+
+/// Where it goes (layout pixels): 0 top right, at the screen's edge, or left of `column` (the left edge of the windows
+/// at the right edge: the main menu, the Config list, sub-menus) while one is open; 1 top left, under the cast bar and
+/// past the status icons when they reach over (as the Timers' left dock).
+pub fn place(dock: u32, size: u32, sw: f32, icons: usize, column: Option<f32>) -> [f32; 4] {
+    let side = SIZES[size.min(2) as usize];
+    match dock {
+        1 => {
+            let icons_foot = if icons == 0 { 0.0 } else { 48.0 + 2.0 + 26.0 * icons.div_ceil(9) as f32 + 4.0 };
+            let top = 122f32.max(if 16.0 + side > 142.0 { icons_foot } else { 0.0 });
+            [16.0, top, side, side]
+        }
+        _ => [column.map_or(sw, |x| x - 4.0).min(sw).max(side) - side, 50.0, side, side],
+    }
+}
+
+/// What one frame draws: the rect, where we stand and face, the map pixels across, and the dots (world x, z, colour,
+/// the target).
+pub struct Frame {
+    pub rect: [f32; 4],
+    pub pos: (f32, f32),
+    pub facing: f32,
+    pub span: f32,
+    pub dots: Vec<(f32, f32, u32, bool)>,
+    /// Each dot's tooltip (the modern minimap's names the one hovered).
+    pub tips: Vec<String>,
+    /// The map overlay's opacity: the marker is coloured as the overlay's.
+    mix: f32,
+}
+
+/// Each frame before the Timers: the map for where we stand (another zone opens it again, another page follows), and
+/// the rect it takes when it draws (hidden in events, under the map window, without a map).
+pub fn prepare(gu: &GameUi, w: &mut World, sw: f32) {
+    w.minimap_rect = None;
+    w.minimap_frame = None;
+    // The bundled Minimap mod's window (panel minimap) asks for it.
+    if !w.lua.has_edge_panel("minimap") {
+        w.minimap = None;
+        return;
+    }
+    let regions = gu.map_regions();
+    match w.minimap.take() {
+        Some(mut m) if m.zone == w.pos_zone => {
+            m.follow(w, regions);
+            w.minimap = Some(m);
+        }
+        _ => w.minimap = Some(Overlay::open(w, regions)),
+    }
+    if event::active(w) || w.map.is_some() || w.cnq.is_some() || !w.minimap.as_ref().is_some_and(Overlay::has_map) {
+        return;
+    }
+    let icons = w.buffs.iter().filter(|&&b| b != 0xffff && b != 0).count();
+    // The main menu column is at W - 128; other windows at the edge as last drawn.
+    let side = SIZES[w.minimap_size.min(2) as usize];
+    let menu = w.menu.map(|_| sw - 128.0);
+    let column = [menu, gu.edge_column(sw, 50.0, 50.0 + side)].into_iter().flatten().reduce(f32::min);
+    let rect = place(w.minimap_dock, w.minimap_size, sw, icons, column);
+    let facing = w.net.me.lock().map_or(0.0, |m| event::rad_of(m.dir));
+    let (dots, tips) = w
+        .lua
+        .edge_panel("minimap")
+        .and_then(|win| {
+            win.elems.into_iter().find_map(|e| match e {
+                super::lua::window::Elem::Map { dots, .. } => Some(dots),
+                _ => None,
+            })
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .map(|d| {
+            let [r, g, b] = d.colour;
+            ((d.x, d.z, 0x8000_0000 | (r as u32) << 16 | (g as u32) << 8 | b as u32, d.target), d.tip)
+        })
+        .unzip();
+    w.minimap_rect = Some(rect);
+    w.minimap_frame = Some(Frame {
+        rect,
+        pos: (w.pos.x, w.pos.z),
+        facing,
+        span: w.minimap_span.clamp(SPAN.0, SPAN.1),
+        dots,
+        tips,
+        mix: w.map_opacity,
+    });
+}
+
+/// Draws what `prepare` set up (after the HUD's clear, under the party / target windows and the menus).
+pub fn draw(gu: &mut GameUi, map: &mut Option<Overlay>, f: Option<Frame>) {
+    if let (Some(m), Some(f)) = (map.as_mut(), f) {
+        m.draw_mini(gu, f.rect, f.pos, f.facing, f.span, &f.dots, f.mix);
+    }
+}
+
+/// The wheel over it: to the mod's map element (`wheel`, notches up positive); true when it took the wheel.
+pub fn wheel(w: &mut World, p: (f32, f32), notches: f32) -> bool {
+    let Some([x, y, sw, sh]) = w.minimap_rect else { return false };
+    if p.0 < x || p.0 >= x + sw || p.1 < y || p.1 >= y + sh {
+        return false;
+    }
+    w.lua.map_wheel("minimap", notches);
+    true
+}
+
+/// A map record's world-to-map scale: map pixels per world unit (Region::px without the rounding).
+pub fn px_per_unit(r: &Region) -> f32 {
+    r.scale.unsigned_abs() as f32 / 5.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn places() {
+        // Top right: at the edge, left of the main menu column while the menu is open.
+        assert_eq!(place(0, 1, 1280.0, 0, None), [1280.0 - 211.0, 50.0, 211.0, 211.0]);
+        assert_eq!(place(0, 1, 1280.0, 0, Some(1280.0 - 128.0)), [1280.0 - 132.0 - 211.0, 50.0, 211.0, 211.0]);
+        assert_eq!(place(1, 0, 1280.0, 3, None), [16.0, 122.0, 154.0, 154.0]);
+        // The status icons reach past the cast bar when a large map stands under them.
+        assert_eq!(place(1, 2, 1280.0, 20, None), [16.0, 48.0 + 2.0 + 78.0 + 4.0, 269.0, 269.0]);
+    }
+
+    /// px_per_unit matches Region::px (Jugner: scale 1, x / 5).
+    #[test]
+    fn scale() {
+        let r = Region { zone: 104, key: 0, num: 0, flags: 0, scale: 1, ki: 1, file: 5, ox: -264, oy: -256 };
+        let ((x, y), s) = (r.px(-200.0, -1050.0), px_per_unit(&r));
+        assert!((x as f32 + 200.0 * s).abs() <= 1.0 && (y as f32 - 1050.0 * s).abs() <= 1.0, "{x} {y}");
+    }
+}

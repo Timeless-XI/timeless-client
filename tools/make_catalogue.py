@@ -13,8 +13,8 @@ It holds:
 Run it after changing anything in mods/ (raise the mod's version in its mod.toml, so clients see the update), or
 after building the client from a newer upstream, then commit mods/, standard/ and catalogue/ together and push:
 
-    py -3 tools/make_catalogue.py ..\\src        (Windows; the client source build-timeless.bat checked out)
-    python3 tools/make_catalogue.py ../src      (Linux / Git Bash)
+    py -3 tools/make_catalogue.py source        (Windows; the client source in this repository)
+    python3 tools/make_catalogue.py source      (Linux / Git Bash)
 
 Files are hashed exactly as they are on disk; .gitattributes keeps git from changing line endings, so GitHub serves
 the same bytes.
