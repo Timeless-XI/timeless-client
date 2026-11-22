@@ -298,10 +298,13 @@ pub struct Looks {
     pub open: bool,
     /// The face (race, face, texture) and settings the texture on the GPU was made from; a newer one waits for its mips.
     made: Option<(MadeKey, Settings)>,
-    made_at: Option<std::time::Instant>,
     /// The new textures (left, right when one-sided) waiting for their mips.
     pending: Option<(u64, wgpu::BindGroup, Option<wgpu::BindGroup>, (MadeKey, Settings))>,
     current: Option<(wgpu::BindGroup, Option<wgpu::BindGroup>)>,
+    /// A look being made on a worker thread (never on the game's own: the sliders must not stutter the game).
+    job: Option<std::sync::mpsc::Receiver<Made>>,
+    /// The face's Prep (another race's face), kept while the face stays the same.
+    prep: Option<(PrepKey, std::sync::Arc<Prep>)>,
     /// Bumped when `try_on` changes: our look loads again.
     pub try_on_ver: u32,
     pub try_on_seen: u32,
@@ -367,6 +370,18 @@ impl FreeCam {
 }
 
 type MadeKey = (u8, u16, String);
+type PrepKey = (u8, u16, String, u32, u32);
+
+/// A look made on the worker: for these settings, its left (and when one-sided, right) texture, w x h, and the Prep it
+/// used (kept for the next one).
+struct Made {
+    want: (MadeKey, Settings),
+    w: u32,
+    h: u32,
+    left: Vec<u8>,
+    right: Option<Vec<u8>>,
+    prep: Option<(PrepKey, std::sync::Arc<Prep>)>,
+}
 
 struct Layers {
     base: Vec<u8>,
@@ -453,21 +468,144 @@ fn sample(m: &[u8], u: f32, v: f32) -> [f32; 4] {
 
 /// Another race's face texture (RGBA w x h, the model's own) recoloured. A mirrored face: the markings on `side`; one
 /// with sides of its own (`sides`): every marking on its own side(s) in one texture.
-pub fn compose_race(rl: &RaceLayers, f: &RaceFace, tex: &[u8], w: u32, h: u32, s: &Settings, side: u8) -> Vec<u8> {
-    let mut out = tex.to_vec();
-    let k = mask_scale(rl, w);
-    let level = hair_level(rl, tex, w, h, k);
-    let level = &level;
-    let row_bytes = w as usize * 4;
+pub fn compose_race(rl: &'static RaceLayers, f: &'static RaceFace, tex: &[u8], w: u32, h: u32, s: &Settings, side: u8) -> Vec<u8> {
+    compose_prep(&Prep::new(rl, f, tex.to_vec(), w, h), s, side)
+}
+
+/// What a face texture's look needs that doesn't change with the sliders, worked out once per face: the hair / iris /
+/// lips / nose masks at the texture's size and the hair's grey (the strands' shading). Making a look is then a few mixes
+/// a texel (the /look sliders: 2026-11-22, a look took 100+ ms a move and stuttered the game).
+pub struct Prep {
+    rl: &'static RaceLayers,
+    f: &'static RaceFace,
+    w: u32,
+    h: u32,
+    tex: Vec<u8>,
+    /// m1 (hair, tip, iris, lips) and m2 (nose, markings) at each texel.
+    a: Vec<[u8; 4]>,
+    b: Vec<[u8; 4]>,
+    /// The hair's grey at each texel (0..255, middle tone 128).
+    g: Vec<u8>,
+    /// The texels with any marking: index, the nine markings' cover (MARKS order) and the right-side masks' seven.
+    marks: Vec<(u32, [u8; 9], [u8; 7])>,
+}
+
+impl Prep {
+    pub fn new(rl: &'static RaceLayers, f: &'static RaceFace, tex: Vec<u8>, w: u32, h: u32) -> Self {
+        let n = (w * h) as usize;
+        let (mut a, mut b, mut g) = (vec![[0u8; 4]; n], vec![[0u8; 4]; n], vec![0u8; n]);
+        let none = vec![0u8; 0];
+        let (m1, m2) = (rl.m.first().unwrap_or(&none), rl.m.get(1).unwrap_or(&none));
+        if !m1.is_empty() {
+            let ks = mask_scale(rl, w);
+            let level = hair_level(rl, &tex, w, h, ks);
+            let mh = f.med[0].max(20.0) / 255.0;
+            let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 8);
+            let per = (h as usize).div_ceil(threads) * w as usize;
+            let (tex, level) = (&tex, &level);
+            std::thread::scope(|sc| {
+                for (k, ((ca, cb), cg)) in a.chunks_mut(per).zip(b.chunks_mut(per)).zip(g.chunks_mut(per)).enumerate() {
+                    sc.spawn(move || {
+                        for (j, ((pa, pb), pg)) in ca.iter_mut().zip(cb.iter_mut()).zip(cg.iter_mut()).enumerate() {
+                            let i = k * per + j;
+                            let (x, y) = (i % w as usize, i / w as usize);
+                            let (u, v) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+                            let q = |c: [f32; 4]| c.map(|v| (v * 255.0 + 0.5) as u8);
+                            let sa = sample(m1, u * ks, v * ks);
+                            *pa = q(sa);
+                            *pb = q(sample(m2, u * ks, v * ks));
+                            if sa[0] > 0.0 {
+                                let p = &tex[i * 4..i * 4 + 3];
+                                let l = (0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32) / 255.0;
+                                // The HD strands' contrast eased (their dark gaps went black, their highlights white,
+                                // whatever the colour).
+                                let gg = l * 0.5 / hair_med(mh, level_at(level, u, v));
+                                let gg = (0.5 + (gg - 0.5) * if gg > 0.5 { 0.3 } else { 0.55 }).clamp(0.0, 1.0);
+                                *pg = (gg * 255.0 + 0.5) as u8;
+                            }
+                        }
+                    });
+                }
+            });
+        }
+        // Markings: a short list of the texels they touch.
+        let mut marks = Vec::new();
+        let (m3, m4, m5, m6) = (rl.m.get(2), rl.m.get(3), rl.m.get(4), rl.m.get(5));
+        if let (Some(m3), Some(m4)) = (m3, m4) {
+            let ks = mask_scale(rl, w);
+            for i in 0..n {
+                let (x, y) = (i % w as usize, i / w as usize);
+                let (u, v) = (ks * (x as f32 + 0.5) / w as f32, ks * (y as f32 + 0.5) / h as f32);
+                let (c3, d) = (sample(m3, u, v), sample(m4, u, v));
+                let bb = b[i];
+                let q = |v: f32| (v * 255.0 + 0.5) as u8;
+                let left = [bb[1], bb[2], bb[3], q(c3[0]), q(c3[1]), q(c3[2]), q(c3[3]), q(d[0]), q(d[1])];
+                let mut right = [0u8; 7];
+                if let (Some(m5), Some(m6)) = (m5.filter(|m| !m.is_empty()), m6.filter(|m| !m.is_empty())) {
+                    let (e, g6) = (sample(m5, u, v), sample(m6, u, v));
+                    right = [q(e[0]), q(e[1]), q(e[2]), q(e[3]), q(g6[0]), q(g6[1]), q(g6[2])];
+                }
+                if left.iter().chain(&right).any(|v| *v > 0) {
+                    marks.push((i as u32, left, right));
+                }
+            }
+        }
+        Prep { rl, f, w, h, tex, a, b, g, marks }
+    }
+}
+
+/// A look from a face's Prep (see compose_race).
+pub fn compose_prep(p: &Prep, s: &Settings, side: u8) -> Vec<u8> {
+    let mut out = p.tex.clone();
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 8);
-    let per = (h as usize).div_ceil(threads) * row_bytes;
+    let per = (p.h as usize).div_ceil(threads) * p.w as usize * 4;
     std::thread::scope(|sc| {
         for (k, chunk) in out.chunks_mut(per).enumerate() {
-            let y0 = k * per / row_bytes;
-            sc.spawn(move || compose_race_rows(rl, f, chunk, w, h, y0, s, side, level));
+            sc.spawn(move || compose_race_rows(p, chunk, k * per / 4, s, side));
         }
     });
+    marks_pass(p, &mut out, s, side);
     out
+}
+
+/// The markings over a composed look (only the texels they touch).
+fn marks_pass(p: &Prep, out: &mut [u8], s: &Settings, side: u8) {
+    let (rl, f) = (p.rl, p.f);
+    let right = f.sides && rl.m.get(4).is_some_and(|m| !m.is_empty());
+    let left_on: Vec<bool> =
+        (0..MARKS.len()).map(|k| if right { s.mark(k) & LEFT != 0 } else { s.mark(k) & side != 0 }).collect();
+    let right_on: Vec<bool> = (0..MARKS.len()).map(|k| right && SIDED[k] && s.mark(k) & RIGHT != 0).collect();
+    if !(left_on.iter().chain(&right_on).any(|o| *o) && s.mark_strength > 0.0) {
+        return;
+    }
+    let strength = s.mark_strength.clamp(0.0, 1.0);
+    let msk = f.med[4].max(20.0) / 255.0;
+    let mark = unit(s.mark_colour);
+    for (i, left, rt) in &p.marks {
+        let i = *i as usize;
+        let t = &p.tex[i * 4..i * 4 + 3];
+        let l = (0.299 * t[0] as f32 + 0.587 * t[1] as f32 + 0.114 * t[2] as f32) / 255.0;
+        let px = &mut out[i * 4..i * 4 + 3];
+        let mut c = [px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0];
+        let sk = l / msk;
+        let mc = mark.map(|x| (x * sk).min(1.0));
+        for (k, v) in left.iter().enumerate() {
+            if left_on[k] && *v > 0 {
+                c = mix(c, mc, *v as f32 / 255.0 * strength);
+            }
+        }
+        if right {
+            // Right-side masks, MARKS order: cheeks, brow, arc, slash, crescent, chevrons, constellation.
+            for (k, v) in [1usize, 2, 3, 4, 6, 7, 8].iter().zip(rt) {
+                if right_on[*k] && *v > 0 {
+                    c = mix(c, mc, *v as f32 / 255.0 * strength);
+                }
+            }
+        }
+        for k in 0..3 {
+            px[k] = (c[k].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -550,81 +688,88 @@ fn hair_med(mh: f32, local: f32) -> f32 {
     (mh.ln() * 0.3 + local.max(0.012).ln() * 0.7).exp()
 }
 
-#[allow(clippy::too_many_arguments)]
-fn compose_race_rows(rl: &RaceLayers, f: &RaceFace, out: &mut [u8], w: u32, h: u32, y0: usize, s: &Settings, side: u8, level: &[f32]) {
-    let none = vec![0u8; 0];
-    let mk = |k: usize| rl.m.get(k).unwrap_or(&none);
-    let (m1, m2, m3, m4) = (mk(0), mk(1), mk(2), mk(3));
-    if m1.is_empty() {
+fn compose_race_rows(p: &Prep, out: &mut [u8], at: usize, s: &Settings, _side: u8) {
+    let f = p.f;
+    if p.rl.m.first().is_none_or(|m| m.is_empty()) {
         return;
     }
-    let (m5, m6) = (mk(4), mk(5));
-    let right = f.sides && !m5.is_empty();
-    // Which markings show on this texture, from the left masks and (sides of their own) the right masks.
-    let left_on: Vec<bool> =
-        (0..MARKS.len()).map(|k| if right { s.mark(k) & LEFT != 0 } else { s.mark(k) & side != 0 }).collect();
-    let right_on: Vec<bool> = (0..MARKS.len()).map(|k| right && SIDED[k] && s.mark(k) & RIGHT != 0).collect();
-    let (hair, tip, eyes, lips, mark) = (unit(s.hair), unit(s.tip), unit(s.eyes), unit(s.lips), unit(s.mark_colour));
+    let (hair, tip, eyes, lips) = (tame(unit(s.hair)), tame(unit(s.tip)), tame(unit(s.eyes)), tame(unit(s.lips)));
     let nose = [nose_grey(s.nose); 3];
     let (t0, t1) = (s.tip_start - s.tip_blend, s.tip_start + s.tip_blend.max(0.005));
     // Floors (hair and skin 20, iris, lips and nose 40, as the tools' preview): a layer nearly black on the face
     // (Galka lips) would blow every texel of it to white.
     let fl = [20.0, 40.0, 40.0, 40.0, 20.0];
-    let [mh, mi, ml, mn, msk] = std::array::from_fn(|k| f.med[k].max(fl[k]) / 255.0);
-    let strength = s.mark_strength.clamp(0.0, 1.0);
-    let ks = mask_scale(rl, w);
+    let [_, mi, ml, mn, _] = std::array::from_fn(|k| f.med[k].max(fl[k]) / 255.0);
+    let hw = |n: f32| n.clamp(0.0, 1.0);
+    let un = |v: u8| v as f32 / 255.0;
+    // The hair colour at each grey, worked out once (two-tone: per texel, by its tip level).
+    let one: Vec<[f32; 3]> = if s.two_tone { Vec::new() } else { (0..256).map(|g| hair_shade(g as f32 / 255.0, hair)).collect() };
     for (i, px) in out.chunks_exact_mut(4).enumerate() {
-        let (x, y) = (i % w as usize, y0 + i / w as usize);
-        let (u, v) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
-        let (mu, mv) = (u * ks, v * ks);
-        let a = sample(m1, mu, mv);
-        let b = sample(m2, mu, mv);
-        let c3 = sample(m3, mu, mv);
-        let d = sample(m4, mu, mv);
-        let hw = |n: f32| n.clamp(0.0, 1.0);
+        let k = at + i;
+        let a = p.a[k];
+        let n0 = p.b[k][0];
+        if a == [0; 4] && n0 == 0 {
+            continue;
+        }
         let mut c = [px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0];
         let l = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
-        if a[0] > 0.0 {
-            // The HD strands' contrast halved (their dark gaps went black, their highlights white, whatever the
-            // colour), and the highlights a lighter shade of the colour, not white.
-            let g = l * 0.5 / hair_med(mh, level_at(level, u, v));
-            let g = hw(0.5 + (g - 0.5) * if g > 0.5 { 0.3 } else { 0.55 });
-            let col = if s.two_tone { mix(hair, tip, smoothstep(t0, t1, a[1])) } else { hair };
-            let hc = if g <= 0.5 { col.map(|v| v * g * 2.0) } else { col.map(|v| v + (1.0 - v) * (g - 0.5) * 2.0 * 0.35) };
-            c = mix(c, hc, a[0]);
+        if a[0] > 0 {
+            let hc = if s.two_tone {
+                hair_shade(un(p.g[k]), mix(hair, tip, smoothstep(t0, t1, un(a[1]))))
+            } else {
+                one[p.g[k] as usize]
+            };
+            c = mix(c, hc, un(a[0]));
         }
         // Iris, lips, nose: their highlights eased (a dark layer's median would blow them to white).
         let knee = |g: f32| if g > 0.5 { 0.5 + (g - 0.5) * 0.4 } else { g };
-        if a[2] > 0.0 {
-            c = mix(c, shade(hw(knee(l * 0.5 / mi)), eyes), a[2]);
+        if a[2] > 0 {
+            c = mix(c, shade(hw(knee(l * 0.5 / mi)), eyes), un(a[2]));
         }
-        if a[3] > 0.0 {
-            c = mix(c, shade(hw(knee(l * 0.5 / ml)), lips), a[3]);
+        if a[3] > 0 {
+            c = mix(c, shade(hw(knee(l * 0.5 / ml)), lips), un(a[3]));
         }
-        if b[0] > 0.0 {
-            c = mix(c, shade(hw(knee(l * 0.5 / mn)), nose), b[0]);
-        }
-        let cover = [b[1], b[2], b[3], c3[0], c3[1], c3[2], c3[3], d[0], d[1]];
-        let sk = l / msk;
-        let mc = mark.map(|x| (x * sk).min(1.0));
-        for (k, v) in cover.iter().enumerate() {
-            if left_on[k] && *v > 0.0 {
-                c = mix(c, mc, v * strength);
-            }
-        }
-        if right {
-            let (e, g6) = (sample(m5, mu, mv), sample(m6, mu, mv));
-            // Right-side masks, MARKS order: cheeks, brow, arc, slash, crescent, chevrons, constellation.
-            for (k, v) in [(1, e[0]), (2, e[1]), (3, e[2]), (4, e[3]), (6, g6[0]), (7, g6[1]), (8, g6[2])] {
-                if right_on[k] && v > 0.0 && !m6.is_empty() {
-                    c = mix(c, mc, v * strength);
-                }
-            }
+        if n0 > 0 {
+            c = mix(c, shade(hw(knee(l * 0.5 / mn)), nose), un(n0));
         }
         for k in 0..3 {
             px[k] = (c[k].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
         }
     }
+}
+
+/// The hair's colour at a strand grey g (0..1, middle tone 0.5). 2026-11-22 (owner: colours "super washed out ...
+/// after about 80-100"): the strands' shading is a multiple of the colour (darker strands stay darker however bright
+/// the colour), highlights a lighter shade with a little white (more for dark colours, so black hair keeps its shine).
+fn hair_shade(g: f32, col: [f32; 3]) -> [f32; 3] {
+    let t = (g - 0.5) * 2.0;
+    let dark = (t.min(0.0) * 1.25).exp();
+    let lite = t.max(0.0);
+    let wl = 0.22 + 0.2 * (1.0 - luma(col));
+    std::array::from_fn(|k| col[k] * dark * (1.0 + lite * 0.45) + (1.0 - col[k]) * lite * wl)
+}
+
+fn luma(c: [f32; 3]) -> f32 {
+    0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
+}
+
+/// A picked colour kept in a range that still shades: the most saturated picks eased a little (pure primaries read as
+/// plastic), and the brightest channel soft-capped at 0.8 so strands and highlights still have room above it.
+fn tame(c: [f32; 3]) -> [f32; 3] {
+    let lum = luma(c);
+    let (mx, mn) = (c[0].max(c[1]).max(c[2]), c[0].min(c[1]).min(c[2]));
+    let sat = if mx > 0.0 { (mx - mn) / mx } else { 0.0 };
+    let mut c = c;
+    if sat > 0.7 {
+        let k = (0.7 + (sat - 0.7) * 0.5) / sat;
+        c = c.map(|v| lum + (v - lum) * k);
+    }
+    let mx = c[0].max(c[1]).max(c[2]);
+    if mx > 0.6 {
+        let to = 0.6 + 0.2 * ((mx - 0.6) / 0.2).tanh();
+        c = c.map(|v| v * to / mx);
+    }
+    c
 }
 
 macro_rules! style_layers {
@@ -703,7 +848,8 @@ pub fn compose(style: u8, s: &Settings, side: u8) -> Vec<u8> {
 
 fn compose_into(l: &Layers, s: &Settings, side: u8, skin_mid: f32, at: usize, out: &mut [u8]) {
     let on: Vec<bool> = (0..MARKS.len()).map(|k| s.mark(k) & side != 0).collect();
-    let (hair, tip, eyes, lips, mark) = (unit(s.hair), unit(s.tip), unit(s.eyes), unit(s.lips), unit(s.mark_colour));
+    let (hair, tip, eyes, lips, mark) =
+        (tame(unit(s.hair)), tame(unit(s.tip)), tame(unit(s.eyes)), tame(unit(s.lips)), unit(s.mark_colour));
     let ng = nose_grey(s.nose);
     let nose = [ng; 3];
     let (t0, t1) = (s.tip_start - s.tip_blend, s.tip_start + s.tip_blend.max(0.005));
@@ -716,7 +862,7 @@ fn compose_into(l: &Layers, s: &Settings, side: u8, skin_mid: f32, at: usize, ou
         let g = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
         if m1[0] > 0 {
             let col = if s.two_tone { mix(hair, tip, smoothstep(t0, t1, w(m1[1]))) } else { hair };
-            c = mix(c, shade(g, col), w(m1[0]));
+            c = mix(c, hair_shade(g, col), w(m1[0]));
         }
         if m1[2] > 0 {
             c = mix(c, shade(g, eyes), w(m1[2]));
@@ -889,7 +1035,7 @@ pub fn apply(gpu: &crate::render::Gpu, w: &mut World, r: &crate::render::ZoneRen
             std::fs::read_to_string(path(&w.name)).ok().and_then(|s| serde_json::from_str(&s).ok());
         l.needs_seed = saved.is_none();
         l.settings = saved.unwrap_or_default();
-        (l.made, l.pending, l.current) = (None, None, None);
+        (l.made, l.pending, l.current, l.job) = (None, None, None, None);
         l.try_on_ver = l.try_on_ver.wrapping_add(1);
     }
     if let Some(t) = l.dirty_save
@@ -943,38 +1089,66 @@ pub fn apply(gpu: &crate::render::Gpu, w: &mut World, r: &crate::render::ZoneRen
         }
         l.made = None;
         l.pending = None;
+        l.job = None;
         return;
     }
     let want = ((race, face, tex_name.clone()), l.settings.clone());
-    let busy = l.made_at.is_some_and(|t| t.elapsed().as_secs_f32() < 0.1);
-    if l.made.as_ref() != Some(&want) && !busy && l.pending.as_ref().is_none_or(|p| p.3 != want) {
-        let base = if race == 7 {
-            None
+    // A finished look: up to the GPU (its mips are made there; it shows once they are done).
+    if let Some(rx) = &l.job {
+        match rx.try_recv() {
+            Ok(m) => {
+                l.job = None;
+                if m.prep.is_some() {
+                    l.prep = m.prep;
+                }
+                let up = |rgba: Vec<u8>| {
+                    r.actor_texture(gpu, &crate::dat::zone::Texture::new("timeless look".into(), 0, m.w, m.h, rgba))
+                };
+                let (left, seq) = up(m.left);
+                let right = m.right.map(up);
+                let seq = right.as_ref().map_or(seq, |r| r.1.max(seq));
+                l.pending = Some((seq, left, right.map(|r| r.0), m.want));
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => l.job = None,
+        }
+    }
+    // A new look wanted: one worker at a time, so a fast slider skips straight to its latest value.
+    if l.job.is_none() && l.made.as_ref() != Some(&want) && l.pending.as_ref().is_none_or(|p| p.3 != want) {
+        let one_sided = want.1.one_sided();
+        let (tx, rx) = std::sync::mpsc::channel();
+        if race == 7 {
+            let w2 = want.clone();
+            std::thread::spawn(move || {
+                let left = compose(style, &w2.1, LEFT);
+                let right = one_sided.then(|| compose(style, &w2.1, RIGHT));
+                let _ = tx.send(Made { want: w2, w: SIZE, h: SIZE, left, right, prep: None });
+            });
         } else {
             let Some(ch) = a.character.as_ref() else { return };
             let Some(t) = ch.textures.iter().find(|t| t.name == tex_name) else { return };
             let (Some(f), Some(rl)) = (race_face(race, face), race_layers(race, style)) else { return };
-            Some((t, f, rl))
-        };
-        let up = |side: u8| {
-            let t = match &base {
-                None => {
-                    crate::dat::zone::Texture::new("timeless look".into(), 0, SIZE, SIZE, compose(style, &want.1, side))
-                }
-                Some((t, f, rl)) => {
-                    let rgba = compose_race(rl, f, t.rgba(), t.width, t.height, &want.1, side);
-                    crate::dat::zone::Texture::new("timeless look".into(), 0, t.width, t.height, rgba)
-                }
-            };
-            r.actor_texture(gpu, &t)
-        };
-        let (left, seq) = up(LEFT);
-        // A face with sides of its own carries both sides in one texture.
-        let sided = base.as_ref().is_some_and(|b| b.1.sides);
-        let right = (want.1.one_sided() && !sided).then(|| up(RIGHT));
-        let seq = right.as_ref().map_or(seq, |r| r.1.max(seq));
-        l.pending = Some((seq, left, right.map(|r| r.0), want.clone()));
-        l.made_at = Some(std::time::Instant::now());
+            let (w0, h0) = (t.width, t.height);
+            let key: PrepKey = (race, face, tex_name.clone(), w0, h0);
+            let have = l.prep.as_ref().filter(|p| p.0 == key).map(|p| p.1.clone());
+            // A face with sides of its own carries both sides in one texture.
+            let right_too = one_sided && !f.sides;
+            let tex = if have.is_none() { Some(t.rgba().to_vec()) } else { None };
+            let w2 = want.clone();
+            std::thread::spawn(move || {
+                let (prep, fresh) = match have {
+                    Some(p) => (p, None),
+                    None => {
+                        let p = std::sync::Arc::new(Prep::new(rl, f, tex.unwrap_or_default(), w0, h0));
+                        (p.clone(), Some((key, p)))
+                    }
+                };
+                let left = compose_prep(&prep, &w2.1, LEFT);
+                let right = right_too.then(|| compose_prep(&prep, &w2.1, RIGHT));
+                let _ = tx.send(Made { want: w2, w: w0, h: h0, left, right, prep: fresh });
+            });
+        }
+        l.job = Some(rx);
     }
     if let Some((seq, ..)) = &l.pending
         && gpu.mips_done() >= *seq
@@ -1130,5 +1304,30 @@ mod tests {
         let v = compose(6, &s, LEFT);
         eprintln!("compose {:?}", t.elapsed());
         std::fs::write("/tmp/look_rust.rgba", v).unwrap();
+    }
+
+    /// `cargo test looks_bench -- --ignored --nocapture`: how long one look takes to make (the /look sliders).
+    #[test]
+    #[ignore]
+    fn looks_bench() {
+        let s = Settings { hair: [200, 30, 30], ..Settings::default() };
+        let _ = compose(6, &s, LEFT);
+        let t = std::time::Instant::now();
+        for _ in 0..5 { let _ = compose(6, &s, LEFT); }
+        eprintln!("mithra compose {:?}", t.elapsed() / 5);
+        for (r, face, n) in [(1u8, 0u16, 1024u32), (8, 0, 2048)] {
+            let f = race_face(r, face).unwrap();
+            let rl = race_layers(r, f.style).unwrap();
+            let tex = vec![120u8; (n * n * 4) as usize];
+            let t = std::time::Instant::now();
+            let prep = Prep::new(rl, f, tex.clone(), n, n);
+            eprintln!("race {r} {n} prep {:?}", t.elapsed());
+            let t = std::time::Instant::now();
+            for _ in 0..3 { let _ = compose_prep(&prep, &s, LEFT); }
+            eprintln!("race {r} {n} compose {:?}", t.elapsed() / 3);
+            let t = std::time::Instant::now();
+            let _ = hair_level(rl, &tex, n, n, mask_scale(rl, n));
+            eprintln!("  hair_level {:?}", t.elapsed());
+        }
     }
 }
