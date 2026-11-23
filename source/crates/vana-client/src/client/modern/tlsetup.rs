@@ -556,7 +556,7 @@ impl SetupUi {
             Page::Welcome => 0,
             Page::Choose => 1,
             Page::Working | Page::Failed => 2,
-            Page::Done => 4,
+            Page::Done => 3,
         };
         let names = ["Welcome", "Game files", "Install", "Play"];
         for (i, name) in names.iter().enumerate() {
@@ -650,12 +650,12 @@ impl SetupUi {
     }
 
     fn choose(&mut self, ui: &mut Ui, inner: Rect) -> SetupAction {
-        let mut y = Self::title(ui, inner, "STEP II", "Where should the game files come from?");
+        let mut y = Self::title(ui, inner, "STEP II  ·  GAME FILES", "Where they come from");
         let ctx = ui.ctx().clone();
         let w = inner.width();
         for i in 0..self.sources.len() {
             let s = self.sources[i].clone();
-            let r = Rect::from_min_size(pos2(inner.min.x, y), vec2(w, 58.0));
+            let r = Rect::from_min_size(pos2(inner.min.x, y), vec2(w, 52.0));
             let resp = ui.interact(r, Id::unique(("tl source", i)), Sense::click());
             if resp.hovered() {
                 ctx.set_cursor_icon(CursorIcon::PointingHand);
@@ -692,12 +692,14 @@ impl SetupUi {
                 font(&ctx, strong(16.0)),
                 if on { SILVER } else { TEXT },
             );
-            let detail = p.layout(s.detail(), font(&ctx, body(13.0)), MUTED, w - 44.0);
-            p.galley(pos2(r.min.x + 34.0, r.min.y + 31.0), detail, MUTED);
-            y += 64.0;
+            // One line: a long path is cut at the row's end rather than wrapping out of it.
+            let detail = p.layout_no_wrap(s.detail(), font(&ctx, body(13.0)), MUTED);
+            let clip = Rect::from_min_max(pos2(r.min.x + 34.0, r.min.y), pos2(r.max.x - 6.0, r.max.y));
+            p.with_clip_rect(clip).galley(pos2(r.min.x + 34.0, r.min.y + 29.0), detail, MUTED);
+            y += 56.0;
         }
         // Another folder.
-        let other = Rect::from_min_size(pos2(inner.min.x + 34.0, y + 2.0), vec2(260.0, 20.0));
+        let other = Rect::from_min_size(pos2(inner.min.x + 34.0, y + 4.0), vec2(280.0, 20.0));
         let resp = ui.interact(other, Id::unique("tl other source"), Sense::click());
         if resp.hovered() {
             ctx.set_cursor_icon(CursorIcon::PointingHand);
@@ -712,9 +714,9 @@ impl SetupUi {
         if resp.clicked() && !self.picking {
             self.pick(Pick::Source);
         }
-        y += 40.0;
+        y += 34.0;
         super::borders::fade_rule(ui.painter(), inner.min.x, inner.max.x, y, PEWTER.gamma_multiply(0.5));
-        y += 16.0;
+        y += 14.0;
         // Where the client goes, and the shortcuts.
         let p = ui.painter();
         spaced(p, pos2(inner.min.x, y), "INSTALL TIMELESS XI IN", font(&ctx, body(11.0)), MUTED, 2.0, false);
@@ -724,7 +726,7 @@ impl SetupUi {
         if button(ui, change, "change dir", "Change", Look::Secondary, !self.picking) {
             self.pick(Pick::Dir);
         }
-        y += 56.0;
+        y += 50.0;
         tick(ui, pos2(inner.min.x, y), "desktop", "Desktop shortcut", &mut self.desktop);
         tick(ui, pos2(inner.min.x + 200.0, y), "start", "Start menu shortcut", &mut self.start_menu);
         let plan = self.plan();
@@ -737,14 +739,14 @@ impl SetupUi {
         };
         let short = free.is_some_and(|f| f < need);
         ui.painter().text(
-            pos2(inner.min.x, y + 32.0),
+            pos2(inner.min.x, y + 28.0),
             Align2::LEFT_TOP,
             line,
             font(&ctx, body(13.0)),
             if short { ALERT } else { MUTED },
         );
         if !self.note.is_empty() {
-            para(ui.painter(), pos2(inner.min.x, y + 54.0), &self.note, font(&ctx, body(13.5)), ALERT, w - 380.0);
+            para(ui.painter(), pos2(inner.min.x, y + 48.0), &self.note, font(&ctx, body(13.0)), ALERT, w - 390.0);
         }
         let enter = ctx.input(|i| i.key_pressed(Key::Enter));
         let esc = ctx.input(|i| i.key_pressed(Key::Escape));
@@ -855,8 +857,15 @@ impl SetupUi {
                 ("SERVER", super::super::timeless::manifest::DEFAULT_HOST.to_string()),
             ] {
                 spaced(p, pos2(inner.min.x, y), k, font(&ctx, body(11.0)), MUTED, 2.0, false);
-                p.text(pos2(inner.min.x + 120.0, y - 2.0), Align2::LEFT_TOP, v, font(&ctx, body(14.0)), TEXT);
-                y += 26.0;
+                let h = para(
+                    p,
+                    pos2(inner.min.x + 110.0, y - 2.0),
+                    &v,
+                    font(&ctx, body(13.5)),
+                    TEXT,
+                    inner.width() - 110.0,
+                );
+                y += h.max(18.0) + 9.0;
             }
         }
         y += 12.0;

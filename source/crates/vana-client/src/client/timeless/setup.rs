@@ -92,15 +92,14 @@ impl Source {
     pub fn detail(&self) -> String {
         match self {
             Source::Installed { game_dir, writable: true } => {
-                format!("{}  ·  no download, ready in a moment", game_dir.join("FINAL FANTASY XI").display())
+                format!("No download, ready in a moment  ·  {}", game_dir.join("FINAL FANTASY XI").display())
             }
-            Source::Installed { game_dir, .. } => format!(
-                "{}  ·  no download; a copy for Timeless XI (Windows protects that folder)",
-                game_dir.join("FINAL FANTASY XI").display()
-            ),
-            Source::Installer(p) => format!("{}  ·  no download", p.display()),
+            Source::Installed { game_dir, .. } => {
+                format!("No download, copied for Timeless XI  ·  {}", game_dir.join("FINAL FANTASY XI").display())
+            }
+            Source::Installer(p) => format!("No download  ·  {}", p.display()),
             Source::Download => {
-                "The official free client, about 7.7 GB. Paused downloads pick up where they left off.".into()
+                "The official free client, 7.7 GB  ·  a paused download picks up where it stopped".into()
             }
         }
     }

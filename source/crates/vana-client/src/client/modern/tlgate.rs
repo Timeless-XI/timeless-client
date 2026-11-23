@@ -143,7 +143,7 @@ impl Gate {
             return out;
         };
         let w = (screen.width() * 0.46).clamp(460.0, 620.0);
-        let r = Rect::from_center_size(pos2(screen.center().x, screen.min.y + screen.height() * 0.72), vec2(w, 250.0));
+        let r = Rect::from_center_size(pos2(screen.center().x, screen.min.y + screen.height() * 0.72), vec2(w, 272.0));
         let job = self.job.as_ref().map(|j| match &*j.lock().unwrap() {
             Job::Running(d, t) => Job::Running(*d, *t),
             Job::Done => Job::Done,
@@ -156,15 +156,15 @@ impl Gate {
             let inner = r.shrink2(vec2(34.0, 26.0));
             let target = m.target();
             let p = ui.painter();
-            spaced(p, pos2(inner.center().x, inner.min.y), &format!("TIMELESS XI {}", target.trim_start_matches('v').to_uppercase()), font(ctx, body(11.5)), FOCUS, 3.0, true);
+            spaced(p, pos2(inner.center().x, inner.min.y), &format!("NEW VERSION  ·  {}", target.trim_start_matches('v')), font(ctx, body(11.5)), FOCUS, 3.0, true);
             let title = match &job {
                 Some(Job::Done) => "Updated",
                 Some(Job::Running(..)) => "Updating Timeless XI",
                 _ => "An update is required",
             };
             p.text(pos2(inner.center().x, inner.min.y + 22.0), egui::Align2::CENTER_TOP, title, font(ctx, serif(31.0)), SILVER);
-            super::borders::fade_rule(p, inner.min.x, inner.max.x, inner.min.y + 66.0, super::tlsetup::PEWTER.gamma_multiply(0.7));
-            let body_y = inner.min.y + 80.0;
+            super::borders::fade_rule(p, inner.min.x, inner.max.x, inner.min.y + 72.0, super::tlsetup::PEWTER.gamma_multiply(0.7));
+            let body_y = inner.min.y + 86.0;
             match &job {
                 Some(Job::Running(d, total)) => {
                     let line = if *total > 0 { format!("Downloading  ·  {} of {}", bytes(*d), bytes(*total)) } else { "Downloading…".into() };
