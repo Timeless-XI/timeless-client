@@ -1424,7 +1424,7 @@ impl super::Modern {
             }
             let up = if v.capped { 0.0 } else { angler::skillup_chance(f.lv, v.skill_raw, v.city) };
             ui.label(if up > 0.0 {
-                RichText::new(format!("Skill-up chance {} (a Perfect catch: 75%)", pct(up))).color(K::text())
+                RichText::new(format!("Skill-up chance {} (a Perfect catch: 50%)", pct(up))).color(K::text())
             } else if v.capped {
                 RichText::new("No skill-ups: your skill is at your guild rank's cap.").color(K::muted())
             } else if f.lv <= v.skill_raw {
