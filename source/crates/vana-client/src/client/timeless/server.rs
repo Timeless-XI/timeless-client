@@ -17,7 +17,7 @@
 use super::super::catalogue;
 use crate::config::{Config, ModRef};
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU32;
@@ -68,9 +68,20 @@ struct Feed {
     version: String,
     json: Asset,
     bin: Asset,
+    /// The HD faces pack (too large for the main set): its own manifest and gzipped data, downloaded in the
+    /// background and written in at the next start. Older clients and the launcher ignore it.
+    #[serde(default)]
+    hd: Option<Pack>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize, Clone, PartialEq, Debug)]
+struct Pack {
+    version: String,
+    json: Asset,
+    bin: Asset,
+}
+
+#[derive(Deserialize, Serialize, Clone, PartialEq, Debug)]
 struct Asset {
     url: String,
     sha1: String,
@@ -184,12 +195,14 @@ pub fn latest() -> Result<PatchSet> {
 
 fn fetch() -> Result<PatchSet> {
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    let feed: Feed = serde_json::from_slice(&get(&format!("{PATCH_FEED}?t={stamp}"))?).context("reading latest.json")?;
+    let feed: Feed =
+        serde_json::from_slice(&get(&format!("{PATCH_FEED}?t={stamp}"))?).context("reading latest.json")?;
     if !safe_version(&feed.version) {
         bail!("latest.json names version {:?}", feed.version);
     }
     let d = dir().join(&feed.version);
-    let have = |name: &str, want: &str| std::fs::read(d.join(name)).ok().filter(|b| sha1(b) == want.to_ascii_lowercase());
+    let have =
+        |name: &str, want: &str| std::fs::read(d.join(name)).ok().filter(|b| sha1(b) == want.to_ascii_lowercase());
     let json = match have(MANIFEST, &feed.json.sha1) {
         Some(b) => b,
         None => download(&feed.json, &d.join(MANIFEST))?,
@@ -200,7 +213,126 @@ fn fetch() -> Result<PatchSet> {
     };
     let ps = PatchSet::parse(&json, blob)?;
     let _ = std::fs::write(dir().join("latest.txt"), &feed.version);
+    // The HD pack the feed names now (none: the one installed comes out at this start).
+    let want = hd_dir().join(HD_WANT);
+    match feed.hd.filter(|p| safe_version(&p.version)) {
+        Some(p) => {
+            let _ = std::fs::create_dir_all(hd_dir());
+            let _ = serde_json::to_vec(&p).map(|b| std::fs::write(&want, b));
+        }
+        None => {
+            let _ = std::fs::remove_file(&want);
+        }
+    }
     Ok(ps)
+}
+
+// ---------------------------------------------------------------- the HD faces pack
+
+const HD_WANT: &str = "wanted.json";
+const HD_BLOB: &str = "timeless_hd.bin.gz";
+/// The pack's data, gzipped and unpacked.
+const MAX_HD_FILE: u64 = 192 << 20;
+const MAX_HD_DATA: u64 = 512 << 20;
+
+/// The HD pack's downloads and its own installed state (apart from the main set's).
+fn hd_dir() -> PathBuf {
+    dir().join("hd")
+}
+
+fn hd_wanted() -> Option<Pack> {
+    serde_json::from_slice(&std::fs::read(hd_dir().join(HD_WANT)).ok()?).ok()
+}
+
+/// Pack `p` as downloaded before, unpacked; None when it isn't all there.
+fn hd_cached(p: &Pack) -> Option<Result<PatchSet>> {
+    let d = hd_dir().join(&p.version);
+    let have =
+        |name: &str, want: &str| std::fs::read(d.join(name)).ok().filter(|b| sha1(b) == want.to_ascii_lowercase());
+    let json = have(MANIFEST, &p.json.sha1)?;
+    let gz = have(HD_BLOB, &p.bin.sha1)?;
+    Some((|| {
+        let mut blob = Vec::new();
+        flate2::read::GzDecoder::new(&gz[..])
+            .take(MAX_HD_DATA)
+            .read_to_end(&mut blob)
+            .context("unpacking the HD faces")?;
+        PatchSet::parse(&json, blob)
+    })())
+}
+
+/// Downloads pack `p` (no hurry: a slow line takes its time, and the next start writes it in).
+fn hd_download(p: &Pack) -> Result<()> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .user_agent(concat!("vana-client/", env!("CARGO_PKG_VERSION")))
+        .timeout_connect(Some(Duration::from_secs(20)))
+        .timeout_global(Some(Duration::from_secs(30 * 60)))
+        .build()
+        .into();
+    let d = hd_dir().join(&p.version);
+    for (a, name, limit) in [(&p.json, MANIFEST, MAX_PATCH_FILE), (&p.bin, HD_BLOB, MAX_HD_FILE)] {
+        if std::fs::read(d.join(name)).is_ok_and(|b| sha1(&b) == a.sha1.to_ascii_lowercase()) {
+            continue;
+        }
+        let b = agent
+            .get(&a.url)
+            .call()
+            .with_context(|| a.url.clone())?
+            .body_mut()
+            .with_config()
+            .limit(limit)
+            .read_to_vec()?;
+        if sha1(&b) != a.sha1.to_ascii_lowercase() {
+            bail!("{} is not the file latest.json names (its SHA-1 differs)", a.url);
+        }
+        std::fs::create_dir_all(&d)?;
+        let part = d.join(format!("{name}.part"));
+        std::fs::write(&part, &b)?;
+        std::fs::rename(&part, d.join(name))?;
+    }
+    // Older packs' downloads go (their originals stay in the state until the new pack replaces them).
+    if let Ok(rd) = std::fs::read_dir(hd_dir()) {
+        for e in rd.flatten() {
+            if e.path().is_dir() && e.file_name() != std::ffi::OsStr::new(&p.version) {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// At start, after the main set: the HD pack written in when it is downloaded, else downloaded in the background for
+/// the next start; taken out when the feed no longer names one.
+fn hd_start(ffxi: &Path) {
+    let state = hd_dir().join("state");
+    let Some(p) = hd_wanted() else {
+        if installed_path(&state).is_file() {
+            match restore(ffxi, &state) {
+                Ok(()) => log::info!("timeless HD faces: taken out (the feed names none)"),
+                Err(e) => log::warn!("timeless HD faces: taking out: {e:#}"),
+            }
+        }
+        return;
+    };
+    match hd_cached(&p) {
+        Some(Ok(ps)) => match apply(&ps, ffxi, &state) {
+            Ok(rep) => log::info!(
+                "timeless HD faces {}: {} written, {} already there, {} left",
+                ps.version,
+                rep.written,
+                rep.done,
+                rep.foreign
+            ),
+            Err(e) => log::warn!("timeless HD faces: {e:#}"),
+        },
+        Some(Err(e)) => log::warn!("timeless HD faces: {e:#}"),
+        None => {
+            std::thread::spawn(move || match hd_download(&p) {
+                Ok(()) => log::info!("timeless HD faces {}: downloaded; written in at the next start", p.version),
+                Err(e) => log::warn!("timeless HD faces: {e:#}"),
+            });
+        }
+    }
 }
 
 fn download(a: &Asset, dest: &Path) -> Result<Vec<u8>> {
@@ -335,7 +467,9 @@ pub fn restore(ffxi: &Path, state: &Path) -> Result<()> {
             if !safe_rel(&rel) {
                 continue;
             }
-            let Ok(mut file) = std::fs::OpenOptions::new().read(true).write(true).open(ffxi.join(&rel)) else { continue };
+            let Ok(mut file) = std::fs::OpenOptions::new().read(true).write(true).open(ffxi.join(&rel)) else {
+                continue;
+            };
             if read_at(&mut file, offset, len).is_ok_and(|cur| sha1(&cur) == ours) {
                 file.seek(SeekFrom::Start(offset))?;
                 file.write_all(orig)?;
@@ -357,6 +491,7 @@ pub fn restore(ffxi: &Path, state: &Path) -> Result<()> {
 pub fn patch_game(ffxi: &Path) -> Result<Report> {
     let ps = latest()?;
     let rep = apply(&ps, ffxi, &dir())?;
+    hd_start(ffxi);
     log::info!(
         "timeless patches {}: {} written, {} already there, {} left (another game version)",
         ps.version,
@@ -374,7 +509,11 @@ pub fn repatch(ffxi: &Path) -> Result<Report> {
     if !safe_version(v) {
         bail!("latest.txt names version {v:?}");
     }
-    apply(&cached(v)?, ffxi, &dir())
+    let rep = apply(&cached(v)?, ffxi, &dir())?;
+    if let Some(Ok(ps)) = hd_wanted().as_ref().and_then(hd_cached) {
+        apply(&ps, ffxi, &hd_dir().join("state"))?;
+    }
+    Ok(rep)
 }
 
 // ---------------------------------------------------------------- game updates
@@ -464,6 +603,19 @@ pub fn start(cfg: &mut Config) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The feed names the HD pack beside the main set; a feed without one still reads.
+    #[test]
+    fn feed_with_and_without_hd() {
+        let asset = r#"{"url": "https://timelessxi.gg/x", "sha1": "ab", "size": 1}"#;
+        let plain = format!(r#"{{"version": "1", "json": {asset}, "bin": {asset}}}"#);
+        assert!(serde_json::from_str::<Feed>(&plain).unwrap().hd.is_none());
+        let hd = format!(
+            r#"{{"version": "1", "json": {asset}, "bin": {asset}, "hd": {{"version": "hd-1", "json": {asset}, "bin": {asset}}}}}"#
+        );
+        let f: Feed = serde_json::from_str(&hd).unwrap();
+        assert_eq!(f.hd.unwrap().version, "hd-1");
+    }
 
     /// A game folder with one game file, and a patch set of two regions in it plus a new file.
     fn game(tag: &str) -> (PathBuf, PathBuf, PatchSet) {
