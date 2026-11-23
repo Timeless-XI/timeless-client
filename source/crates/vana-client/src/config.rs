@@ -4,15 +4,10 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// `base`/vana-client, moved there from the project's old name (ffxi-linux) the first time.
+/// `base`/TimelessXI: TimelessXI's own folder (not vana-client's), so its settings, mods and game never mix with a
+/// stock vana-client's.
 fn app_dir(base: Option<PathBuf>) -> PathBuf {
-    let base = base.unwrap_or_else(|| PathBuf::from("."));
-    let dir = base.join("vana-client");
-    let old = base.join("ffxi-linux");
-    if !dir.exists() && old.is_dir() {
-        let _ = std::fs::rename(&old, &dir);
-    }
-    dir
+    base.unwrap_or_else(|| PathBuf::from(".")).join("TimelessXI")
 }
 
 pub fn data_dir() -> PathBuf {
@@ -244,6 +239,24 @@ pub struct Config {
     /// Not retail (Settings' Light Shading Smooth): the scenery's point lights per pixel with a soft edge, in place of
     /// retail's per-vertex lights with a hard cut at the range.
     pub smooth_lights: bool,
+    /// Not retail (Settings' Zone Changes Soft, client/zonefade.rs): a zone change keeps the last picture, dimmed a
+    /// little, until the new zone is ready and crossfades into it, in place of retail's fade to black.
+    pub soft_zoning: bool,
+    /// Not retail (Settings' Preload Zones, client/preload.rs): near a zone line the zone behind it loads ahead, so
+    /// the zone change takes it at once.
+    pub zone_preload: bool,
+    /// Not retail (Settings' Night Lighting, client/night.rs): Modern makes nights darker and moonlit, lamps and fires
+    /// glow and flicker, lanterns and torches give light, mods may place lights; false is retail's lighting.
+    pub night_lighting: bool,
+    /// How dark Modern nights get, 0..100 (Settings' Night Darkness).
+    pub night_darkness: u32,
+    /// With Modern nights: your character carries a soft light at night outdoors and in dark places (Carry a Light).
+    pub own_light: bool,
+    /// Not retail (Settings' Weather, client/storm.rs): Modern draws snow and blizzards as real storms (wind-driven
+    /// snow with gusts, whiteout fog, flat cold light, snow building up on the ground); false is retail's weather.
+    pub modern_weather: bool,
+    /// With Modern weather: frost creeps in at the screen's edges in a blizzard's gusts (Screen Frost).
+    pub screen_frost: bool,
     /// Character shadows: 0 retail's (blob / silhouette), 1 real (a shadow map from the sun, render/sunshadow.rs,
     /// retail's where there is no sun). Not a retail option.
     pub actor_shadows: u32,
@@ -328,6 +341,9 @@ pub struct Config {
     pub modern_scale: u32,
     /// How opaque the modern windows' backgrounds are (0.1 ..= 1).
     pub modern_opacity: f32,
+    /// TimelessXI: how big mods' canvases are drawn in the modern windows, in percent (100 as the mod drew them), so
+    /// a mod's small print can be made readable without growing the whole interface.
+    pub modern_mod_scale: u32,
     pub modern_places: std::collections::BTreeMap<String, ModernLayout>,
     pub modern_chat_font: f32,
     /// The modern edge windows folded to their tabs, by panel (the minimap, Wide Scan).
@@ -576,7 +592,8 @@ impl Default for Config {
         Self {
             game_dir: data_dir().join("game"),
             installed: false,
-            server: "127.0.0.1".into(),
+            // TimelessXI: its server.
+            server: "play.timelessxi.gg".into(),
             username: String::new(),
             pol_id: String::new(),
             logins: Vec::new(),
@@ -604,6 +621,13 @@ impl Default for Config {
             notes_seen: env!("CARGO_PKG_VERSION").into(),
             lamp_lights: true,
             smooth_lights: false,
+            soft_zoning: true,
+            zone_preload: true,
+            night_lighting: true,
+            night_darkness: 60,
+            own_light: true,
+            modern_weather: true,
+            screen_frost: true,
             actor_shadows: 0,
             shadow_map: 2048,
             ssao: false,
@@ -630,6 +654,7 @@ impl Default for Config {
             timeless_ready_chime: true,
             modern_scale: 60,
             modern_opacity: 0.85,
+            modern_mod_scale: 100,
             modern_places: Default::default(),
             modern_chat_font: 15.0,
             modern_folded: Default::default(),

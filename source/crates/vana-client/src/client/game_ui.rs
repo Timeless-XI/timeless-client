@@ -2276,6 +2276,11 @@ impl GameUi {
         self.batch.push_image(name, x, y, w, h, rgba);
     }
 
+    /// A live portrait's picture (premultiplied: its clear backdrop shows what is under it).
+    pub fn portrait_rect(&mut self, name: &str, x: f32, y: f32, w: f32, h: f32, rgba: [f32; 4]) {
+        self.batch.push_image_premul(name, x, y, w, h, rgba);
+    }
+
     /// A menu window with every child's sprite, the child `sel` highlighted with the hand (FUN_101144b0).
     pub fn menu_sel(&mut self, name: &str, w: f32, h: f32, sel: u16) -> Option<(f32, f32)> {
         let (fx, fy, fw, fh) = screens::frame_rect(self.data.lobby.menu(name)?, w, h, 1.0, 1.0);

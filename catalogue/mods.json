@@ -3184,7 +3184,7 @@
       "id": "timeless-cardian",
       "name": "Timeless Cardian",
       "kind": "lua",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "authors": [
         "TimelessXI"
       ],
@@ -3193,8 +3193,8 @@
         {
           "path": "init.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/init.lua",
-          "sha256": "e86734eea8f9a46dd3db057eaa2608e30717e57c666c9e0ee936d4444ffe9cf8",
-          "size": 8461
+          "sha256": "808bc016d36bc6e38225830d08b6f549f57af850233603d6fcc99d29b02730d7",
+          "size": 8539
         },
         {
           "path": "lib/action.lua",
@@ -3211,8 +3211,8 @@
         {
           "path": "lib/book.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/lib/book.lua",
-          "sha256": "d25582a9f17d47ac4c5603cd753533ae060b51eb08ee2bd2c645c0a202c7079b",
-          "size": 23134
+          "sha256": "c2a31bbf3b062fb56a3e83b941e18b94e528f33644807fa64111b475d865506b",
+          "size": 23528
         },
         {
           "path": "lib/canvas.lua",
@@ -3271,7 +3271,7 @@
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-cardian/mod.toml",
-          "sha256": "b194031fc8d0e7a017b2914c92407ce021019662c95a3b6972dbb2e5af497c41",
+          "sha256": "3c94662011d9386117ad996d96b51e3cb68d70a95b61f4993d8547118d9a027e",
           "size": 1122
         },
         {
@@ -3986,11 +3986,11 @@
       "id": "timeless-menu",
       "name": "TimelessMenu",
       "kind": "lua",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "authors": [
         "TimelessXI"
       ],
-      "description": "Every TimelessXI mod in one menu (/tm or the hourglass button): open Companion Manager, Companion View, the Journal and Job Gauges and jump to their tabs, start a mod that isn't running, and say the server's commands.",
+      "description": "Every TimelessXI mod in one menu (/tm or the hourglass button), sorted into categories (Companions, World, Combat, Crafting & Shops, Games) with your pinned mods first: open them, jump to their tabs, start a mod that isn't running, and say the server's commands.",
       "files": [
         {
           "path": "img/hourglass.png",
@@ -4013,8 +4013,8 @@
         {
           "path": "lib/menu.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-menu/lib/menu.lua",
-          "sha256": "c3ca3d63a5bfd8554598782271952168706c777ce0706811982f1a8502a3be82",
-          "size": 8675
+          "sha256": "fcde92bc2cc151d76b83c98cd3d297958907514dc89ef24f2daeecbcf0dce8cf",
+          "size": 13805
         },
         {
           "path": "lib/style.lua",
@@ -4025,8 +4025,8 @@
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-menu/mod.toml",
-          "sha256": "dac6a1f1d5c0888f3a2317f3bb6bff07bdb4b5e8ef60088c18ada4dc5aca0773",
-          "size": 779
+          "sha256": "c8a73d5a2cbed37b14ba66a9c70bb83bf9d75b9985412490105522d2415db278",
+          "size": 824
         }
       ],
       "required": true,

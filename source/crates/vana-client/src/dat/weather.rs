@@ -237,6 +237,11 @@ impl ZoneWeather {
     }
 
     /// Env at `minute` of the day for `weather`, falling back to "suny" (FUN_10183780).
+    /// Whether the file has `weather`'s own folder.
+    pub fn has(&self, weather: &str) -> bool {
+        self.keys.contains_key(weather)
+    }
+
     pub fn at(&self, weather: &str, minute: f32) -> Option<Env> {
         // FUN_1018a7a0: the weather's folder, else `suny`, else the first one the file has.
         let keys = self

@@ -311,7 +311,7 @@ function B.draw(c)
     { size = 0.8, colour = S.MUTED, w = B.W })
   -- Another player: target them (close by) and challenge them
   local cy = wy + 24
-  local t = game and game.target and game.target()
+  local t = B.target()
   local busy = g and g.now and not g.now.over and not m.result
   if t and t.kind == "player" and not t.me then
     local close = (t.distance or 99) <= B.RANGE
@@ -427,6 +427,18 @@ function B.draw_quests(c, x, y)
     c:text(x + W, ry, who, { size = 0.78, colour = info.mine and S.GOOD or (info.holder == "" and S.MUTED or S.WARN), align = "right" })
     ry = ry + 20
   end
+end
+
+-- Your target, as the mod's own timer last saw it (init.lua keeps B.target_now fresh). game.target only answers
+-- in the mod's phase: a draw started by a command (the Timeless menu's Open, /cardbook) runs outside it.
+B.target_now = nil
+function B.target()
+  local ok, t = pcall(function() return game and game.target and game.target() end)
+  if ok then
+    B.target_now = t
+    return t
+  end
+  return B.target_now
 end
 
 function B.setup(model)

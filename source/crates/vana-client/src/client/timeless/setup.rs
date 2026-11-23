@@ -172,10 +172,13 @@ fn installer() -> Option<PathBuf> {
 
 /// Every source this computer offers, quickest first; Download is always last.
 pub fn sources() -> Vec<Source> {
+    // Only a client's own game files are used where they are: the Timeless patches go into the files, and a retail or
+    // Steam install must stay as Square Enix left it, so those are copied.
+    let own = [crate::config::Config::load().game_dir, crate::config::data_dir().join("game")];
     let mut out: Vec<Source> = installs()
         .into_iter()
         .map(|g| {
-            let w = writable(&g.join("FINAL FANTASY XI"));
+            let w = own.contains(&g) && writable(&g.join("FINAL FANTASY XI"));
             Source::Installed { game_dir: g, writable: w }
         })
         .collect();
@@ -197,7 +200,9 @@ pub fn source_at(picked: &Path) -> Result<Source> {
         return Ok(Source::Installer(picked.join(volume(1))));
     }
     let game_dir = super::super::firstrun::existing(picked)?;
-    let w = writable(&game_dir.join("FINAL FANTASY XI"));
+    // A folder picked by hand is copied too (see `sources`), unless it is a client's own.
+    let own = [crate::config::Config::load().game_dir, crate::config::data_dir().join("game")];
+    let w = own.contains(&game_dir) && writable(&game_dir.join("FINAL FANTASY XI"));
     Ok(Source::Installed { game_dir, writable: w })
 }
 
@@ -675,7 +680,7 @@ mod tests {
         let game = base.join("PlayOnline").join("SquareEnix");
         std::fs::create_dir_all(game.join("FINAL FANTASY XI")).unwrap();
         std::fs::write(game.join("FINAL FANTASY XI").join("VTABLE.DAT"), b"").unwrap();
-        assert_eq!(source_at(&base).unwrap(), Source::Installed { game_dir: game.clone(), writable: true });
+        assert_eq!(source_at(&base).unwrap(), Source::Installed { game_dir: game.clone(), writable: false });
         let dl = base.join("dl");
         std::fs::create_dir_all(&dl).unwrap();
         std::fs::write(dl.join(volume(1)), b"").unwrap();

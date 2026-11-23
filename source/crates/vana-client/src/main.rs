@@ -74,6 +74,17 @@ struct Cli {
 enum Cmd {
     /// Timeless XI: remove the Timeless XI install (what Windows' Installed apps > Uninstall runs).
     Uninstall,
+    /// Timeless XI: sign a release asset with a release key (writes ASSET.sig), for publishing from Windows.
+    ReleaseSign {
+        /// The private key, openssl PEM (C:\\FFXILocal\\keys\\timeless-release.pem).
+        #[arg(long)]
+        key: PathBuf,
+        /// The release tag (v1.0.14-timeless.10).
+        #[arg(long)]
+        tag: String,
+        /// The asset: vana-client-windows-x86_64.exe.
+        asset: PathBuf,
+    },
     /// Install the game data from FFXIFullSetup_US.part1.exe (or an extracted copy).
     Install {
         source: PathBuf,
@@ -1273,6 +1284,11 @@ fn main() -> Result<()> {
     };
     match cmd {
         Cmd::Uninstall => client::timeless_uninstall(),
+        Cmd::ReleaseSign { key, tag, asset } => {
+            let sig = client::timeless_release_sign(&key, &tag, &asset)?;
+            println!("signed: {}", sig.display());
+            Ok(())
+        }
         Cmd::Play { credentials, character, walk, goto, screenshot, after, quit, input, chase } => {
             let goto: Vec<(f32, f32)> = goto
                 .unwrap_or_default()
@@ -1974,10 +1990,11 @@ fn main() -> Result<()> {
                             .filter(|_| std::env::var_os("FFXI_LAMPS_DARK").is_none())
                         {
                             println!("lamps: {:?}", l);
-                            zr.set_lamps(gpu, &l.iter().map(|l| (l.pos, l.slot)).collect::<Vec<_>>());
+                            zr.set_lamps(gpu, &l.iter().map(|l| (l.pos, l.slot)).collect::<Vec<_>>(), false);
                             eg.set_lamps(
                                 gpu,
                                 &l.iter().map(|l| (l.pos, l.slot, l.template, l.colour)).collect::<Vec<_>>(),
+                                &[],
                             );
                             // One more update copies the lamps' slots before the next frame's scenery reads them.
                             let mut e = gpu.device.create_command_encoder(&Default::default());

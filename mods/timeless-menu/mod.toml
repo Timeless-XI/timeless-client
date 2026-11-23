@@ -1,7 +1,7 @@
 name = "TimelessMenu"
-version = "1.0.0"
+version = "1.1.0"
 authors = ["TimelessXI"]
-description = "Every TimelessXI mod in one menu (/tm or the hourglass button): open Companion Manager, Companion View, the Journal and Job Gauges and jump to their tabs, start a mod that isn't running, and say the server's commands."
+description = "Every TimelessXI mod in one menu (/tm or the hourglass button), sorted into categories (Companions, World, Combat, Crafting & Shops, Games) with your pinned mods first: open them, jump to their tabs, start a mod that isn't running, and say the server's commands."
 permissions = ["actions", "mods"]
 
 [settings.key_menu]

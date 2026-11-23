@@ -59,6 +59,7 @@ pub(super) fn icon_tex(
             .and_then(|c| m.item_icon(ctx, c, id))
             .map(|t| (t, super::FULL_UV)),
         model::Icon::Status(id) => gu.and_then(|g| m.status_icon(ctx, g, false, id)),
+        model::Icon::Job(job) => model::job_sprite(job).and_then(|id| m.art.sprite(&id)).map(|s| (s.tex, s.uv)),
         model::Icon::Spell(_) | model::Icon::Ability(_) => {
             let w = world?;
             let (lib, k) = i.sprite(w)?;
@@ -76,20 +77,22 @@ fn canvas(
     world: Option<&super::super::World>,
     r: Rect,
     cmds: &[model::Cmd],
+    z: f32,
 ) {
     use model::Cmd;
     let p = ui.painter().with_clip_rect(r.intersect(ui.clip_rect()));
-    let at = |q: [f32; 2]| pos2(r.min.x + q[0], r.min.y + q[1]);
+    // Canvas units to points: the Mod Interface Size (Modern::mod_zoom)
+    let at = |q: [f32; 2]| pos2(r.min.x + q[0] * z, r.min.y + q[1] * z);
     for c in cmds {
         match c {
             Cmd::Line { a, b, width, colour } => {
-                p.line_segment([at(*a), at(*b)], Stroke::new(*width, rgba(*colour)));
+                p.line_segment([at(*a), at(*b)], Stroke::new(*width * z, rgba(*colour)));
             }
             Cmd::Rect { r: q, colour, to, line, round } => {
-                let rr = Rect::from_min_size(at([q[0], q[1]]), vec2(q[2], q[3]));
+                let rr = Rect::from_min_size(at([q[0], q[1]]), vec2(q[2] * z, q[3] * z));
                 match (line, to) {
                     (Some(w), _) => {
-                        p.rect_stroke(rr, *round, Stroke::new(*w, rgba(*colour)), StrokeKind::Inside);
+                        p.rect_stroke(rr, *round * z, Stroke::new(*w * z, rgba(*colour)), StrokeKind::Inside);
                     }
                     (None, Some(to)) => {
                         let mut mesh = egui::Mesh::default();
@@ -104,16 +107,16 @@ fn canvas(
                         p.add(Shape::mesh(mesh));
                     }
                     (None, None) => {
-                        p.rect_filled(rr, *round, rgba(*colour));
+                        p.rect_filled(rr, *round * z, rgba(*colour));
                     }
                 }
             }
             Cmd::Circle { c, radius, colour, line } => match line {
                 Some(w) => {
-                    p.circle_stroke(at(*c), *radius, Stroke::new(*w, rgba(*colour)));
+                    p.circle_stroke(at(*c), *radius * z, Stroke::new(*w * z, rgba(*colour)));
                 }
                 None => {
-                    p.circle_filled(at(*c), *radius, rgba(*colour));
+                    p.circle_filled(at(*c), *radius * z, rgba(*colour));
                 }
             },
             Cmd::Tri { pts, colour } => {
@@ -121,25 +124,32 @@ fn canvas(
             }
             Cmd::Text { at: q, text, colour, size, align, outline, bold } => {
                 let font = if *bold {
-                    FontId::new(m.theme.small * size, egui::FontFamily::Name(super::STRONG.into()))
+                    FontId::new(m.theme.small * size * z, egui::FontFamily::Name(super::STRONG.into()))
                 } else {
-                    FontId::proportional(m.theme.small * size)
+                    FontId::proportional(m.theme.small * size * z)
                 };
                 let anchor = [Align2::LEFT_TOP, Align2::CENTER_TOP, Align2::RIGHT_TOP][*align as usize % 3];
                 if let Some(o) = outline {
                     for k in 0..8 {
                         let a = k as f32 * std::f32::consts::FRAC_PI_4;
-                        p.text(at(*q) + vec2(a.cos(), a.sin()), anchor, text, font.clone(), rgba(*o));
+                        p.text(at(*q) + vec2(a.cos(), a.sin()) * z.max(1.0), anchor, text, font.clone(), rgba(*o));
                     }
                 }
                 p.text(at(*q), anchor, text, font, rgba(*colour));
             }
             Cmd::Tip { r: q, title, text } => {
-                m.tip(ui, Rect::from_min_size(at([q[0], q[1]]), vec2(q[2], q[3])), title, text);
+                m.tip(ui, Rect::from_min_size(at([q[0], q[1]]), vec2(q[2] * z, q[3] * z)), title, text);
             }
             Cmd::Icon { at: q, size, icon, tint } => {
                 if let Some((t, uv)) = icon_tex(m, ctx, gu, world, *icon) {
-                    p.image(t, Rect::from_min_size(at(*q), vec2(*size, *size)), uv, rgba(*tint));
+                    p.image(t, Rect::from_min_size(at(*q), vec2(*size * z, *size * z)), uv, rgba(*tint));
+                }
+            }
+            // Nothing until the actor has been drawn into a portrait this frame (client/portrait.rs).
+            Cmd::Portrait { r: q, entity, tint, .. } => {
+                if let Some((_, t)) = world.and_then(|w| w.lua.portrait(*entity)) {
+                    let rr = Rect::from_min_size(at([q[0], q[1]]), vec2(q[2] * z, q[3] * z));
+                    p.image(t, rr, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), rgba(*tint));
                 }
             }
         }
@@ -245,6 +255,12 @@ pub fn draw(p: &mut Panels, w: &mut World) {
     }
 }
 
+/// A mod window's width in points: grown with the Mod Interface Size when it holds a canvas, so the canvas still fits.
+pub(super) fn mod_width(m: &super::Modern, win: &model::Window, default: f32) -> f32 {
+    let width = if win.width > 0.0 { win.width } else { default };
+    if win.elems.iter().any(|e| matches!(e, Elem::Canvas { .. })) { width * m.mod_zoom() } else { width }
+}
+
 /// One window as a panel, `t` of the way open (an animated one: faded, and grown up from its bottom edge): the clicks
 /// on it and its rect.
 fn panel(
@@ -257,7 +273,7 @@ fn panel(
     let m = p.m;
     let (ctx, gu) = (p.ctx, p.gu);
     {
-        let width = if win.width > 0.0 { win.width } else { 360.0 };
+        let width = mod_width(m, win, 360.0);
         let mut clicks: Vec<Click> = Vec::new();
         let title = (!win.title.is_empty()).then_some(Title { icon: None, text: &win.title, note: None, name: false });
         let frame = if win.framed { "window_normal" } else { "none" };
@@ -622,8 +638,10 @@ pub(super) fn body(
                 });
             }
             Elem::Canvas { w: cw, h: ch, cmds, .. } => {
-                let (r, resp) = ui.allocate_exact_size(vec2(*cw, *ch), Sense::click_and_drag());
-                canvas(ui, m, ctx, gu, world, r, cmds);
+                // Drawn Mod Interface Size times as big; what the mod hears back is in its own units
+                let z = m.mod_zoom();
+                let (r, resp) = ui.allocate_exact_size(vec2(*cw * z, *ch * z), Sense::click_and_drag());
+                canvas(ui, m, ctx, gu, world, r, cmds, z);
                 let shown = r.intersect(ui.clip_rect());
                 if shown.is_positive() {
                     let ppp = ctx.pixels_per_point();
@@ -636,22 +654,22 @@ pub(super) fn body(
                         i,
                         [r.min.x * ppp, r.min.y * ppp],
                         [shown.min.x * ppp, shown.min.y * ppp, shown.max.x * ppp, shown.max.y * ppp],
-                        ppp,
+                        ppp * z,
                         top,
                     ));
                 }
                 let at = resp
                     .interact_pointer_pos()
                     .or_else(|| ctx.input(|inp| inp.pointer.latest_pos()))
-                    .map(|q| (q.x - r.min.x, q.y - r.min.y));
+                    .map(|q| ((q.x - r.min.x) / z, (q.y - r.min.y) / z));
                 if (resp.clicked() || resp.secondary_clicked())
                     && let Some(q) = resp.interact_pointer_pos()
                 {
-                    clicks.push(Click::Canvas(i, q.x - r.min.x, q.y - r.min.y, resp.secondary_clicked()));
+                    clicks.push(Click::Canvas(i, (q.x - r.min.x) / z, (q.y - r.min.y) / z, resp.secondary_clicked()));
                 }
                 // The pointer over it as it moves, and once when it leaves.
                 let was = egui::Id::unique(("canvas hover", pid, i));
-                let inside = resp.hover_pos().map(|q| (q.x - r.min.x, q.y - r.min.y));
+                let inside = resp.hover_pos().map(|q| ((q.x - r.min.x) / z, (q.y - r.min.y) / z));
                 let last = ctx.data(|d| d.get_temp::<(f32, f32)>(was));
                 match (inside, last) {
                     (Some(q), l) if l != Some(q) => {

@@ -13,6 +13,19 @@ pub enum Icon {
     Status(u16),
     Spell(u16),
     Ability(u16),
+    /// Timeless: a job's icon from the modern UI's pack (1 WAR .. 22 RUN), as the party window shows it.
+    Job(u16),
+}
+
+/// Timeless: the modern pack's job pictograms by job id (1 WAR .. 22 RUN).
+const JOB_SPRITES: [&str; 22] = [
+    "war", "mnk", "whm", "blm", "rdm", "thf", "pld", "drk", "bst", "brd", "rng", "sam", "nin", "drg", "smn", "blu",
+    "cor", "pup", "dnc", "sch", "geo", "run",
+];
+
+/// Timeless: the pack sprite of a job (`jobs/war` ...), or None outside 1..22.
+pub fn job_sprite(job: u16) -> Option<String> {
+    JOB_SPRITES.get((job as usize).wrapping_sub(1)).map(|n| format!("jobs/{n}"))
 }
 
 impl Icon {
@@ -22,6 +35,7 @@ impl Icon {
             Some("status") => Icon::Status(id),
             Some("spell") => Icon::Spell(id),
             Some("ability" | "weaponskill" | "weapon_skill") => Icon::Ability(id),
+            Some("job") => Icon::Job(id),
             _ => Icon::Item(id),
         }
     }
@@ -32,12 +46,13 @@ impl Icon {
             Icon::Status(_) => "status",
             Icon::Spell(_) => "spell",
             Icon::Ability(_) => "ability",
+            Icon::Job(_) => "job",
         }
     }
 
     pub fn id(self) -> u16 {
         match self {
-            Icon::Item(id) | Icon::Status(id) | Icon::Spell(id) | Icon::Ability(id) => id,
+            Icon::Item(id) | Icon::Status(id) | Icon::Spell(id) | Icon::Ability(id) | Icon::Job(id) => id,
         }
     }
 
@@ -373,6 +388,17 @@ pub enum Cmd {
         at: [f32; 2],
         size: f32,
         icon: Icon,
+        tint: [u8; 4],
+    },
+    /// An actor drawn live in `r` (client/portrait.rs), as hud.portrait: a server id or a model preview's id
+    /// (client/preview.rs), its finish, the whole body or the face, a preview's facing and turn (TimelessXI).
+    Portrait {
+        r: [f32; 4],
+        entity: u32,
+        look: super::hud::Look,
+        body: bool,
+        turn: f32,
+        spin: f32,
         tint: [u8; 4],
     },
 }
@@ -2058,6 +2084,13 @@ fn draw_canvas(gu: &mut GameUi, world: Option<&super::World>, cmds: &[Cmd], x: f
                 let [ix, iy] = at(*p);
                 icon(gu, world, *i, ix, iy, *size, *t);
             }
+            // Nothing until the actor has been drawn into a portrait this frame.
+            Cmd::Portrait { r, entity, tint: t, .. } => {
+                if let Some((key, _)) = world.and_then(|w| w.lua.portrait(*entity)) {
+                    let [px, py] = at([r[0], r[1]]);
+                    gu.portrait_rect(&key, px, py, r[2], r[3], t.map(|c| c as f32 / 255.0));
+                }
+            }
         }
     }
     gu.clip(None);
@@ -2092,6 +2125,11 @@ pub(super) fn icon(gu: &mut GameUi, w: Option<&super::World>, i: Icon, x: f32, y
         Icon::Status(id) => {
             if let Some(name) = gu.status_icon(false, id) {
                 gu.image_rect(&name, x, y, s, s, mul);
+            }
+        }
+        Icon::Job(job) => {
+            if let Some(id) = job_sprite(job) {
+                pack_icon(gu, &id, x, y, s, mul);
             }
         }
         Icon::Spell(_) | Icon::Ability(_) => {

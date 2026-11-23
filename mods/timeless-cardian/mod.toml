@@ -1,5 +1,5 @@
 name = "Timeless Cardian"
-version = "1.2.0"
+version = "1.2.1"
 authors = ["TimelessXI"]
 description = "Vana'diel's card game, after the old card games: four numbers a card, a 3x3 board over three real regions, capture by beating the touching number. Monsters drop their own cards, notorious monsters rare ones and Champions foils; keep them in the cardbook (/cardbook, or the Timeless menu), pick a hand of five, and play the Steaming Sheep's regulars after dark, Shaali the travelling card shark, or other players. The big cards show each monster's real model from your game files (TimelessXI client). Needs the server's cardian module."
 permissions = ["packets.write"]

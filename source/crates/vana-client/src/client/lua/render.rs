@@ -254,6 +254,129 @@ pub(super) fn install(lua: &Lua, g: &Table, mod_id: &str) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
+    install_lights(lua, &t, mod_id)?;
     g.set("render", t)?;
+    Ok(())
+}
+
+/// A colour of 0..255 parts (render.light's colour) as the light table's (1 = 0x80, so 255 is about 2).
+fn light_colour(v: Value) -> mlua::Result<[f32; 3]> {
+    Ok(match colour(v)? {
+        Some(c) => [c[0] as f32 / 128.0, c[1] as f32 / 128.0, c[2] as f32 / 128.0],
+        None => [255.0 / 128.0, 190.0 / 128.0, 120.0 / 128.0],
+    })
+}
+
+/// A point {x, y, z} (or 1, 2, 3).
+fn point(t: &Table) -> mlua::Result<Option<glam::Vec3>> {
+    let get =
+        |k: &str, i: i64| -> mlua::Result<Option<f32>> { Ok(t.get::<Option<f32>>(k)?.or(t.get::<Option<f32>>(i)?)) };
+    Ok(match (get("x", 1)?, get("y", 2)?, get("z", 3)?) {
+        (Some(x), Some(y), Some(z)) => Some(glam::Vec3::new(x, y, z)),
+        _ => None,
+    })
+}
+
+/// render.light, render.lamp_zone, render.lamps, render.night (docs: Night Lighting Modern, client/night.rs).
+fn install_lights(lua: &Lua, t: &Table, mod_id: &str) -> mlua::Result<()> {
+    use crate::client::night::{LampZone, ModLight, Where};
+    let me = mod_id.to_string();
+    t.set(
+        "light",
+        lua.create_function(move |lua, (id, spec): (String, Option<Table>)| {
+            let spec = spec.map(|s| super::api::unhooked(lua, &s)).transpose()?;
+            let info = info(lua);
+            let key = (me.clone(), id);
+            let Some(s) = spec else {
+                info.borrow_mut().lights.remove(&key);
+                return Ok(());
+            };
+            let at = match (s.get::<Option<u32>>("entity")?, point(&s)?) {
+                (Some(e), _) => Where::Entity(e),
+                (None, Some(p)) => Where::Point(p),
+                (None, None) => return Err(mlua::Error::runtime("render.light: give x, y, z or entity")),
+            };
+            let num = |k: &str, d: f32, lo: f32, hi: f32| -> mlua::Result<f32> {
+                Ok(s.get::<Option<f32>>(k)?.unwrap_or(d).clamp(lo, hi))
+            };
+            let light = ModLight {
+                at,
+                height: num("height", 0.0, -20.0, 20.0)?,
+                colour: light_colour(s.get("colour")?)?,
+                range: num("range", 8.0, 0.5, 40.0)?,
+                intensity: num("intensity", 10.0, 0.0, 100.0)?,
+                halo: num("halo", 0.0, 0.0, 8.0)?,
+                night_only: s.get::<Option<bool>>("night_only")?.unwrap_or(false),
+            };
+            let mut f = info.borrow_mut();
+            if f.lights.len() >= 128 && !f.lights.contains_key(&key) {
+                return Err(mlua::Error::runtime("render.light: at most 128 lights"));
+            }
+            f.lights.insert(key, light);
+            Ok(())
+        })?,
+    )?;
+    let me = mod_id.to_string();
+    t.set(
+        "lamp_zone",
+        lua.create_function(move |lua, (id, spec): (String, Option<Table>)| {
+            let spec = spec.map(|s| super::api::unhooked(lua, &s)).transpose()?;
+            let info = info(lua);
+            let key = (me.clone(), id);
+            let Some(s) = spec else {
+                info.borrow_mut().lamp_zones.remove(&key);
+                return Ok(());
+            };
+            let Some(at) = point(&s)? else { return Err(mlua::Error::runtime("render.lamp_zone: give x, y, z")) };
+            let zone = LampZone {
+                at,
+                radius: s.get::<Option<f32>>("radius")?.unwrap_or(6.0).clamp(0.5, 200.0),
+                level: s.get::<Option<f32>>("level")?.unwrap_or(1.0).clamp(0.0, 1.0),
+                fade: s.get::<Option<f32>>("fade")?.unwrap_or(1.5).clamp(0.0, 60.0),
+            };
+            info.borrow_mut().lamp_zones.insert(key, zone);
+            Ok(())
+        })?,
+    )?;
+    let me = mod_id.to_string();
+    t.set(
+        "clear_lights",
+        lua.create_function(move |lua, ()| {
+            let info = info(lua);
+            let mut f = info.borrow_mut();
+            f.lights.retain(|k, _| k.0 != me);
+            f.lamp_zones.retain(|k, _| k.0 != me);
+            Ok(())
+        })?,
+    )?;
+    t.set(
+        "lamps",
+        lua.create_function(|lua, ()| {
+            let info = info(lua);
+            let f = info.borrow();
+            let out = lua.create_table()?;
+            for g in &f.glows {
+                let p = lua.create_table()?;
+                p.set("x", g[0])?;
+                p.set("y", g[1])?;
+                p.set("z", g[2])?;
+                p.set("level", g[3])?;
+                out.push(p)?;
+            }
+            Ok(out)
+        })?,
+    )?;
+    t.set(
+        "night",
+        lua.create_function(|lua, ()| {
+            let info = info(lua);
+            let (modern, amount, dark) = info.borrow().night;
+            let out = lua.create_table()?;
+            out.set("modern", modern)?;
+            out.set("amount", amount)?;
+            out.set("darkness", dark)?;
+            Ok(out)
+        })?,
+    )?;
     Ok(())
 }

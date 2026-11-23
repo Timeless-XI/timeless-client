@@ -9,11 +9,14 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-/// Where releases are published.
-/// Timeless XI: the upstream repository (the mod and DAT catalogues, release notes).
-pub const RELEASE_REPO: &str = "lenonk/vana-client";
-/// Timeless XI: where this build's own client updates come from, so an upstream release never replaces it.
-pub const CLIENT_RELEASE_REPO: &str = "Timeless-XI/timeless-client";
+/// Where releases are published: TimelessXI's builds, on a public repository that holds only the releases and the mod
+/// list (catalogue/mods.json). Its releases are signed with TimelessXI's key (release/signing-key.pub, put there by
+/// build-timeless.bat), so a stock vana-client build is never installed over this one.
+pub const RELEASE_REPO: &str = "Timeless-XI/timeless-client";
+/// The project this client is built from (its committed mod list names files there).
+pub const UPSTREAM_REPO: &str = "lenonk/vana-client";
+/// Timeless XI: where this build's own client updates come from (the same repository: kept for the code that names it).
+pub const CLIENT_RELEASE_REPO: &str = RELEASE_REPO;
 
 /// The release asset for this platform. A build for a platform no release carries (macOS, Linux on ARM so far) finds
 /// none and is never offered another platform's binary.
@@ -122,6 +125,21 @@ pub fn start(root: PathBuf, playonline: bool) -> Shared {
     std::thread::spawn(move || {
         // The button shows as soon as the version says so; the file check sizes it afterwards.
         let game = match crate::patch::behind(&root) {
+            // TimelessXI: a retail update waits until TimelessXI allows its version (catalogue/game.json), so the
+            // game files never run ahead of what the server and the Timeless patches were tried with.
+            Ok(Some(server))
+                if !super::timeless::game_update_allowed(
+                    &server.version,
+                    super::timeless::allowed_game_version()
+                        .map_err(|e| log::info!("update check: TimelessXI's allowed game version: {e:#}"))
+                        .ok()
+                        .as_deref(),
+                    crate::patch::applied_version(&root).as_deref(),
+                ) =>
+            {
+                log::info!("update check: game files {} held back until TimelessXI allows it", server.version);
+                Game::Current
+            }
             Ok(Some(server)) => {
                 g.lock().unwrap().game = Game::Behind(server.version.clone());
                 match crate::patch::plan_against(&root, server) {
@@ -200,7 +218,12 @@ fn latest_release() -> Result<Option<Release>> {
 }
 
 /// The release signing key's public half (release/signing-key.pub; release/publish.sh signs with the private one).
+/// Timeless XI: Cynix's key (his publish-timeless.sh signs with it).
 const SIGNING_KEY: &str = include_str!("../../../../release/signing-key.pub");
+/// Timeless XI: the owner's key (C:\FFXILocal\keys\timeless-release.pem; release/sign_release.bat). A release signed
+/// by either key installs, so either of them can publish.
+const SIGNING_KEY_2: &str = include_str!("../../../../release/signing-key-2.pub");
+const SIGNING_KEYS: [&str; 2] = [SIGNING_KEY, SIGNING_KEY_2];
 
 /// What a release's signature covers: its tag, the asset's name and the asset's SHA-256, so a signed binary can't be
 /// served under another tag or for the other platform.
@@ -214,14 +237,61 @@ fn signed_by(key: &str, text: &str, sig: &[u8]) -> bool {
     ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, key).verify(text.as_bytes(), sig).is_ok()
 }
 
+/// Timeless XI: `vana-client release-sign`: signs a release asset as release/publish.sh does (the same text, an
+/// Ed25519 signature), with a key in openssl's PEM (`openssl genpkey -algorithm ed25519`), for publishing from Windows
+/// without openssl. Writes `<asset>.sig` beside it; refuses a key whose public half isn't built into this client.
+pub fn sign_release(key_pem: &Path, tag: &str, asset: &Path) -> Result<PathBuf> {
+    let pem = std::fs::read_to_string(key_pem).with_context(|| key_pem.display().to_string())?;
+    let b64: String = pem.lines().filter(|l| !l.starts_with("-----")).collect::<String>();
+    let der = base64_decode(b64.trim()).context("the key file is not a PEM key")?;
+    let pair = ring::signature::Ed25519KeyPair::from_pkcs8_maybe_unchecked(&der)
+        .map_err(|e| anyhow::anyhow!("not an Ed25519 key: {e}"))?;
+    use ring::signature::KeyPair;
+    let public = hex::encode(pair.public_key().as_ref());
+    if !SIGNING_KEYS.iter().any(|k| k.trim() == public) {
+        bail!("{} is not one of the release keys built into the client (release/signing-key*.pub)", key_pem.display());
+    }
+    let tag = if tag.starts_with('v') { tag.to_string() } else { format!("v{tag}") };
+    let name = asset.file_name().and_then(|n| n.to_str()).context("no asset file name")?;
+    let text = signed_text(&tag, name, &std::fs::read(asset).with_context(|| asset.display().to_string())?);
+    let sig = pair.sign(text.as_bytes());
+    let out = PathBuf::from(format!("{}.sig", asset.display()));
+    std::fs::write(&out, sig.as_ref())?;
+    Ok(out)
+}
+
+fn base64_decode(s: &str) -> Option<Vec<u8>> {
+    let val = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32)
+    };
+    let bytes: Vec<u8> = s.bytes().filter(|c| !c.is_ascii_whitespace() && *c != b'=').collect();
+    let mut out = Vec::new();
+    for chunk in bytes.chunks(4) {
+        let mut n = 0u32;
+        for (i, c) in chunk.iter().enumerate() {
+            n |= val(*c)? << (18 - 6 * i);
+        }
+        out.extend_from_slice(&n.to_be_bytes()[1..chunk.len()]);
+    }
+    Some(out)
+}
+
 /// A downloaded binary checked against its release's signature before it is installed; one that fails is removed.
 fn verify(r: &Release, file: &Path) -> Result<()> {
     let url = r.sig_url.as_ref().with_context(|| format!("release {} is not signed", r.tag))?;
     let sig =
         agent().get(url).call().with_context(|| url.clone())?.body_mut().with_config().limit(1024).read_to_vec()?;
-    if !signed_by(SIGNING_KEY, &signed_text(&r.tag, asset_name(), &std::fs::read(file)?), &sig) {
+    let text = signed_text(&r.tag, asset_name(), &std::fs::read(file)?);
+    if !SIGNING_KEYS.iter().any(|k| signed_by(k, &text, &sig)) {
         let _ = std::fs::remove_file(file);
-        bail!("the downloaded vana-client {} is not signed by the release key; not installed", r.tag);
+        bail!("the downloaded TimelessXI client {} is not signed by the release key; not installed", r.tag);
     }
     Ok(())
 }
@@ -405,6 +475,8 @@ pub struct UpdateUi {
     cursor: usize,
     job: Option<Arc<Mutex<Job>>>,
     reloaded: bool,
+    /// TimelessXI: opened by itself for a client update (open_client_only): it restarts the client when done.
+    auto: bool,
     /// The view's scale about the screen's centre: 1 classic, larger for the modern UI's text.
     pub zoom: f32,
 }
@@ -416,15 +488,17 @@ impl UpdateUi {
             [0, 1, 2].map(|r| offered(&s, r))
         };
         let cursor = if pick.iter().any(|&p| p) { UPDATE } else { CLOSE };
-        Self { status, root, pick, cursor, job: None, reloaded: false, zoom: 1.0 }
+        Self { status, root, pick, cursor, job: None, reloaded: false, auto: false, zoom: 1.0 }
     }
 
-    /// Timeless XI: the window with only the client program's row ticked (from the character menu's Update: the
-    /// game files stay as they are, a retail file update would undo the Timeless DAT patches).
+    /// TimelessXI: a newer TimelessXI client installed by itself (at start, or the character menu's Update): the window
+    /// opens with only the client checked and starts at once, and the client restarts when it's in place (poll). Game
+    /// files still wait for the Update button (a retail file update would undo the Timeless DAT patches).
     pub fn open_client_only(status: Shared, root: PathBuf) -> Self {
         let mut u = Self::open(status, root);
-        u.pick[0] = false;
-        u.pick[1] = false;
+        u.pick = [false, false, true];
+        u.auto = true;
+        u.start();
         u
     }
 
@@ -474,6 +548,15 @@ impl UpdateUi {
                     })?;
                     status.lock().unwrap().game = Game::Current;
                     lines.push(format!("Game files updated to {version} ({total_files} files)."));
+                    // TimelessXI: an updated game file is Square Enix's again; the Timeless patches go back in.
+                    match super::timeless::repatch(&root) {
+                        Ok(r) if r.written > 0 => {
+                            lines.push(format!("TimelessXI patches written again ({} changes); restart to use them.", r.written));
+                            restart = true;
+                        }
+                        Ok(_) => {}
+                        Err(e) => lines.push(format!("TimelessXI patches: {e:#}")),
+                    }
                 }
                 let plan = if viewer {
                     wait_plan(&status, &set, |s| s.viewer.get_or_insert(Game::Current), "PlayOnline Viewer files")?
@@ -505,7 +588,7 @@ impl UpdateUi {
                     let dest = exe().context("no executable path")?.with_extension("new");
                     download(&r.url, &dest, &|d, t| {
                         set(Progress {
-                            label: format!("Downloading vana-client {}", r.tag),
+                            label: format!("Downloading the TimelessXI client {}", r.tag),
                             done: d,
                             total: t.max(r.size),
                             detail: format!("{:.1} of {:.1} MB", d as f64 / 1e6, t.max(r.size) as f64 / 1e6),
@@ -514,7 +597,7 @@ impl UpdateUi {
                     verify(&r, &dest)?;
                     replace_self(&dest)?;
                     status.lock().unwrap().client = Client::Current;
-                    lines.push(format!("vana-client {} is installed; restart to use it.", r.tag));
+                    lines.push(format!("TimelessXI client {} is installed; restart to use it.", r.tag));
                     restart = true;
                     // The notes since this version, for the restarted client to show (none if GitHub won't say).
                     let from = env!("CARGO_PKG_VERSION");
@@ -609,10 +692,11 @@ impl UpdateUi {
     pub fn poll(&mut self) -> Out {
         let mut out = Out::default();
         if !self.reloaded
-            && let Some(Job::Done(lines, _)) = self.job.as_ref().map(|j| j.lock().unwrap()).as_deref()
+            && let Some(Job::Done(lines, restart)) = self.job.as_ref().map(|j| j.lock().unwrap()).as_deref()
         {
             self.reloaded = true;
             out.reload = lines.iter().any(|l| l.starts_with("Game files"));
+            out.restart = self.auto && *restart;
             self.cursor = UPDATE;
         }
         out
@@ -662,7 +746,7 @@ impl UpdateUi {
         match self.cursor {
             0 => "The game's data files, from the PlayOnline patch server.".into(),
             1 => "The PlayOnline Viewer's files, which a PlayOnline log-in needs current (kept, never run).".into(),
-            2 => "vana-client itself, from its latest release.".into(),
+            2 => "The TimelessXI client itself, from its latest release.".into(),
             UPDATE => "Download and install what is checked.".into(),
             _ => "Close this window.".into(),
         }
@@ -899,7 +983,7 @@ impl View {
 
 #[cfg(test)]
 mod tests {
-    use super::{SIGNING_KEY, asset_name, newer, signed_by, signed_text, thousands};
+    use super::{SIGNING_KEY, SIGNING_KEY_2, asset_name, newer, signed_by, signed_text, thousands};
 
     /// Each platform asks for its asset; only the published ones carry the release names.
     #[test]
@@ -918,11 +1002,31 @@ mod tests {
     #[test]
     fn release_signatures() {
         use ring::signature::{Ed25519KeyPair, KeyPair};
+        // release/publish.sh's text and openssl's signature by the release key check against the built-in half.
+        // TimelessXI: signed with TimelessXI's release key.
+        let sig = hex::decode("8c39ba5e4f91f0b444992c0aa79d824ae35e64ebeeb6230d118068ae6707d1c73501560d9c9166725d7dcc2da2de0e05d81f38a87d82a0d27d6aef54cf5b5408").unwrap();
+        assert!(signed_by(SIGNING_KEY, &signed_text("v0.0.0-test", "vana-client-linux-x86_64", b"binary"), &sig));
         // Timeless XI: the built-in key is TimelessXI's: the published v1.0.14-timeless.3's signature checks against it.
         let sig = hex::decode("dc72e22954f0e6b6f8456a8bbc51b0811d3477e551eb13876139cea9713cadcccd3cde12f1887276a47b0b7bda5bc1d9e47a9ff7f819d007f0d9e4ce802ce809").unwrap();
         let text = "vana-client release\nv1.0.14-timeless.3\nvana-client-windows-x86_64.exe\n\
                     ebf5116a8a0c02d3f8981b24adb4417b478e884b34371a59be33188457fcbc0e\n";
         assert!(signed_by(SIGNING_KEY, text, &sig));
+        // Timeless XI: the owner's key (signing-key-2.pub) signed this test text on his PC with openssl.
+        let sig = hex::decode("444019aa3d5df4b09b83da48d8efa7698adf22e648d5724cc5cc6a9572bd569595c21655771f410bbe293b027e5ea7cf4be494405e1d77a041365c92d2cc320d").unwrap();
+        let text = "vana-client release\nv0.0.0-owner-key-test\nvana-client-windows-x86_64.exe\n\
+                    0000000000000000000000000000000000000000000000000000000000000000\n";
+        assert!(signed_by(SIGNING_KEY_2, text, &sig));
+        assert!(!signed_by(SIGNING_KEY, text, &sig), "each key signs only for itself");
+        assert_eq!(super::base64_decode("TWFu").unwrap(), b"Man");
+        assert_eq!(super::base64_decode("TWE=").unwrap(), b"Ma");
+        // A key that isn't built in is refused.
+        let dir = std::env::temp_dir().join(format!("tl-sign-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // RFC 8032 test 1's private key as PKCS#8 PEM.
+        std::fs::write(dir.join("k.pem"), "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIJ1hsZ3v/VpguoRK9JLsLMREScVpezJpGXA7rAMcrn9g\n-----END PRIVATE KEY-----\n").unwrap();
+        std::fs::write(dir.join("a.exe"), b"x").unwrap();
+        assert!(super::sign_release(&dir.join("k.pem"), "v1", &dir.join("a.exe")).unwrap_err().to_string().contains("not one of"));
+        std::fs::remove_dir_all(&dir).unwrap();
         let rng = ring::rand::SystemRandom::new();
         let pair = |rng| Ed25519KeyPair::from_pkcs8(Ed25519KeyPair::generate_pkcs8(rng).unwrap().as_ref()).unwrap();
         let (ours, theirs) = (pair(&rng), pair(&rng));

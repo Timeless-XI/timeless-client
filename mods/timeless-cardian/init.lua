@@ -209,4 +209,6 @@ timer.every(0.1, function()
   invite.tick(t)
   pcall(st.card_button)
   pcall(st.npc_button)
+  local okT, tgt = pcall(game.target)
+  if okT then book.target_now = tgt end
 end)

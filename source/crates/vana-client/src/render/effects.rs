@@ -367,7 +367,8 @@ const STAGES: usize = 3;
 
 /// The lamps' copy (EffectsGpu::lamp_pipe): a lamp's slot takes its template's range, colour and intensity at its
 /// position; a lamp with no template (0xffff) its glow's colour (after the n lamps) at range 8 and intensity 20,
-/// the gate tunnel lights' (op 0x49 of glr1 .. gll2) *(inf: a stand-in)*.
+/// the gate tunnel lights' (op 0x49 of glr1 .. gll2) *(inf: a stand-in)*. A light placed outright (0xfffe: a
+/// lantern, a torch, a mod's, client/night.rs) its own colour, range and intensity (the third run).
 const LAMP_WGSL: &str = r#"
 @group(0) @binding(0) var<storage, read_write> lights: array<vec4<f32>>;
 @group(0) @binding(1) var<storage, read> lamps: array<vec4<f32>>;
@@ -380,6 +381,12 @@ fn copy_lamps(@builtin(global_invocation_id) gid: vec3<u32>) {
     let w = bitcast<u32>(l.w);
     let s = w & 0xffffu;
     let t = w >> 16u;
+    if (t == 0xfffeu) {
+        let x = lamps[1u + 2u * n + gid.x];
+        lights[2u * s] = vec4<f32>(l.xyz, x.x);
+        lights[2u * s + 1u] = vec4<f32>(lamps[1u + n + gid.x].rgb, x.y);
+        return;
+    }
     if (t == 0xffffu) {
         lights[2u * s] = vec4<f32>(l.xyz, 8.0);
         lights[2u * s + 1u] = vec4<f32>(lamps[1u + n + gid.x].rgb, 20.0);
@@ -489,7 +496,7 @@ impl EffectsGpu {
         });
         let lamp_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("effects lamps"),
-            size: (16 * (2 * crate::render::LIGHTS + 1)) as u64,
+            size: (16 * (3 * crate::render::LIGHTS + 1)) as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1230,14 +1237,24 @@ impl EffectsGpu {
     }
 
     /// The lamps (client/lamps.rs): position, slot, template slot (0xffff: its light) and the glow's colour
-    /// (BGRA, 0x80 = 1.0).
-    pub fn set_lamps(&mut self, gpu: &Gpu, lamps: &[(glam::Vec3, u32, u32, u32)]) {
-        let n = lamps.len().min(crate::render::LIGHTS);
+    /// (BGRA, 0x80 = 1.0); then the lights placed outright (client/night.rs): position, slot, colour (1 = 0x80),
+    /// range, intensity.
+    pub fn set_lamps(&mut self, gpu: &Gpu, lamps: &[(glam::Vec3, u32, u32, u32)], placed: &[crate::render::Placed]) {
+        let all: Vec<(glam::Vec3, u32, u32, [f32; 3], [f32; 2])> = lamps
+            .iter()
+            .map(|&(p, slot, t, c)| {
+                let rgb =
+                    [((c >> 16) & 0xff) as f32 / 128.0, ((c >> 8) & 0xff) as f32 / 128.0, (c & 0xff) as f32 / 128.0];
+                (p, slot, t, rgb, [0.0; 2])
+            })
+            .chain(placed.iter().map(|l| (l.pos, l.slot, 0xfffe, l.colour, [l.range, l.intensity])))
+            .take(crate::render::LIGHTS)
+            .collect();
+        let n = all.len();
         let mut words: Vec<[f32; 4]> = vec![[f32::from_bits(n as u32), 0.0, 0.0, 0.0]];
-        words.extend(lamps[..n].iter().map(|(p, slot, t, _)| [p.x, p.y, p.z, f32::from_bits(slot | t << 16)]));
-        words.extend(lamps[..n].iter().map(|(.., c)| {
-            [((c >> 16) & 0xff) as f32 / 128.0, ((c >> 8) & 0xff) as f32 / 128.0, (c & 0xff) as f32 / 128.0, 0.0]
-        }));
+        words.extend(all.iter().map(|(p, slot, t, ..)| [p.x, p.y, p.z, f32::from_bits(slot | t << 16)]));
+        words.extend(all.iter().map(|(.., c, _)| [c[0], c[1], c[2], 0.0]));
+        words.extend(all.iter().map(|(.., x)| [x[0], x[1], 0.0, 0.0]));
         gpu.queue.put(&self.lamp_buf, 0, bytemuck::cast_slice(&words));
         self.lamp_count = n as u32;
     }
@@ -2786,5 +2803,17 @@ mod soften_tests {
         };
         assert!(soften_alpha(&tex(116, "effect  kaw1")).is_none());
         assert!(soften_alpha(&tex(101, "light   light")).is_some());
+    }
+}
+
+#[cfg(test)]
+mod lamp_copy_tests {
+    /// The lamps' copy (with the placed lights' run) parses and validates.
+    #[test]
+    fn lamp_copy_shader_is_valid() {
+        let m = wgpu::naga::front::wgsl::parse_str(super::LAMP_WGSL).expect("parse");
+        wgpu::naga::valid::Validator::new(Default::default(), wgpu::naga::valid::Capabilities::all())
+            .validate(&m)
+            .expect("valid");
     }
 }

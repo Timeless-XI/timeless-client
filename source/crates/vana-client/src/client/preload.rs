@@ -7,9 +7,6 @@ use glam::Vec3;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-/// Off for now (user, 2026-11-04): nothing is preloaded while false.
-pub const ENABLED: bool = false;
-
 const TABLE: &str = include_str!("../../data/zonelines.txt");
 /// Yalms from a zone line's box at which the zone behind it starts loading.
 pub const RANGE: f32 = 40.0;
@@ -34,8 +31,13 @@ pub struct Ready {
 
 /// Each frame: the zone to start loading, if the nearest known zone line within RANGE leads to one not loading yet. A
 /// preload goes once no line to its zone is within KEEP, or another zone's line is the nearest in range.
-pub fn step(w: &mut super::World) -> Option<(u16, u16)> {
-    if !ENABLED {
+/// `on`: Settings' Preload Zones (config zone_preload; upstream had it off since 2026-11-04, TimelessXI turns it on).
+pub fn step(w: &mut super::World, on: bool) -> Option<(u16, u16)> {
+    if !on {
+        if w.preload.as_ref().is_some_and(|p| !p.claimed) {
+            log::info!("preload: off, zone dropped");
+            w.preload = None;
+        }
         return None;
     }
     let zone = w.zone?;

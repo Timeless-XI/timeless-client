@@ -19,8 +19,154 @@ fn volume(i: usize) -> String {
     if i == 1 { "FFXIFullSetup_US.part1.exe".into() } else { format!("FFXIFullSetup_US.part{i}.rar") }
 }
 
-/// The first-start window's size (fixed; the configured size applies once the game files are in).
-pub const WINDOW: [u32; 2] = [760, 540];
+/// The first-start window's size (fixed; the configured size applies once the game files are in). TimelessXI: wide
+/// enough for the launcher's banner at its own size.
+pub const WINDOW: [u32; 2] = [980, 700];
+
+/// TimelessXI: the first-start window wears the Timeless Launcher's look (timeless-tools TimelessLauncher: Theme.cs,
+/// Banner.cs): its banner, Timeless XI: Reforged over the misty island, with the hourglass animated from the
+/// launcher's own frames, its colours, and the heading in its typeface (Cormorant, OFL; drawn into title.png, as the
+/// client's fonts are replaced once the game's interface starts).
+mod look {
+    use egui::Color32;
+    /// The banner's bottom edge, so the window runs on from it.
+    pub const BG: Color32 = Color32::from_rgb(0x0B, 0x0D, 0x14);
+    pub const CARD: Color32 = Color32::from_rgb(0x11, 0x14, 0x1D);
+    pub const CARD2: Color32 = Color32::from_rgb(0x18, 0x1D, 0x28);
+    pub const HOVER: Color32 = Color32::from_rgb(0x24, 0x2A, 0x36);
+    pub const LINE: Color32 = Color32::from_rgb(0x28, 0x30, 0x40);
+    pub const TEXT: Color32 = Color32::from_rgb(0xE6, 0xEC, 0xF5);
+    pub const MUTED: Color32 = Color32::from_rgb(0x98, 0xA3, 0xB8);
+    pub const ICE: Color32 = Color32::from_rgb(0xD6, 0xE1, 0xF0);
+    pub const ACCENT: Color32 = Color32::from_rgb(0x8F, 0xB2, 0xE6);
+    pub const DEEP: Color32 = Color32::from_rgb(0x3D, 0x5F, 0x94);
+    pub const DEEP_HOVER: Color32 = Color32::from_rgb(0x4C, 0x72, 0xAD);
+    pub const BAD: Color32 = Color32::from_rgb(0xE0, 0x7A, 0x70);
+
+    pub const BANNER: &[u8] = include_bytes!("../../assets/timeless/banner.png");
+    /// The banner's size in pixels.
+    pub const BANNER_SIZE: egui::Vec2 = egui::vec2(980.0, 320.0);
+    /// "TXHP", then count, fps, x, y, w, h (u32 LE; where the frames go on the banner), then each frame as a u32
+    /// length and a PNG: the launcher's hourglass_frames.bin, cut to the part that moves.
+    pub const HOURGLASS: &[u8] = include_bytes!("../../assets/timeless/hourglass.bin");
+    /// The heading, drawn at twice the size it is shown.
+    pub const TITLE: &[u8] = include_bytes!("../../assets/timeless/title.png");
+}
+
+/// A PNG as an egui image.
+fn png_image(bytes: &[u8]) -> Option<egui::ColorImage> {
+    let mut d = png::Decoder::new(std::io::Cursor::new(bytes));
+    d.set_transformations(png::Transformations::EXPAND | png::Transformations::ALPHA);
+    let mut r = d.read_info().ok()?;
+    let mut buf = vec![0; r.output_buffer_size()?];
+    let info = r.next_frame(&mut buf).ok()?;
+    let (w, h) = (info.width as usize, info.height as usize);
+    match info.color_type {
+        png::ColorType::Rgba => Some(egui::ColorImage::from_rgba_unmultiplied([w, h], buf.get(..w * h * 4)?)),
+        _ => None,
+    }
+}
+
+/// The hourglass frames: frames per second, where they go on the banner, each frame's PNG.
+fn hourglass(b: &'static [u8]) -> Option<(u32, egui::Rect, Vec<&'static [u8]>)> {
+    let u32_at = |at: usize| -> Option<u32> { Some(u32::from_le_bytes(b.get(at..at + 4)?.try_into().ok()?)) };
+    if b.get(..4)? != b"TXHP" {
+        return None;
+    }
+    let (n, fps) = (u32_at(4)?, u32_at(8)?);
+    let at = egui::Rect::from_min_size(
+        egui::pos2(u32_at(12)? as f32, u32_at(16)? as f32),
+        egui::vec2(u32_at(20)? as f32, u32_at(24)? as f32),
+    );
+    let mut pos = 28;
+    let mut frames = Vec::with_capacity(n as usize);
+    for _ in 0..n {
+        let len = u32_at(pos)? as usize;
+        frames.push(b.get(pos + 4..pos + 4 + len)?);
+        pos += 4 + len;
+    }
+    Some((fps.max(1), at, frames))
+}
+
+/// The banner and the heading as textures, and the hourglass frame shown now.
+struct Art {
+    banner: egui::TextureHandle,
+    title: Option<egui::TextureHandle>,
+    fps: u32,
+    at: egui::Rect,
+    frames: Vec<&'static [u8]>,
+    frame: Option<(usize, egui::TextureHandle)>,
+}
+
+impl Art {
+    fn load(ctx: &egui::Context) -> Option<Self> {
+        let banner = ctx.load_texture("timeless-banner", png_image(look::BANNER)?, egui::TextureOptions::LINEAR);
+        let title = png_image(look::TITLE).map(|i| ctx.load_texture("timeless-title", i, egui::TextureOptions::LINEAR));
+        let (fps, at, frames) = hourglass(look::HOURGLASS).unwrap_or((20, egui::Rect::NOTHING, Vec::new()));
+        Some(Self { banner, title, fps, at, frames, frame: None })
+    }
+
+    /// The hourglass frame for this moment (decoded when it changes).
+    fn frame(&mut self, ctx: &egui::Context) -> Option<egui::TextureId> {
+        if self.frames.is_empty() {
+            return None;
+        }
+        let n = ((ctx.input(|i| i.time) * self.fps as f64) as u64 % self.frames.len() as u64) as usize;
+        match &mut self.frame {
+            Some((i, _)) if *i == n => {}
+            Some((i, tex)) => {
+                if let Some(img) = png_image(self.frames[n]) {
+                    tex.set(img, egui::TextureOptions::LINEAR);
+                    *i = n;
+                }
+            }
+            None => {
+                let img = png_image(self.frames[n])?;
+                self.frame = Some((n, ctx.load_texture("timeless-hourglass", img, egui::TextureOptions::LINEAR)));
+            }
+        }
+        self.frame.as_ref().map(|(_, t)| t.id())
+    }
+}
+
+/// The launcher's widget colours for everything in the card.
+fn style(ui: &mut egui::Ui) {
+    let v = ui.visuals_mut();
+    v.override_text_color = Some(look::TEXT);
+    v.selection.bg_fill = look::DEEP;
+    v.selection.stroke = egui::Stroke::new(1.0, look::ACCENT);
+    v.extreme_bg_color = look::CARD2;
+    let w = &mut v.widgets;
+    for (s, fill, line) in [
+        (&mut w.inactive, look::CARD2, look::LINE),
+        (&mut w.hovered, look::HOVER, look::ACCENT),
+        (&mut w.active, look::DEEP, look::ACCENT),
+    ] {
+        s.weak_bg_fill = fill;
+        s.bg_fill = fill;
+        s.bg_stroke = egui::Stroke::new(1.0, line);
+        s.fg_stroke = egui::Stroke::new(1.5, look::TEXT);
+        s.corner_radius = egui::CornerRadius::same(6);
+    }
+}
+
+/// The launcher's blue main button.
+fn primary(ui: &mut egui::Ui, enabled: bool, text: &str) -> egui::Response {
+    ui.scope(|ui| {
+        let w = &mut ui.visuals_mut().widgets;
+        w.inactive.weak_bg_fill = look::DEEP;
+        w.hovered.weak_bg_fill = look::DEEP_HOVER;
+        w.active.weak_bg_fill = look::DEEP_HOVER;
+        w.inactive.bg_stroke = egui::Stroke::new(1.0, look::DEEP_HOVER);
+        ui.add_enabled(enabled, egui::Button::new(egui::RichText::new(text).size(18.0).color(egui::Color32::WHITE)))
+    })
+    .inner
+}
+
+/// A plain button in the launcher's colours.
+fn secondary(ui: &mut egui::Ui, enabled: bool, text: &str, size: f32) -> egui::Response {
+    ui.add_enabled(enabled, egui::Button::new(egui::RichText::new(text).size(size)))
+}
 
 /// Left in the game folder while the first start runs: one stopped part-way resumes in this window.
 const MARKER: &str = ".vana-installing";
@@ -59,11 +205,11 @@ pub fn existing(picked: &Path) -> Result<PathBuf> {
 /// What closing the client does to the step under way.
 fn closing_note(phase: &str) -> &'static str {
     if phase.starts_with("Downloading") {
-        "Closing vana-client stops this; the download resumes next time."
+        "Closing the TimelessXI client stops this; the download resumes next time."
     } else if phase.starts_with("Unpacking") || phase.starts_with("Installing") {
-        "Closing vana-client stops this; installing starts over next time (the download is kept)."
+        "Closing the TimelessXI client stops this; installing starts over next time (the download is kept)."
     } else if phase.starts_with("Updating") || phase.starts_with("Checking") {
-        "Closing vana-client stops this; the update picks up where it left off next time."
+        "Closing the TimelessXI client stops this; the update picks up where it left off next time."
     } else {
         ""
     }
@@ -99,6 +245,9 @@ pub struct FirstRun {
     menu: bool,
     shortcut: bool,
     note: String,
+    /// TimelessXI: the banner and the hourglass (loaded on the first frame drawn; None if they wouldn't load).
+    art: Option<Art>,
+    art_loaded: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -121,6 +270,8 @@ impl FirstRun {
             menu: true,
             shortcut: false,
             note: String::new(),
+            art: None,
+            art_loaded: false,
         }
     }
 
@@ -196,76 +347,111 @@ impl FirstRun {
             Stage::Failed(e) => e.clone(),
             _ => String::new(),
         };
-        let gold = egui::Color32::from_rgb(0xe8, 0xc8, 0x80);
+        if !self.art_loaded {
+            self.art_loaded = true;
+            self.art = Art::load(ctx);
+        }
         let screen = ctx.content_rect();
-        ctx.layer_painter(egui::LayerId::background()).rect_filled(
-            screen,
-            0.0,
-            egui::Color32::from_rgb(0x12, 0x14, 0x22),
-        );
-        egui::Area::new(egui::Id::unique("first run")).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+        let painter = ctx.layer_painter(egui::LayerId::background());
+        painter.rect_filled(screen, 0.0, look::BG);
+        // The banner across the top, the hourglass animated on it; the card sits just over its foot.
+        let mut card_top = 32.0;
+        let mut title = None;
+        if let Some(art) = self.art.as_mut() {
+            let scale = screen.width() / look::BANNER_SIZE.x;
+            let banner = egui::Rect::from_min_size(screen.min, look::BANNER_SIZE * scale);
+            let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+            painter.image(art.banner.id(), banner, uv, egui::Color32::WHITE);
+            if let Some(id) = art.frame(ctx) {
+                let at = egui::Rect::from_min_size(banner.min + art.at.min.to_vec2() * scale, art.at.size() * scale);
+                painter.image(id, at, uv, egui::Color32::WHITE);
+            }
+            card_top = banner.height() - 24.0 * scale;
+            title = art.title.as_ref().map(|t| (t.id(), t.size_vec2() / 2.0));
+            ctx.request_repaint_after(std::time::Duration::from_millis(1000 / art.fps.max(1) as u64));
+        }
+        egui::Area::new(egui::Id::new("first run")).anchor(egui::Align2::CENTER_TOP, [0.0, card_top]).show(ctx, |ui| {
             {
                 egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(0x1e, 0x22, 0x3a))
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(0x6a, 0x70, 0xa8)))
-                    .corner_radius(6.0)
-                    .inner_margin(32.0)
+                    .fill(look::CARD)
+                    .stroke(egui::Stroke::new(1.0, look::LINE))
+                    .corner_radius(10.0)
+                    .inner_margin(28.0)
                     .show(ui, |ui| {
-                        ui.set_max_width(620.0);
-                        ui.style_mut().spacing.button_padding = egui::vec2(14.0, 8.0);
+                        ui.set_max_width(640.0);
+                        style(ui);
+                        ui.style_mut().spacing.button_padding = egui::vec2(16.0, 8.0);
+                        ui.style_mut().spacing.item_spacing = egui::vec2(10.0, 8.0);
                         ui.vertical(|ui| {
-                            ui.label(egui::RichText::new("FINAL FANTASY XI game files").size(30.0).color(gold));
-                            ui.add_space(10.0);
+                            match title {
+                                Some((id, size)) => {
+                                    ui.add(egui::Image::new(egui::load::SizedTexture::new(id, size)));
+                                }
+                                None => {
+                                    ui.label(egui::RichText::new("FINAL FANTASY XI GAME FILES").size(24.0).color(look::ICE));
+                                }
+                            }
+                            // The launcher's thin accent rule under a heading.
+                            let (rule, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+                            ui.painter().rect_filled(rule, 0.0, egui::Color32::from_rgba_unmultiplied(0x8F, 0xB2, 0xE6, 70));
+                            ui.add_space(8.0);
                             match stage {
                                 0 => {
-                                    ui.label(egui::RichText::new(format!(
-                                        "vana-client uses the game files of the free FINAL FANTASY XI client. Download it from Square Enix \
-                                         (about 7.7 GB) and install its game files to\n\n{}\n\nThe download is deleted once the game \
-                                         files are installed and up to date. About 25 GB of free space is needed while it runs.",
-                                        self.game_dir.display()
-                                    )).size(17.0));
-                                    ui.add_space(6.0);
+                                    ui.label(egui::RichText::new(
+                                        "TimelessXI plays on the game files of the free FINAL FANTASY XI client. It downloads them from \
+                                         Square Enix (about 7.7 GB) and installs them to",
+                                    ).size(16.0));
+                                    ui.label(egui::RichText::new(self.game_dir.display().to_string()).size(16.0).color(look::ACCENT));
+                                    ui.label(egui::RichText::new(
+                                        "The download is deleted once the game files are installed and up to date. About 25 GB of free \
+                                         space is needed while it runs. Already have FINAL FANTASY XI? Use its game files instead.",
+                                    ).size(14.0).color(look::MUTED));
+                                    ui.add_space(4.0);
                                     let picking = self.picking.is_some();
                                     ui.horizontal(|ui| {
-                                        if ui.add_enabled(!picking, egui::Button::new(egui::RichText::new("Change install folder...").size(15.0))).clicked() {
+                                        if secondary(ui, !picking, "Change install folder...", 15.0).clicked() {
                                             self.pick(Pick::Install);
                                         }
-                                        if ui.add_enabled(!picking, egui::Button::new(egui::RichText::new("Use existing game files...").size(15.0))).clicked() {
+                                        if secondary(ui, !picking, "Use existing game files...", 15.0).clicked() {
                                             self.pick(Pick::Existing);
                                         }
                                     });
                                     if !self.note.is_empty() {
-                                        ui.label(egui::RichText::new(&self.note).color(egui::Color32::from_rgb(0xe0, 0x80, 0x70)));
+                                        ui.label(egui::RichText::new(&self.note).color(look::BAD));
                                     }
-                                    ui.add_space(16.0);
+                                    ui.add_space(12.0);
                                     ui.horizontal(|ui| {
-                                        if ui.add_enabled(!picking, egui::Button::new(egui::RichText::new("Download and install").size(19.0))).clicked() {
+                                        if primary(ui, !picking, "Download and install").clicked() {
                                             self.start();
                                             action = Action::Begin(self.game_dir.clone());
                                         }
-                                        if ui.button(egui::RichText::new("Quit").size(19.0)).clicked() {
+                                        if secondary(ui, true, "Quit", 18.0).clicked() {
                                             action = Action::Quit;
                                         }
                                     });
                                 }
                                 2 => {
                                     if self.found {
-                                        ui.label(egui::RichText::new(format!(
-                                            "Using the game files in\n\n{}\n\nIf they are behind the current version, the Update button on the \
-                                             title screen brings them up to date.",
-                                            self.game_dir.join("FINAL FANTASY XI").display()
-                                        )).size(17.0));
+                                        ui.label(egui::RichText::new("Using the game files in").size(16.0));
+                                        ui.label(
+                                            egui::RichText::new(self.game_dir.join("FINAL FANTASY XI").display().to_string())
+                                                .size(16.0)
+                                                .color(look::ACCENT),
+                                        );
+                                        ui.label(egui::RichText::new(
+                                            "If they are behind the current version, the Update button on the title screen brings them up to date.",
+                                        ).size(14.0).color(look::MUTED));
                                     } else {
-                                        ui.label(egui::RichText::new("The game files are installed and up to date.").size(17.0));
+                                        ui.label(egui::RichText::new("The game files are installed and up to date.").size(16.0));
+                                    }
+                                    ui.add_space(10.0);
+                                    ui.checkbox(&mut self.menu, egui::RichText::new("Add TimelessXI to the application menu").size(15.0));
+                                    ui.checkbox(&mut self.shortcut, egui::RichText::new("Add a shortcut to the desktop").size(15.0));
+                                    if !self.note.is_empty() {
+                                        ui.label(egui::RichText::new(&self.note).color(look::MUTED));
                                     }
                                     ui.add_space(12.0);
-                                    ui.checkbox(&mut self.menu, egui::RichText::new("Add vana-client to the application menu").size(16.0));
-                                    ui.checkbox(&mut self.shortcut, egui::RichText::new("Add a shortcut to the desktop").size(16.0));
-                                    if !self.note.is_empty() {
-                                        ui.label(egui::RichText::new(&self.note).weak());
-                                    }
-                                    ui.add_space(16.0);
-                                    if ui.button(egui::RichText::new("Continue").size(19.0)).clicked() {
+                                    if primary(ui, true, "Continue").clicked() {
                                         let r = super::desktop::install(self.menu).and_then(|()| if self.shortcut { super::desktop::desktop_shortcut() } else { Ok(()) });
                                         match r {
                                             Ok(()) => action = Action::Ready,
@@ -276,28 +462,31 @@ impl FirstRun {
                                 1 => {
                                     let p = &self.progress;
                                     let (done, total) = (p.done.load(Ordering::Relaxed), p.total.load(Ordering::Relaxed));
-                                    ui.label(egui::RichText::new(p.phase.lock().unwrap().clone()).size(19.0));
-                                    ui.add_space(8.0);
-                                    ui.add(egui::ProgressBar::new(p.fraction()).desired_width(620.0).fill(egui::Color32::from_rgb(0x9a, 0x7a, 0x40)));
+                                    ui.label(egui::RichText::new(p.phase.lock().unwrap().clone()).size(18.0).color(look::ICE));
+                                    ui.add_space(6.0);
+                                    ui.add(egui::ProgressBar::new(p.fraction()).desired_width(640.0).fill(look::DEEP_HOVER));
                                     if total > 0 {
-                                        ui.label(format!("{:.2} of {:.2} GB", done as f64 / 1e9, total as f64 / 1e9));
+                                        ui.label(
+                                            egui::RichText::new(format!("{:.2} of {:.2} GB", done as f64 / 1e9, total as f64 / 1e9))
+                                                .color(look::MUTED),
+                                        );
                                     }
-                                    ui.add_space(8.0);
+                                    ui.add_space(6.0);
                                     let note = closing_note(&p.phase.lock().unwrap());
                                     if !note.is_empty() {
-                                        ui.label(egui::RichText::new(note).weak());
+                                        ui.label(egui::RichText::new(note).size(14.0).color(look::MUTED));
                                     }
                                     ctx.request_repaint_after(std::time::Duration::from_millis(250));
                                 }
                                 _ => {
-                                    ui.label("It did not finish:");
-                                    ui.label(egui::RichText::new(&failed).weak());
-                                    ui.add_space(16.0);
+                                    ui.label(egui::RichText::new("It did not finish:").size(16.0));
+                                    ui.label(egui::RichText::new(&failed).color(look::BAD));
+                                    ui.add_space(12.0);
                                     ui.horizontal(|ui| {
-                                        if ui.button(egui::RichText::new("Try again").size(19.0)).clicked() {
+                                        if primary(ui, true, "Try again").clicked() {
                                             self.start();
                                         }
-                                        if ui.button(egui::RichText::new("Quit").size(19.0)).clicked() {
+                                        if secondary(ui, true, "Quit", 18.0).clicked() {
                                             action = Action::Quit;
                                         }
                                     });

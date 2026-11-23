@@ -20,6 +20,9 @@ pub enum Blend {
     Replace,
     /// Font glyphs: SRCBLEND = DESTBLEND = ONE (FUN_10118aa0).
     Glyph,
+    /// A premultiplied picture over the frame (ONE / INVSRCALPHA): a live portrait whose backdrop is clear, so only
+    /// the model shows (TimelessXI). Its tint is premultiplied too: opacity scales every channel.
+    Premul,
 }
 
 impl Blend {
@@ -55,6 +58,10 @@ impl Blend {
             }
             Blend::Replace => wgpu::BlendState::REPLACE,
             Blend::Glyph => wgpu::BlendState { color: c(F::One, F::One, O::Add), alpha: c(F::Zero, F::One, O::Add) },
+            Blend::Premul => wgpu::BlendState {
+                color: c(F::One, F::OneMinusSrcAlpha, O::Add),
+                alpha: c(F::One, F::OneMinusSrcAlpha, O::Add),
+            },
         }
     }
 }
@@ -509,7 +516,7 @@ impl UiBatch {
         // The window's opacity: alpha, or every channel where the blend adds the colour whole.
         if let Some(o) = self.opacity {
             for c in &mut colors {
-                if blend == Blend::Glyph {
+                if matches!(blend, Blend::Glyph | Blend::Premul) {
                     c.iter_mut().for_each(|v| *v *= o);
                 } else {
                     c[3] *= o;
@@ -560,7 +567,7 @@ impl UiBatch {
             }
             for v in &mut self.vertices[first.max(mark)..end] {
                 v.color[3] *= a;
-                if r.blend == Blend::Glyph {
+                if matches!(r.blend, Blend::Glyph | Blend::Premul) {
                     for c in &mut v.color[..3] {
                         *c *= a;
                     }
@@ -808,6 +815,18 @@ impl UiBatch {
     /// A texture over any four corners (top left, top right, bottom left, bottom right) with their uvs.
     pub fn push_image_corners(&mut self, texture: &str, corners: [[f32; 2]; 4], uvs: [[f32; 2]; 4], rgba: [f32; 4]) {
         self.push_quad(Some(texture), Blend::Alpha, corners, uvs, [rgba; 4]);
+    }
+
+    /// A premultiplied picture (a live portrait): `rgba` multiplies it and its alpha fades it.
+    pub fn push_image_premul(&mut self, texture: &str, x: f32, y: f32, w: f32, h: f32, rgba: [f32; 4]) {
+        let a = rgba[3];
+        self.push_quad(
+            Some(texture),
+            Blend::Premul,
+            [[x, y], [x + w, y], [x, y + h], [x + w, y + h]],
+            [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+            [[rgba[0] * a, rgba[1] * a, rgba[2] * a, a]; 4],
+        );
     }
 
     pub fn push_image(&mut self, texture: &str, x: f32, y: f32, w: f32, h: f32, rgba: [f32; 4]) {
@@ -1083,7 +1102,7 @@ impl UiRenderer {
             attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4, 3 => Float32],
         })];
         let mut pipelines = HashMap::new();
-        for blend in [Blend::Alpha, Blend::Add, Blend::Subtract, Blend::Opaque, Blend::Replace, Blend::Glyph] {
+        for blend in [Blend::Alpha, Blend::Add, Blend::Subtract, Blend::Opaque, Blend::Replace, Blend::Glyph, Blend::Premul] {
             let p = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("ui"),
                 layout: Some(&layout),

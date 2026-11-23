@@ -186,7 +186,7 @@ fn mod_edges(p: &mut Panels, w: &mut World) {
         let (m, ctx, gu) = (p.m, p.ctx, p.gu);
         let label = if win.title.is_empty() { win.id.clone() } else { win.title.clone() };
         let screen = ctx.content_rect();
-        let width = if win.width > 0.0 { win.width } else { WIDTH };
+        let width = super::modwin::mod_width(m, &win, WIDTH);
         // As wide as its lines need, more of the screen on the top or the bottom edge.
         let (width, room) = if win.fit {
             let across = {

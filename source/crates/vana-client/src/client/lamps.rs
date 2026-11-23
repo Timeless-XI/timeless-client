@@ -23,9 +23,21 @@ pub struct Lamp {
 /// No data light to copy: the lamp's light (render/effects.rs LAMP_WGSL).
 pub const OWN: u32 = 0xffff;
 
+/// A lamp's glow (the zone's "light..." mesh), merged, for the night halos (client/night.rs): where it shows, the
+/// table slot whose light it has (its lamp's, or the data light within LIT of it; none: its own colour), its colour.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Glow {
+    pub pos: Vec3,
+    pub slot: Option<u32>,
+    /// BGRA, 0x80 = 1.0.
+    pub colour: u32,
+}
+
 #[derive(Default)]
 pub struct Lamps {
     pub list: Vec<Lamp>,
+    /// Every merged glow of the last scan, lit or not (with Lamp Lights Baked too).
+    pub glows: Vec<Glow>,
     /// The zone's data lights (position, table slot) from the last scan: lamp shadows fall from these too.
     pub data: Vec<(Vec3, u32)>,
     at: Option<Instant>,
@@ -57,6 +69,7 @@ impl Lamps {
         let first = fx.reg.light_keys.len() as u32;
         let mut list =
             if on { build(&scan.glows, &scan.lights, first, |a, b| ground?.raycast(a, b)) } else { Vec::new() };
+        self.glows = glows_of(&scan.glows, &scan.lights, &list);
         // A lamp keeps the colour it was first given (glows pulse; the list changes only when the lamps do).
         for l in &mut list {
             if let Some(old) = self.list.iter().find(|o| o.slot == l.slot && o.pos == l.pos && o.template == l.template)
@@ -86,14 +99,28 @@ impl Lamps {
     }
 }
 
-/// The lamps of `glows` not already lit by `lights` (position, slot), slots from `first`.
-fn build(
-    glows: &[(Vec3, u32)],
-    lights: &[(Vec3, u32)],
-    first: u32,
-    ray: impl Fn(Vec3, Vec3) -> Option<f32>,
-) -> Vec<Lamp> {
-    // Merged glows: position sum, count, the first glow's colour.
+/// The glows merged (as build does), each with the slot lighting it: its lamp's (nearest within MERGE + OUT of the
+/// light it was moved to), else a data light within LIT, else none.
+fn glows_of(glows: &[(Vec3, u32)], lights: &[(Vec3, u32)], lamps: &[Lamp]) -> Vec<Glow> {
+    merge(glows)
+        .into_iter()
+        .map(|(pos, colour)| {
+            let lamp = lamps.iter().find(|l| l.pos.distance(pos) < MERGE + OUT + 0.01).map(|l| l.slot);
+            let data = || {
+                lights
+                    .iter()
+                    .map(|(p, s)| (p.distance(pos), *s))
+                    .filter(|(d, _)| *d < LIT)
+                    .min_by(|a, b| a.0.total_cmp(&b.0))
+                    .map(|(_, s)| s)
+            };
+            Glow { pos, slot: lamp.or_else(data), colour }
+        })
+        .collect()
+}
+
+/// Glows closer than MERGE as one: the average position, the first glow's colour.
+fn merge(glows: &[(Vec3, u32)]) -> Vec<(Vec3, u32)> {
     let mut groups: Vec<(Vec3, f32, u32)> = Vec::new();
     for &(g, colour) in glows {
         match groups.iter_mut().find(|(s, n, _)| (*s / *n).distance(g) < MERGE) {
@@ -104,11 +131,18 @@ fn build(
             None => groups.push((g, 1.0, colour)),
         }
     }
-    let mut lamps: Vec<(Vec3, u32)> = groups
-        .into_iter()
-        .map(|(s, n, c)| (s / n, c))
-        .filter(|(c, _)| !lights.iter().any(|(p, _)| p.distance(*c) < LIT))
-        .collect();
+    groups.into_iter().map(|(s, n, c)| (s / n, c)).collect()
+}
+
+/// The lamps of `glows` not already lit by `lights` (position, slot), slots from `first`.
+fn build(
+    glows: &[(Vec3, u32)],
+    lights: &[(Vec3, u32)],
+    first: u32,
+    ray: impl Fn(Vec3, Vec3) -> Option<f32>,
+) -> Vec<Lamp> {
+    let mut lamps: Vec<(Vec3, u32)> =
+        merge(glows).into_iter().filter(|(c, _)| !lights.iter().any(|(p, _)| p.distance(*c) < LIT)).collect();
     lamps
         .sort_by(|a, b| (a.0.x, a.0.z, a.0.y).partial_cmp(&(b.0.x, b.0.z, b.0.y)).unwrap_or(std::cmp::Ordering::Equal));
     let mut out = Vec::new();
@@ -186,5 +220,11 @@ mod tests {
         let own = build(&glows, &[], 10, ray);
         assert_eq!(own.len(), 3);
         assert!(own.iter().all(|l| l.template == OWN && l.colour == 0x80604020));
+        // The halos' glows: the one by the door light has its slot, the lamps theirs.
+        let g = glows_of(&glows, &lights, &l);
+        assert_eq!(g.len(), 3);
+        assert_eq!(g[0].slot, Some(3));
+        assert!(g[1..].iter().all(|x| x.slot.is_some_and(|s| s >= 10)));
+        assert!(glows_of(&glows, &[], &[]).iter().all(|x| x.slot.is_none()));
     }
 }

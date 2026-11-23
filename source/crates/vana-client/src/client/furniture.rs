@@ -69,6 +69,12 @@ pub struct Drawn {
 }
 
 impl State {
+    /// The pieces on screen (client/night.rs, the fire furniture's light): record (slot, container), matrix, height in
+    /// yalms.
+    pub fn drawn_items(&self) -> impl Iterator<Item = ((u8, u8), glam::Mat4, f32)> + '_ {
+        self.drawn.iter().map(|d| (d.key, d.matrix, d.furn.height as f32 * 0.01))
+    }
+
     /// A new scene: its renderer has no furniture; the set loads again.
     pub fn reset(&mut self) {
         self.want.clear();

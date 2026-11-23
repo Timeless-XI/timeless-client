@@ -1,5 +1,5 @@
--- TimelessMenu's window: one card per TimelessXI mod (what it does, Open and its tab buttons), then the server's
--- commands.
+-- TimelessMenu's window: the TimelessXI mods by category (Pinned, Companions, World, Combat, Crafting & Shops,
+-- Games, Other), each a compact row (what it does, Open and its tab buttons), and the server's commands.
 --
 -- The cards come from the mods themselves: a loaded mod that offers "timeless_menu" (mods.provide) gives its card(s)
 -- when the menu draws, so a new mod shows up here without a change to the menu. The TimelessXI mods the menu knows
@@ -11,8 +11,8 @@ local Canvas = require("lib.canvas")
 local M = {}
 
 M.WIN = "timeless_menu"
-M.WIDTH = 560
-local CW = 536
+M.WIDTH = 720
+local CW = 696
 
 -- The TimelessXI mods: their cards when they aren't running to give their own.
 M.KNOWN = {
@@ -105,10 +105,71 @@ function M.entries()
   return out
 end
 
-local PAD = 12
-local BH = 26 -- button height
+-----------------------------------
+-- The layout: categories down the left, the chosen one's mods on the right as compact rows (title, one line of
+-- what it does with the rest in its tip, Open and its tabs). A mod names its category in its card
+-- (category = "Combat"); the menu knows TimelessXI's own; anything else goes under Other. Pin a mod (the star)
+-- and it's also under Pinned, which opens first. The window keeps one height: its tallest category's.
+-----------------------------------
+M.CATEGORIES = {
+  { key = "Pinned", tip = "The mods you've pinned (the star on a row)." },
+  { key = "Companions", tip = "Your companions." },
+  { key = "World", tip = "The world around you: maps, towns, notorious monsters, your quests and fame." },
+  { key = "Combat", tip = "In a fight: your gauges, enmity, monsters' moves and casts, Champions." },
+  { key = "Crafting & Shops", tip = "Shops, crafting and Masterworks." },
+  { key = "Games", tip = "Cardian and other games." },
+  { key = "Other", tip = "Mods that don't name a category." },
+  { key = "Server", tip = "The server's commands; the answers come in chat." },
+}
 
-local function button_w(it) return math.max(60, Canvas.measure(it.label, 0.9, it.primary) + 24) end
+-- TimelessXI's mods, by card title, for cards that don't say (older versions)
+M.CATEGORY_OF = {
+  ["Companion Manager"] = "Companions", ["Companion View"] = "Companions",
+  ["World Map"] = "World", ["Town"] = "World", ["NM Atlas"] = "World", ["Journal"] = "World", ["Reputation"] = "World",
+  ["Job Gauges"] = "Combat", ["Enmity"] = "Combat", ["Telegraphs"] = "Combat", ["Champions"] = "Combat", ["Cast Bars"] = "Combat",
+  ["Shops"] = "Crafting & Shops", ["Masterworks"] = "Crafting & Shops",
+  ["Cardian"] = "Games",
+}
+
+local SIDE = 150  -- the categories' column
+local GAP = 12
+local RX = SIDE + GAP
+local RW = CW - RX
+local PAD = 10
+local BH = 24 -- button height
+
+local function prefs()
+  storage.account.menu = storage.account.menu or {}
+  local p = storage.account.menu
+  p.pinned = p.pinned or {}
+  return p
+end
+M.prefs = prefs
+
+local function category(card)
+  local c = card.category or M.CATEGORY_OF[card.title]
+  for _, k in ipairs(M.CATEGORIES) do
+    if k.key == c and c ~= "Pinned" and c ~= "Server" then return c end
+  end
+  return "Other"
+end
+M.category = category
+
+-- Every card with its entry, by category: { [category] = { { card, entry }, ... } }
+function M.grouped()
+  local out = {}
+  for _, k in ipairs(M.CATEGORIES) do out[k.key] = {} end
+  local pinned = prefs().pinned
+  for _, entry in ipairs(M.entries()) do
+    for _, card in ipairs(entry.cards) do
+      table.insert(out[category(card)], { card = card, entry = entry })
+      if pinned[card.title] then table.insert(out.Pinned, { card = card, entry = entry }) end
+    end
+  end
+  return out
+end
+
+local function button_w(it) return math.max(52, Canvas.measure(it.label, 0.85, it.primary) + 18) end
 
 -- How many rows a row of buttons takes in w.
 local function rows(items, w)
@@ -117,7 +178,7 @@ local function rows(items, w)
   for _, it in ipairs(items) do
     local bw = button_w(it)
     if cx > 0 and cx + bw > w then cx, n = 0, n + 1 end
-    cx = cx + bw + 6
+    cx = cx + bw + 5
   end
   return n
 end
@@ -128,14 +189,14 @@ local function button_row(c, x, y, w, items, enabled, key)
   for i, it in ipairs(items) do
     local bw = button_w(it)
     if cx > x and cx + bw > x + w then
-      cx, cy = x, cy + BH + 6
+      cx, cy = x, cy + BH + 5
     end
     c:button(cx, cy, bw, BH, it.label, { style = it.primary and "primary" or "plain", enabled = enabled, tip = it.tip,
-      bold = it.primary, key = key .. i, on = function()
+      bold = it.primary, size = 0.85, key = key .. i, on = function()
         M.run(it.command)
         if it.after then it.after() end
       end })
-    cx = cx + bw + 6
+    cx = cx + bw + 5
   end
   return cy + BH
 end
@@ -153,48 +214,110 @@ local function card_items(card, entry)
   return items
 end
 
--- One card's height and drawing.
-local function card_height(card, entry)
-  local inner = CW - PAD * 2
-  local h = PAD + 20 + Canvas.wrapped_height(card.desc or "", inner, 0.95)
-  local r = rows(card_items(card, entry), inner)
-  if r > 0 then h = h + 8 + r * BH + (r - 1) * 6 end
+local function row_height(card, entry)
+  local r = rows(card_items(card, entry), RW - PAD * 2)
+  local h = PAD + 18 + 16
+  if r > 0 then h = h + 6 + r * BH + (r - 1) * 5 end
   return h + PAD
 end
 
-local function draw_card(c, y, card, entry, n)
-  local h = card_height(card, entry)
-  c:card(0, y, CW, h)
-  local x, inner = PAD, CW - PAD * 2
+local function draw_row(c, y, card, entry, n)
+  local h = row_height(card, entry)
+  c:card(RX, y, RW, h)
+  local x, inner = RX + PAD, RW - PAD * 2
   local ty = y + PAD
-  local tw = c:text(x, ty, card.title, { bold = true, colour = entry.state == "running" and S.GOLD or S.MUTED, w = inner - 140 })
+  local p = prefs()
+  local pinned = p.pinned[card.title]
+  -- The pin: a small button at the right
+  c:button(RX + RW - PAD - 46, ty - 2, 46, 20, pinned and "Pinned" or "Pin", { style = pinned and "primary" or "plain", size = 0.72,
+    key = "pin" .. n, tip = pinned and "Take it out of Pinned." or "Also show it under Pinned, which opens first.",
+    on = function()
+      p.pinned[card.title] = not pinned or nil
+      pcall(storage.save)
+      M.render()
+    end })
+  local tw = c:text(x, ty, card.title, { bold = true, colour = entry.state == "running" and S.GOLD or S.MUTED, w = inner - 120 })
   local right = card.command or ""
   if entry.state == "off" then right = "installed, not running"
   elseif entry.state == "missing" then right = "not installed yet" end
-  c:text(CW - PAD, ty + 1, right, { size = 0.85, colour = S.FAINT, align = "right", w = inner - tw - 16 })
-  ty = c:para(x, ty + 20, inner, card.desc or "", { size = 0.95, colour = S.MUTED })
+  c:text(RX + RW - PAD - 54, ty + 1, right, { size = 0.8, colour = S.FAINT, align = "right", w = inner - tw - 70 })
+  -- What it does: one line here, all of it in the tip
+  local desc = card.desc or ""
+  local line = Canvas.fit(desc, inner, 0.85)
+  c:region(x, ty + 18, inner, 16, { key = "desc" .. n, title = card.title, tip = line ~= desc and desc or nil })
+  c:text(x, ty + 18, line, { size = 0.85, colour = S.MUTED, w = inner })
   local items = card_items(card, entry)
-  if #items > 0 then button_row(c, x, ty + 8, inner, items, true, "c" .. n .. "_") end
-  return y + h + 8
+  if #items > 0 then button_row(c, x, ty + 40, inner, items, true, "c" .. n .. "_") end
+  return y + h + 6
+end
+
+-- The height of a category's list, to keep the window one size
+local function list_height(list)
+  local h = 0
+  for _, it in ipairs(list) do h = h + row_height(it.card, it.entry) + 6 end
+  return h
+end
+
+local function server_height()
+  return 26 + rows(M.SERVER, RW) * (BH + 5) + 40
+end
+
+-- The category shown: the one picked; Pinned first when anything is pinned
+function M.current(groups)
+  local p = prefs()
+  local cur = M.state.category or p.category
+  if cur == nil or (cur ~= "Server" and #(groups[cur] or {}) == 0) then
+    cur = #groups.Pinned > 0 and "Pinned" or "Companions"
+    if #(groups[cur] or {}) == 0 then
+      for _, k in ipairs(M.CATEGORIES) do
+        if k.key ~= "Server" and #groups[k.key] > 0 then cur = k.key break end
+      end
+    end
+  end
+  return cur
 end
 
 function M.draw(c)
+  local groups = M.grouped()
+  local cur = M.current(groups)
+  -- The categories: the ones with something in them (and Server)
   local y = 0
-  local n = 0
-  for _, entry in ipairs(M.entries()) do
-    for _, card in ipairs(entry.cards) do
-      n = n + 1
-      y = draw_card(c, y, card, entry, n)
+  local tallest = 0
+  for i, k in ipairs(M.CATEGORIES) do
+    local list = groups[k.key] or {}
+    if k.key == "Server" or #list > 0 then
+      local lit = k.key == cur
+      c:button(0, y, SIDE, 30, k.key, { style = lit and "on" or "off", key = "cat" .. i, tip = k.tip,
+        sub = nil, on = (not lit) and function()
+          M.state.category = k.key
+          local p = prefs()
+          p.category = k.key
+          pcall(storage.save)
+          M.render()
+        end or nil })
+      if k.key ~= "Server" then
+        c:text(SIDE - 10, y + 7, tostring(#list), { size = 0.78, colour = lit and S.TEXT or S.FAINT, align = "right" })
+      end
+      y = y + 34
+      tallest = math.max(tallest, k.key == "Server" and server_height() or list_height(list))
     end
   end
-  y = c:heading(0, y + 4, CW, "Server", "answers come in chat")
-  y = button_row(c, 0, y, CW, M.SERVER, true, "srv")
-  if M.state.note and os.clock() - M.state.note_at < 8 then
-    c:text(0, y + 8, M.state.note, { size = 0.85, colour = S.FAINT, w = CW })
+  c:para(0, y + 6, SIDE, "Drag the hourglass anywhere; right-click it to hide it (/tm button).", { size = 0.72, colour = S.FAINT })
+  -- The chosen category
+  local ry = 0
+  if cur == "Server" then
+    ry = c:heading(RX, 0, RW, "Server", "answers come in chat")
+    ry = button_row(c, RX, ry, RW, M.SERVER, true, "srv")
+  else
+    for n, it in ipairs(groups[cur] or {}) do
+      ry = draw_row(c, ry, it.card, it.entry, n)
+    end
   end
-  c:para(0, y + (M.state.note and 28 or 8), CW,
-    "Drag the hourglass button anywhere; right-click it to hide it (/tm button brings it back).",
-    { size = 0.8, colour = S.FAINT })
+  if M.state.note and os.clock() - M.state.note_at < 8 then
+    c:text(RX, ry + 8, M.state.note, { size = 0.8, colour = S.FAINT, w = RW })
+  end
+  -- One height for every category, so the window doesn't jump about
+  c:grow(math.max(tallest, y + 60))
 end
 
 function M.setup()

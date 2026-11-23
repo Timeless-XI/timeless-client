@@ -309,6 +309,10 @@ from the canvas's top left corner, with y going down; drawing outside it is cut 
 over it sends `hover` {x, y} (at most once a frame) and `leave` when it goes (see [Window events](#window-events)). To redraw it, give it a
 new `draw` list with `ui.update(window, canvas, {draw = ...})`. It is not a cursor stop.
 
+*TimelessXI fork:* in the modern UI the player's Mod Interface Size (Settings, config `modern_mod_scale`) draws canvases
+that many times bigger, and a window holding a canvas that much wider. Your canvas units do not change: clicks, drags
+and hovers still come in them, and `ui.bounds` gives the drawn size and its `scale`.
+
 A press and release without moving is a click. Moving more than a few units with the button down starts a drag
 instead, and no `click` follows it.
 
@@ -331,6 +335,7 @@ fields, all numbers defaulting to `0` unless shown:
 | `"text"` | `x`, `y`, `text` (default `""`), `size` (default `1`), `align`, `font`, `outline` | Text at (x, y), in the UI's text font: `size` times its small text, `align` `"left"` (the default), `"center"` or `"right"` of `x`, `font = "bold"` for the bold face, `outline` a colour round the letters. The classic UI draws its font at one size. |
 | `"tip"` | `x`, `y`, `w`, `h`, `title`, `text` | Nothing drawn: the tooltip shown while the pointer rests on that rectangle (modern UI). |
 | `"icon"` | `x`, `y`, `size` (default `16`), `kind`, `id` | A square icon with its top left at (x, y), tinted by `colour` (its alpha fades it; the classic UI draws it plain): `kind` is `"item"` (or none), `"status"`, `"spell"` or `"ability"`, as for [`hud.icon`](hud.md#hudicon). `id` is required. |
+| `"portrait"` | `x`, `y`, `w`, `h`, `entity` or `model`, `body`, `turn`, `spin`, `shape` (default `"square"`), `bg`, `frame`, `frame_w` | *TimelessXI fork (`mod.model_portraits`).* An actor drawn live in the rectangle, as [`hud.portrait`](hud.md#hudportrait): a server id, or a model id drawn from the game's files. Without `bg` the backdrop is clear and only the model shows over the canvas. Portraits in canvases and on the HUD share the four slots. |
 
 ### chip
 

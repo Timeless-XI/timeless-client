@@ -7,6 +7,7 @@ pub mod cull;
 pub mod dancer;
 pub mod effects;
 pub mod gputime;
+pub mod halo;
 pub mod invwin;
 pub mod lampshadow;
 pub mod leak;
@@ -24,6 +25,7 @@ pub mod nostalgia;
 pub mod screens;
 pub mod shadow;
 pub mod smaa;
+pub mod snow;
 pub mod ssao;
 pub mod sunshadow;
 pub mod sway;
@@ -283,6 +285,13 @@ pub struct Uniforms {
     modes: [f32; 4],
     /// Windowed mode's light boost (light_boost): rgb factors, w = 1 on.
     boost: [f32; 4],
+    /// Ours (Settings' Night Lighting, client/night.rs): x 1 Modern (0 Original: the rest unused), y seconds (the
+    /// fire flicker), z how far into the night (0 day .. 1), w 0.
+    night: [f32; 4],
+    /// Ours, with night.x: each table slot's light scaled (the lamplighter's lamps, the night's brighter lamps).
+    slot_scale: [[f32; 4]; LIGHTS / 4],
+    /// Ours (Settings' Weather Modern, client/storm.rs): x the snow on the ground, y the gust, z the storm, w 0.
+    weather: [f32; 4],
 }
 
 /// Windowed mode's light boost (FUN_1000be50, the SetLight wrapper FUN_1000bf30's helper; only while config 0034 !=
@@ -453,6 +462,13 @@ pub struct ZoneRenderer {
     pub smooth_lights: bool,
     /// Windowed mode's light boost (light_boost; zero = off).
     pub light_boost: [f32; 4],
+    /// Ours (client/night.rs): the night uniforms (Uniforms::night, slot_scale); night[0] = 0 leaves retail's.
+    pub night: [f32; 4],
+    pub slot_scale: [f32; LIGHTS],
+    /// Ours (client/storm.rs): the weather uniform (Uniforms::weather); zero leaves retail's.
+    pub weather: [f32; 4],
+    /// The next set_lamps is a moving light's (logged at debug, not info).
+    lamps_quiet: bool,
     /// The zone's scenery culled on the GPU (render/cull.rs) when the device draws indirectly, and its passes.
     cull: Option<cull::Cull>,
     cull_pipes: [wgpu::ComputePipeline; 2],
@@ -844,6 +860,8 @@ pub struct ActorGpu {
     pub tint: [f32; 3],
     /// Target flash (client/flash.rs): ambient lerp toward 220 / 255 and fog colour scale.
     pub flash: [f32; 2],
+    /// Snow settled on it (client/storm.rs settle, 0..1): zone.wgsl's snow_dust. It rides the area slot's fraction.
+    pub snow: f32,
     /// The floor's four point lights (table slot + 1, 0 none): FUN_100c94a0 picks the strongest.
     pub lights: [u8; 4],
     /// The area 4cc it stands in (vtable +0x188, the floor's +0xb0): its environment lights it (0 = the zone's).
@@ -1933,6 +1951,17 @@ impl ZonePipes {
 
 /// Point-light table entries (DAT_105ecae8: 256).
 pub const LIGHTS: usize = 256;
+
+/// Ours (Settings' Night Lighting Modern, client/night.rs): a light put in the table outright (a lantern, a torch,
+/// the player's own light, a mod's): its position, slot, colour (1 = 0x80), range and intensity.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Placed {
+    pub pos: Vec3,
+    pub slot: u32,
+    pub colour: [f32; 3],
+    pub range: f32,
+    pub intensity: f32,
+}
 /// Ours: how far past an instance's bounding sphere a lamp's light is offered to it (set_lamps; the light's range
 /// cuts it in the shader).
 const LAMP_REACH: f32 = 16.0;
@@ -2579,6 +2608,10 @@ impl ZoneRenderer {
             bump_mode: true,
             smooth_lights: false,
             light_boost: [0.0; 4],
+            night: [0.0; 4],
+            slot_scale: [1.0; LIGHTS],
+            weather: [0.0; 4],
+            lamps_quiet: false,
             scenery_bump: p.scenery_bump,
             scenery: p.scenery,
             scenery_furn: p.scenery_furn,
@@ -2803,8 +2836,9 @@ impl ZoneRenderer {
     /// Ours (the Lamp Lights setting, client/lamps.rs): the lamps' lights (position, table slot) go into the free light
     /// slots of the zone instances near them, nearest first; an empty list puts the instances' back. Waits for a
     /// streamed zone's geometry.
-    pub fn set_lamps(&mut self, gpu: &Gpu, lamps: &[(Vec3, u32)]) {
+    pub fn set_lamps(&mut self, gpu: &Gpu, lamps: &[(Vec3, u32)], quiet: bool) {
         self.lamps_wanted = Some(lamps.to_vec());
+        self.lamps_quiet = quiet;
         if self.geo_pending.is_none() {
             self.apply_lamps(gpu);
         }
@@ -2812,6 +2846,7 @@ impl ZoneRenderer {
 
     fn apply_lamps(&mut self, gpu: &Gpu) {
         let Some(lamps) = self.lamps_wanted.take() else { return };
+        let level = if std::mem::take(&mut self.lamps_quiet) { log::Level::Debug } else { log::Level::Info };
         let next = lamp_slots(&self.inst_lights, &self.spheres, &lamps);
         let full = self
             .inst_lights
@@ -2836,10 +2871,11 @@ impl ZoneRenderer {
                     put(i, own);
                 }
             }
-            log::info!("lamps: {} sub-area instances lit by lamps", snext.len());
+            log::log!(level, "lamps: {} sub-area instances lit by lamps", snext.len());
             sub.lamp_patch = snext;
         }
-        log::info!(
+        log::log!(
+            level,
             "lamps: {} lamp lights on {} instances; {full} near a lamp have no free slot",
             lamps.len(),
             next.len()
@@ -3530,6 +3566,7 @@ impl ZoneRenderer {
                 shadow_off: false,
                 tint: [1.0; 3],
                 flash: [0.0, 1.0],
+                snow: 0.0,
                 lights: [0; 4],
                 area: 0,
                 bg_lit: false,
@@ -3584,7 +3621,8 @@ impl ZoneRenderer {
         let area = match self.area_keys.iter().position(|&k| k == actor.area) {
             Some(s) if actor.area != 0 => (s + 1) as f32,
             _ => 0.0,
-        } + if actor.bg_lit { 65536.0 } else { 0.0 };
+        } + if actor.bg_lit { 65536.0 } else { 0.0 }
+            + actor.snow.clamp(0.0, 1.0) * 0.98;
         actor.origin = model.w_axis.truncate();
         let Some(skin) = actor.skin.as_mut() else { return };
         while !self.poses.len().is_multiple_of(16) {
@@ -3697,6 +3735,7 @@ impl ZoneRenderer {
             shadow_off: false,
             tint: [1.0; 3],
             flash: [0.0, 1.0],
+            snow: 0.0,
             lights: [0; 4],
             area: 0,
             bg_lit: false,
@@ -3793,6 +3832,9 @@ impl ZoneRenderer {
             two: [[0.0; 4]; 4],
             modes: [self.bump_mode as u32 as f32, self.smooth_lights as u32 as f32, 0.0, 0.0],
             boost: self.light_boost,
+            night: self.night,
+            slot_scale: bytemuck::cast(self.slot_scale),
+            weather: self.weather,
         };
         let mut clear = self.fog_color;
         if let Some(l) = &self.lighting {
