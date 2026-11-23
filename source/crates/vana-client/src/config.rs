@@ -328,6 +328,10 @@ pub struct Config {
     /// Timeless XI: the Timeless interface (Interface = Timeless): the modern layer in the Timeless look
     /// (assets/timeless). Only means something with `modern_ui` on.
     pub timeless_ui: bool,
+    /// TimelessXI: the Timeless interface has been switched on once for this config (an older config, or one a
+    /// first start made before Timeless was the default, gets it at its next start; turned off later, it stays off).
+    #[serde(default)]
+    pub timeless_view_set: bool,
     /// Timeless XI: the Timeless interface's hotbars on 1..0 - =, Ctrl and Alt (off: those keys open the chat line again).
     pub timeless_hotbar: bool,
     /// Timeless XI: the hotbar slots' key labels: 0 always in the corner, 1 only on the slot under the pointer, 2 none.
@@ -646,8 +650,10 @@ impl Default for Config {
             cam_keys_y: 0,
             auto_sort: 0,
             mods: Vec::new(),
-            modern_ui: false,
-            timeless_ui: false,
+            // TimelessXI: the official client starts in the Timeless interface (title, Select ring, Create Character).
+            modern_ui: true,
+            timeless_ui: true,
+            timeless_view_set: true,
             timeless_hotbar: true,
             timeless_key_labels: 0,
             window_maximized: false,
@@ -715,6 +721,11 @@ impl Config {
         // A config from before the lists: its one login starts them.
         if c.logins.is_empty() && !c.server.trim().is_empty() && !c.username.trim().is_empty() {
             c.remember_login();
+        }
+        if !c.timeless_view_set {
+            c.modern_ui = true;
+            c.timeless_ui = true;
+            c.timeless_view_set = true;
         }
         c.modern_modes.split_timers();
         c.follow_applied_version();

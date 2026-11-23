@@ -2544,7 +2544,8 @@ mod tests {
     /// and Enter; Up from the page name wraps to the last row.
     #[test]
     fn extras_buttons() {
-        let c = Config::default();
+        // The retail interface's Extras (TimelessXI's default is the Timeless interface).
+        let c = Config { modern_ui: false, timeless_ui: false, ..Config::default() };
         let mut ui = SettingsUi::open_kind(&c, [1280, 800], Kind::Extras);
         assert_eq!((ui.tab, ui.row), (0, 0));
         ui.key(egui::Key::ArrowLeft);
