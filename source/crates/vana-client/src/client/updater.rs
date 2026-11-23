@@ -339,6 +339,23 @@ fn replace_self(new: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Timeless XI: a release named by its tag (the Timeless client manifest's `latest`), its asset and signature at
+/// GitHub's fixed download addresses: no API call, so GitHub's hourly API limit never stops a required update.
+pub fn release_for(tag: &str) -> Release {
+    let tag = if tag.starts_with('v') { tag.to_string() } else { format!("v{tag}") };
+    let base = format!("https://github.com/{CLIENT_RELEASE_REPO}/releases/download/{tag}/{}", asset_name());
+    Release { tag, url: base.clone(), size: 0, sig_url: Some(format!("{base}.sig")) }
+}
+
+/// Timeless XI: downloads `r`, checks its signature and puts it in place of the running client (the caller
+/// restarts). `progress`: (bytes, total).
+pub fn install_release(r: &Release, progress: &dyn Fn(u64, u64)) -> Result<()> {
+    let dest = exe().context("no executable path")?.with_extension("new");
+    download(&r.url, &dest, progress)?;
+    verify(r, &dest)?;
+    replace_self(&dest)
+}
+
 /// Removes what replace_self left behind (at start, which also takes the executable's path).
 pub fn tidy() {
     if let Some(exe) = exe() {
@@ -901,9 +918,11 @@ mod tests {
     #[test]
     fn release_signatures() {
         use ring::signature::{Ed25519KeyPair, KeyPair};
-        // release/publish.sh's text and openssl's signature by the release key check against the built-in half.
-        let sig = hex::decode("6db22e308db928bf583baf80d49e91a6573ce88302c67964811dd7f9e0bf2bfa8b00d47f8889e6789d505fe2530cbba9402206e45e29cbd91bf8ba7a3015da01").unwrap();
-        assert!(signed_by(SIGNING_KEY, &signed_text("v0.0.0-test", "vana-client-linux-x86_64", b"binary"), &sig));
+        // Timeless XI: the built-in key is TimelessXI's: the published v1.0.14-timeless.3's signature checks against it.
+        let sig = hex::decode("dc72e22954f0e6b6f8456a8bbc51b0811d3477e551eb13876139cea9713cadcccd3cde12f1887276a47b0b7bda5bc1d9e47a9ff7f819d007f0d9e4ce802ce809").unwrap();
+        let text = "vana-client release\nv1.0.14-timeless.3\nvana-client-windows-x86_64.exe\n\
+                    ebf5116a8a0c02d3f8981b24adb4417b478e884b34371a59be33188457fcbc0e\n";
+        assert!(signed_by(SIGNING_KEY, text, &sig));
         let rng = ring::rand::SystemRandom::new();
         let pair = |rng| Ed25519KeyPair::from_pkcs8(Ed25519KeyPair::generate_pkcs8(rng).unwrap().as_ref()).unwrap();
         let (ours, theirs) = (pair(&rng), pair(&rng));

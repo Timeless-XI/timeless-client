@@ -59,6 +59,11 @@ mod tabs;
 mod theme;
 /// Timeless XI: the Timeless interface's hotbars and their Actions window.
 mod tlbar;
+// Timeless XI: the update gate over the title and the setup wizard (TimelessXI-Setup.exe).
+mod tlgate;
+mod tlsetup;
+pub(super) use tlgate::{Gate, GateOut};
+pub(super) use tlsetup::{SetupAction, SetupUi};
 // Timeless XI: the Timeless title's logo and /titlecam's guide.
 mod tltitle;
 mod tlselect;

@@ -14,6 +14,8 @@ fn main() {
     }
     println!("cargo:rerun-if-changed=assets/vana-client.rc");
     println!("cargo:rerun-if-changed=assets/vana-client.ico");
+    // Timeless XI: the exe carries the Timeless hourglass icon (assets/timeless/timeless.ico).
+    println!("cargo:rerun-if-changed=assets/timeless/timeless.ico");
     // rc.exe looks for the icon in its include dirs, not beside the .rc.
     let assets = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("assets");
     if let Err(e) = embed_resource::compile("assets/vana-client.rc", embed_resource::ParamsIncludeDirs([assets]))

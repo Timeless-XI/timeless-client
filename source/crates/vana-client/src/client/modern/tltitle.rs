@@ -78,6 +78,43 @@ fn frame_uv(i: usize) -> Rect {
     Rect::from_min_size(pos2(c as f32 * w, r as f32 * h), vec2(w, h))
 }
 
+/// Timeless XI: the logo's hourglass (the moving part) over the logo drawn in `rect`, at `a`.
+fn hourglass(ctx: &Context, p: &egui::Painter, rect: Rect, a: f32) {
+    let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+    // The hourglass, playing at 30 frames a second.
+    let at = |f: f32| rect.min + vec2(f * rect.width(), 0.0);
+    let glass = Rect::from_min_max(
+        pos2(at(SAND_RECT[0]).x, rect.min.y + SAND_RECT[1] * rect.height()),
+        pos2(at(SAND_RECT[2]).x, rect.min.y + SAND_RECT[3] * rect.height()),
+    );
+    let tint = Color32::from_white_alpha((a * 255.0) as u8);
+    match sheet(ctx) {
+        Some(sand) => {
+            let t = ctx.input(|i| i.time) as f32 % LOOP_SECS / LOOP_SECS * FRAMES as f32;
+            p.image(sand.id(), glass, frame_uv(t as usize), tint);
+        }
+        None => {
+            if let Some(still) = texture(ctx, "timeless/title_logo_sand0", SAND0_PNG) {
+                p.image(still.id(), glass, uv, tint);
+            }
+        }
+    }
+}
+
+/// Timeless XI: the whole hero logo (no tagline) in `rect` at `alpha`, the hourglass moving: the setup wizard and the
+/// Update Required card draw it where there is no title reel.
+pub(super) fn hero_logo(ctx: &Context, p: &egui::Painter, rect: Rect, alpha: f32) {
+    let Some(base) = texture(ctx, "timeless/title_logo_base", BASE_PNG) else { return };
+    let a = alpha.clamp(0.0, 1.0);
+    let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+    p.image(base.id(), rect, uv, Color32::from_white_alpha((a * 255.0) as u8));
+    hourglass(ctx, p, rect, a);
+    ctx.request_repaint();
+}
+
+/// The logo's width over its height.
+pub(super) const LOGO_ASPECT: f32 = 1329.0 / 846.0;
+
 impl Modern {
     /// The logo at `alpha`, with `glow` (the match cut's afterglow) and `flare` (its light, as the world goes) lighting
     /// its crystal.
@@ -111,24 +148,7 @@ impl Modern {
         let g = p.layout_job(job);
         let top = rect.max.y + rect.height() * 0.075;
         p.galley(pos2(rect.center().x - g.size().x / 2.0 + spacing / 2.0, top), g, colour);
-        // The hourglass, playing at 30 frames a second.
-        let at = |f: f32| rect.min + vec2(f * rect.width(), 0.0);
-        let glass = Rect::from_min_max(
-            pos2(at(SAND_RECT[0]).x, rect.min.y + SAND_RECT[1] * rect.height()),
-            pos2(at(SAND_RECT[2]).x, rect.min.y + SAND_RECT[3] * rect.height()),
-        );
-        let tint = Color32::from_white_alpha((a * 255.0) as u8);
-        match sheet(ctx) {
-            Some(sand) => {
-                let t = ctx.input(|i| i.time) as f32 % LOOP_SECS / LOOP_SECS * FRAMES as f32;
-                p.image(sand.id(), glass, frame_uv(t as usize), tint);
-            }
-            None => {
-                if let Some(still) = texture(ctx, "timeless/title_logo_sand0", SAND0_PNG) {
-                    p.image(still.id(), glass, uv, tint);
-                }
-            }
-        }
+        hourglass(ctx, &p, rect, a);
         ctx.request_repaint();
         // The crystal's light: soft rings of the focus colour, strongest at the cut, fading after it.
         let light = (glow + flare * 0.6).min(1.2) * alpha.max(flare);

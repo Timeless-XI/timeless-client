@@ -6764,7 +6764,7 @@ struct Place {
 
 /// The application icon (assets/vana-client.png at 256 px) for the window and the task bar.
 fn window_icon() -> Option<winit::window::Icon> {
-    let mut dec = png::Decoder::new(std::io::Cursor::new(&include_bytes!("../../assets/icon-256.png")[..]));
+    let mut dec = png::Decoder::new(std::io::Cursor::new(&include_bytes!("../../assets/timeless/timeless-256.png")[..] /* Timeless XI: the hourglass */));
     dec.set_transformations(png::Transformations::normalize_to_color8() | png::Transformations::ALPHA);
     let mut reader = dec.read_info().ok()?;
     let mut buf = vec![0u8; reader.output_buffer_size()?];
@@ -9227,6 +9227,10 @@ pub struct App {
     updates: Option<updater::Shared>,
     /// No game files yet: the download window (not retail).
     first_run: Option<firstrun::FirstRun>,
+    /// Timeless XI: the setup wizard (TimelessXI-Setup.exe, client/timeless/setup.rs) in place of the title.
+    tl_setup: Option<modern::SetupUi>,
+    /// Timeless XI: the update gate over the title (client/timeless/manifest.rs, client/modern/tlgate.rs).
+    tl_gate: modern::Gate,
     update_ui: Option<updater::UpdateUi>,
     /// The Update window opened by itself for an out-of-date PlayOnline Viewer (once a run).
     viewer_asked: bool,
@@ -9353,7 +9357,11 @@ impl App {
         let (tasks_tx, tasks) = channel();
         let phase = Phase::login(&cfg);
         // Config 0022 (FUN_10010d20 state 1): the opening movie before the title; in a test drive only with FFXI_OPENING.
-        let opening = (cfg.tool("0022") != 0 && (!drive.driven() || std::env::var_os("FFXI_OPENING").is_some()))
+        // Timeless XI: the setup wizard (TimelessXI-Setup.exe) plays no movie and checks for no updates.
+        let setup_mode = timeless::setup::wanted();
+        let opening = (!setup_mode
+            && cfg.tool("0022") != 0
+            && (!drive.driven() || std::env::var_os("FFXI_OPENING").is_some()))
             .then(|| opening::Opening::open(&cfg.ffxi_dir().join("mov")))
             .flatten();
         let installed = crate::dat::installed(&cfg.ffxi_dir());
@@ -9361,11 +9369,12 @@ impl App {
         // The executable's path while it is still the running file (a restart after an update needs it).
         let _ = updater::exe();
         // A test drive checks for updates only with FFXI_UPDATE_CHECK set.
-        let drive_checks = drive.login.is_none() || std::env::var_os("FFXI_UPDATE_CHECK").is_some();
+        let drive_checks = !setup_mode && (drive.login.is_none() || std::env::var_os("FFXI_UPDATE_CHECK").is_some());
         let updates = (drive_checks && cfg.ffxi_dir().join("VTABLE.DAT").is_file()).then(|| {
             updater::tidy();
             updater::start(cfg.ffxi_dir(), uses_playonline(&cfg))
         });
+        let tl_gate = if setup_mode || drive.driven() { modern::Gate::off() } else { modern::Gate::new() };
         let whats_new = notes::pending();
         // A test drive asks for the notes only with FFXI_NOTES_CHECK set (or FFXI_UPDATE_CHECK).
         let notes_check = drive_checks || std::env::var_os("FFXI_NOTES_CHECK").is_some();
@@ -9501,6 +9510,9 @@ impl App {
             lobby_settings: None,
             updates,
             first_run: None,
+            tl_setup: None,
+            // Timeless XI: the client manifest (required version, server), not for test drives or the setup.
+            tl_gate,
             update_ui: None,
             viewer_asked: false,
             whats_new,
@@ -15729,7 +15741,7 @@ impl App {
             gu.hide_title_art = tl;
         }
         // Timeless XI: the hero logo over the Timeless title's reel.
-        if self.timeless_title() && self.title_backdrop() {
+        if self.timeless_title() && self.title_backdrop() && self.tl_setup.is_none() {
             let place = self.flyover.as_ref().and_then(|f| f.playing()).map(|p| p.0.place).unwrap_or_default();
             // Before the reel's first shot has loaded the logo comes up all the same.
             if self.flyover.is_none() {
@@ -15791,6 +15803,27 @@ impl App {
         let (mut apply, mut save) = (false, false);
         let mut settings_new = false;
         let mut lobby_apply = LobbyApply::default();
+        // Timeless XI: the setup wizard is the whole window.
+        if let Some(su) = self.tl_setup.as_mut() {
+            match su.ui(ctx) {
+                modern::SetupAction::None => {}
+                modern::SetupAction::Quit => self.exit_requested = true,
+                modern::SetupAction::Configure { game_dir, manifest } => {
+                    // The installed client reads this config: the Timeless XI server, its game files, Timeless View.
+                    timeless::setup::configure(&mut self.cfg, &game_dir, manifest.as_ref());
+                    if let Err(e) = self.cfg.save() {
+                        log::warn!("setup: saving the config: {e:#}");
+                    }
+                }
+                modern::SetupAction::Play(exe) => {
+                    if let Err(e) = timeless::setup::launch(&exe) {
+                        log::warn!("setup: {e:#}");
+                    }
+                    self.exit_requested = true;
+                }
+            }
+            return;
+        }
         // The game UI is the only UI: until its data loads nothing draws, and if it fails one plain error shows.
         if let Some(fr) = self.first_run.as_mut() {
             match fr.ui(ctx) {
@@ -15832,6 +15865,34 @@ impl App {
                         ui.label(format!("The game data could not be loaded.\n{status}"));
                     },
                 );
+            }
+            return;
+        }
+        // Timeless XI: the client manifest's server for a config on the Timeless XI server, once it is read.
+        if let Some(server) = self.tl_gate.take_server()
+            && timeless::manifest::apply_server(&mut self.cfg, &server)
+            && !crate::config::is_copy()
+            && let Err(e) = self.cfg.save()
+        {
+            log::warn!("saving the config: {e:#}");
+        }
+        // Timeless XI: until the manifest is read (a few seconds at most), and while this client is older than the
+        // one it requires, the title's login and character menu give way to the update gate.
+        if matches!(self.phase, Phase::Login { .. } | Phase::Characters { .. })
+            && self.lobby_popup.is_none()
+            && self.tl_gate.holds()
+        {
+            match self.tl_gate.ui(ctx) {
+                modern::GateOut::None => {}
+                modern::GateOut::Exit => self.exit_requested = true,
+                modern::GateOut::Restart => {
+                    match updater::exe().map(|exe| std::process::Command::new(&exe).args(std::env::args().skip(1)).spawn()) {
+                        Some(Ok(c)) => log::info!("update: restarted (pid {})", c.id()),
+                        Some(Err(e)) => log::warn!("update: restart failed: {e}"),
+                        None => log::warn!("update: restart failed: no executable path"),
+                    }
+                    self.exit_requested = true;
+                }
             }
             return;
         }
@@ -18108,6 +18169,12 @@ impl App {
     /// Parses the lobby DATs and font on a worker thread.
     fn load_game_ui(&mut self) {
         self.game_ui_state = LoadState::Loading;
+        // Timeless XI: the setup wizard needs nothing of the game's.
+        if timeless::setup::wanted() {
+            self.tl_setup.get_or_insert_with(modern::SetupUi::new);
+            self.game_ui_state = LoadState::Failed;
+            return;
+        }
         if firstrun::needed(&self.cfg.ffxi_dir()) {
             self.first_run = Some(firstrun::FirstRun::new(self.cfg.game_dir.clone()));
             self.game_ui_state = LoadState::Failed;
@@ -18192,7 +18259,7 @@ impl App {
         if !self.shown {
             self.shown = true;
             gfx.window.set_visible(true);
-            if self.first_run.is_none() {
+            if self.first_run.is_none() && self.tl_setup.is_none() {
                 self.refullscreen.set(Some(3));
             }
         }
@@ -18407,6 +18474,10 @@ impl App {
     fn scene_loads(&mut self) {
         if self.game_ui_state == LoadState::Idle {
             self.load_game_ui();
+        }
+        // Timeless XI: the setup wizard loads no scenes.
+        if self.tl_setup.is_some() {
+            return;
         }
         if self.title_backdrop() {
             if self.flyover.is_none() && self.flyover_state == LoadState::Idle {
@@ -18658,7 +18729,7 @@ impl App {
                 g.window.set_visible(true);
             }
             // A full-screen state asked for while the window was hidden is not kept by KWin; ask again once mapped.
-            if self.first_run.is_none() {
+            if self.first_run.is_none() && self.tl_setup.is_none() {
                 self.refullscreen.set(Some(3));
             }
         }
@@ -21571,10 +21642,28 @@ impl ApplicationHandler for App {
         }
         // Hidden (and on Wayland unmapped, nothing being presented) until the title can draw. Driven test runs
         // don't ask for focus and say so in the title, so they never take the user's keyboard.
-        let title = if self.drive.driven() { "FINAL FANTASY XI [test]" } else { "FINAL FANTASY XI" };
+        let setup_mode = timeless::setup::wanted();
+        let title = if self.drive.driven() {
+            "FINAL FANTASY XI [test]"
+        } else if setup_mode {
+            "Timeless XI Setup"
+        } else if self.cfg.timeless_ui {
+            // Timeless XI: the window (and the taskbar) names the game it is.
+            "Timeless XI"
+        } else {
+            "FINAL FANTASY XI"
+        };
         // No game files yet: the first-start window is a fixed size, whatever the config says.
-        let bootstrap = firstrun::needed(&self.cfg.ffxi_dir());
-        let [ww, wh] = if bootstrap { firstrun::WINDOW } else { self.cfg.window_size() };
+        let bootstrap = setup_mode || firstrun::needed(&self.cfg.ffxi_dir());
+        let [ww, wh] = if setup_mode {
+            // Timeless XI: the wizard is laid out in points; the window is that size at the screen's scale.
+            let s = event_loop.primary_monitor().map_or(1.0, |m| m.scale_factor());
+            timeless::setup::WINDOW.map(|v| (v as f64 * s).round() as u32)
+        } else if bootstrap {
+            firstrun::WINDOW
+        } else {
+            self.cfg.window_size()
+        };
         // Test runs are windowed, unless their config puts them borderless on a named monitor (mode 3), which keeps
         // them off the screen the user works on.
         let test_monitor = self.drive.driven() && self.cfg.window_mode() == 3 && !self.cfg.monitor.is_empty();
@@ -21745,7 +21834,13 @@ impl ApplicationHandler for App {
             // 5120 at 200%); full screen keeps the monitor's size.
             WindowEvent::ScaleFactorChanged { scale_factor, mut inner_size_writer } => {
                 if gfx.window.fullscreen().is_none() {
-                    let [w, h] = if self.first_run.is_some() { firstrun::WINDOW } else { self.cfg.window_size() };
+                    let [w, h] = if self.tl_setup.is_some() {
+                        timeless::setup::WINDOW.map(|v| (v as f64 * scale_factor).round() as u32)
+                    } else if self.first_run.is_some() {
+                        firstrun::WINDOW
+                    } else {
+                        self.cfg.window_size()
+                    };
                     log::info!("window: scale factor {scale_factor}, keeping {w}x{h}");
                     let _ = inner_size_writer.request_inner_size(winit::dpi::PhysicalSize::new(w, h));
                 }
@@ -22264,6 +22359,11 @@ fn arrows_take_shift(w: &World) -> bool {
 /// A '-' key press among the events (egui maps the numpad's minus to Key::Minus too).
 fn minus_pressed(events: &[egui::Event]) -> bool {
     events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::Minus, pressed: true, .. }))
+}
+
+/// Timeless XI: `uninstall` (Windows Installed apps > Timeless XI > Uninstall): client/timeless/setup.rs.
+pub fn timeless_uninstall() -> Result<()> {
+    timeless::setup::uninstall()
 }
 
 pub fn run(cfg: Config, drive: Drive) -> Result<()> {

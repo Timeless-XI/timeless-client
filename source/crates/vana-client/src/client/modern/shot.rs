@@ -905,6 +905,8 @@ pub struct Opts {
     pub select: u8,
     /// Timeless XI: drawn in the Timeless interface (Timeless View).
     pub timeless: bool,
+    /// Timeless XI: a setup wizard page or the update gate (tlsetup::mock / tlgate::mock).
+    pub setup: Option<String>,
 }
 
 pub fn shot(width: u32, height: u32, scale: u32, backdrop: Option<&Path>, out: &Path, opts: &Opts) -> Result<()> {
@@ -958,6 +960,9 @@ pub fn shot(width: u32, height: u32, scale: u32, backdrop: Option<&Path>, out: &
     });
     let mut layout = Layout::new();
     let mut last = None;
+    // Timeless XI: the setup wizard or the update gate, with sample values.
+    let mut setup = opts.setup.as_deref().filter(|p| !p.starts_with("gate")).map(super::tlsetup::mock);
+    let mut gate = opts.setup.as_deref().filter(|p| p.starts_with("gate")).map(super::tlgate::mock);
     // Frame 0 only sets the screen (egui's first frame has its default one); the time steps finish the fades.
     for frame in 0..8 {
         let raw = egui::RawInput {
@@ -979,7 +984,20 @@ pub fn shot(width: u32, height: u32, scale: u32, backdrop: Option<&Path>, out: &
                     Color32::WHITE,
                 );
             }
-            if opts.select > 0 {
+            if let Some(su) = setup.as_mut() {
+                su.ui(ctx);
+            } else if let Some(g) = gate.as_mut() {
+                // Over the title's look: the logo where the reel shows it.
+                let screen = ctx.content_rect();
+                let p = ctx.layer_painter(LayerId::new(Order::Background, Id::unique("gate shot logo")));
+                let h = screen.height() * 0.42;
+                let r = Rect::from_center_size(
+                    pos2(screen.center().x, screen.min.y + screen.height() * 0.29),
+                    vec2(h * super::tltitle::LOGO_ASPECT, h),
+                );
+                super::tltitle::hero_logo(ctx, &p, r, 1.0);
+                g.ui(ctx);
+            } else if opts.select > 0 {
                 mock_style(ctx);
                 let v = select_sample(opts.select == 2);
                 m.select_screen(ctx, None, [width, height], scale, &v);

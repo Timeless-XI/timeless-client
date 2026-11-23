@@ -72,6 +72,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Timeless XI: remove the Timeless XI install (what Windows' Installed apps > Uninstall runs).
+    Uninstall,
     /// Install the game data from FFXIFullSetup_US.part1.exe (or an extracted copy).
     Install {
         source: PathBuf,
@@ -704,6 +706,10 @@ enum Cmd {
         /// Timeless XI: the Select Character panels (1), with the log-in prompt (2).
         #[arg(long, default_value_t = 0)]
         select: u8,
+        /// Timeless XI: a setup wizard page with sample values (welcome, choose, working, done, failed) or the
+        /// title's update gate (gate, gate-updating, gate-checking), in place of the panels.
+        #[arg(long)]
+        setup: Option<String>,
     },
     /// Disassemble a zone's event scripts (event DAT), with dialogue text inlined.
     EventDump {
@@ -1266,6 +1272,7 @@ fn main() -> Result<()> {
         return client::run(config::Config::load(), client::Drive::default());
     };
     match cmd {
+        Cmd::Uninstall => client::timeless_uninstall(),
         Cmd::Play { credentials, character, walk, goto, screenshot, after, quit, input, chase } => {
             let goto: Vec<(f32, f32)> = goto
                 .unwrap_or_default()
@@ -1475,6 +1482,7 @@ fn main() -> Result<()> {
             controller,
             mods,
             select,
+            setup,
         } => {
             let list = font.is_some();
             client::modern_shot(
@@ -1502,6 +1510,7 @@ fn main() -> Result<()> {
                     controller,
                     mods,
                     select,
+                    setup,
                 },
             )
         }

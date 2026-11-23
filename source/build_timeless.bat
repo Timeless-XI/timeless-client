@@ -36,9 +36,12 @@ rem --- Build --------------------------------------------------------------
 echo Building the Timeless XI client (the first build takes several minutes)...
 cargo build --release -p vana-client
 if errorlevel 1 goto failed
+rem Timeless XI: the same exe under the setup name is the player download (it opens the setup wizard).
+copy /y "target\release\vana-client.exe" "target\release\TimelessXI-Setup.exe" >nul
 echo.
 echo Built: %CD%\target\release\vana-client.exe
-echo Start it with VanaLocal\Play Timeless Local.bat
+echo Player download (setup wizard): %CD%\target\release\TimelessXI-Setup.exe
+echo Start the client with VanaLocal\Play Timeless Local.bat
 pause
 exit /b 0
 
