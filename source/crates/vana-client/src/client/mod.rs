@@ -16811,6 +16811,8 @@ impl App {
                         match out.action {
                             Some(select::Action::Login(i)) => {
                                 if let (Some(l), Some(c)) = (lobby.take(), chars.get(i).cloned()) {
+                                    // Timeless XI: the Select list's "Last played" (client/modern/tlselect.rs).
+                                    modern::record_played(&c.world, &c.name);
                                     action = Some(Box::new(move |app: &mut App| app.start_login_run(l, c)));
                                     fade_action = true;
                                 }

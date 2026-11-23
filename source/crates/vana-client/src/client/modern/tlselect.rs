@@ -213,24 +213,82 @@ pub fn prompt(ui: &mut Ui, m: &Modern, question: &str, labels: [&str; 2], yes: b
 // with a level medallion; the rows with the job plaque and something new at the right.
 // ---------------------------------------------------------------------------------------------------------------
 
-/// Which card and row the Select screen draws (the mock-ups' variants).
+/// Which card and row the Select screen draws. The owner chose the level medallion and "last played" (2026-11-22);
+/// the others stay for the mock-ups (modern-shot's `VANA_SELECT_MOCK`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CardStyle {
-    #[default]
     Plain,
     Portrait,
+    #[default]
     Medallion,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum RowRight {
     /// The job and level (round 3).
-    #[default]
     Job,
     /// The nation and its rank.
     Nation,
     /// When the character last played on this computer.
+    #[default]
     Played,
+}
+
+/// When each character last logged in on this computer: `timeless-last-played.json` beside config.json, "world:name"
+/// to unix seconds.
+fn played_path() -> std::path::PathBuf {
+    crate::config::config_path().with_file_name("timeless-last-played.json")
+}
+
+fn played_map() -> std::collections::HashMap<String, u64> {
+    std::fs::read_to_string(played_path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+/// Notes a log-in (the Select screen's Yes).
+pub fn record_played(world: &str, name: &str) {
+    let mut map = played_map();
+    map.insert(format!("{world}:{name}"), unix_now());
+    if let Ok(s) = serde_json::to_string_pretty(&map) {
+        let _ = std::fs::write(played_path(), s);
+    }
+}
+
+/// "Today", "Yesterday", "3 days ago", "2 weeks ago", "4 months ago", "A year ago", by whole days of `utc_offset`.
+pub fn played_label(at: u64, now: u64, utc_offset: i64) -> String {
+    let day = |t: u64| (t as i64 + utc_offset).div_euclid(86_400);
+    let days = (day(now) - day(at)).max(0);
+    match days {
+        0 => "Today".into(),
+        1 => "Yesterday".into(),
+        2..=13 => format!("{days} days ago"),
+        14..=59 => format!("{} weeks ago", days / 7),
+        60..=364 => format!("{} months ago", days / 30),
+        365..=729 => "A year ago".into(),
+        _ => format!("{} years ago", days / 365),
+    }
+}
+
+/// The row's "last played" text: the mock-up's sample, else this computer's record (re-read every few seconds).
+fn played_text(style: &Style, world: &str, name: &str) -> Option<String> {
+    if let Some(s) = style.played.get(name) {
+        return Some(s.clone());
+    }
+    thread_local! {
+        static CACHE: std::cell::RefCell<(u64, std::collections::HashMap<String, u64>)> = Default::default();
+    }
+    let t = unix_now();
+    let offset = super::super::cfgapply::utc_offset();
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        if t >= c.0 + 3 {
+            *c = (t, played_map());
+        }
+        c.1.get(&format!("{world}:{name}")).map(|at| played_label(*at, t, offset))
+    })
 }
 
 #[derive(Clone, Default)]
@@ -373,15 +431,11 @@ pub fn card_marked(ui: &mut Ui, m: &Modern, r: &RowView, labels: &[String; 5], n
             }
         }
         _ => {
-            spaced(
-                ui,
-                pos2(x + name_w + 12.0, name_y + 2.0),
-                Align2::LEFT_CENTER,
-                job,
-                m.theme.ui * 0.95,
-                m.theme.color("focus"),
-                1.6,
-            );
+            // The job plaque beside the name (main over sub), its level left to the medallion.
+            let _ = job;
+            if let Some(main) = job_code(r.job) {
+                super::hud::tl_job_plaque(&p, m, x + name_w + 14.0, name_y, main, job_code(r.sub_job), 0, true);
+            }
         }
     }
     let nation = match r.rank {
@@ -500,7 +554,7 @@ pub fn row_plaque(
             }
         }
         RowRight::Played => {
-            if let Some(when) = style.played.get(&r.name) {
+            if let Some(when) = played_text(style, &r.info[0], &r.name) {
                 spaced(
                     ui,
                     pos2(right, top),
@@ -516,4 +570,23 @@ pub fn row_plaque(
         RowRight::Job => {}
     }
     resp
+}
+
+#[cfg(test)]
+mod tests {
+    use super::played_label;
+
+    #[test]
+    fn last_played_by_calendar_day() {
+        let day: i64 = 86_400;
+        // 23:00 and 01:00 the next day (UTC-7): yesterday, though only two hours apart.
+        let off = -7 * 3600;
+        let late = (10 * day + 23 * 3600 - off) as u64;
+        assert_eq!(played_label(late, late + 2 * 3600, off), "Yesterday");
+        assert_eq!(played_label(late, late + 60, off), "Today");
+        assert_eq!(played_label(late, late + 3 * day as u64, off), "3 days ago");
+        assert_eq!(played_label(late, late + 20 * day as u64, off), "2 weeks ago");
+        assert_eq!(played_label(late, late + 100 * day as u64, off), "3 months ago");
+        assert_eq!(played_label(late, late + 400 * day as u64, off), "A year ago");
+    }
 }

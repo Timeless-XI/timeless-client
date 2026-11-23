@@ -48,6 +48,7 @@ mod points;
 mod rows;
 mod search;
 pub use search::SEARCH_LISTS;
+pub use tlselect::record_played;
 mod post;
 mod shop;
 pub mod shot;

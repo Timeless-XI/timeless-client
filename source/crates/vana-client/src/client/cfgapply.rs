@@ -117,7 +117,7 @@ pub fn stamp_text(mode: u32, [h, m, s]: [u8; 3]) -> String {
 }
 
 /// The local UTC offset in seconds, from date(1) once.
-fn utc_offset() -> i64 {
+pub(crate) fn utc_offset() -> i64 {
     static OFF: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
     *OFF.get_or_init(|| {
         // Windows: UTC = local + bias (minutes), the daylight or standard bias added while it applies.
