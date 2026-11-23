@@ -314,6 +314,10 @@ fn run(plan: &Plan, w: &Work) -> Result<Option<super::manifest::Manifest>> {
     let manifest = super::manifest::fetch().map_err(|e| log::warn!("setup: client manifest: {e:#}")).ok();
     let cap = manifest.as_ref().map(|m| m.game_version.clone()).unwrap_or_default();
     update_game(&game_dir.join("FINAL FANTASY XI"), &cap, p)?;
+    // The Timeless patches and the HD faces, so the first start already looks the part.
+    if let Err(e) = super::server::install_all(&game_dir.join("FINAL FANTASY XI"), &|what, d, t| set(p, what, d, t)) {
+        log::warn!("setup: Timeless patches / HD faces (the first start adds them): {e:#}");
+    }
     // 4. Shortcuts and the Installed apps entry (the config is the app's: the wizard writes it on the main thread).
     w.step.store(3, Ordering::Relaxed);
     set(p, "Adding Timeless XI to your computer", 0, 0);

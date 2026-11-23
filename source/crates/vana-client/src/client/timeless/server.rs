@@ -263,6 +263,11 @@ fn hd_cached(p: &Pack) -> Option<Result<PatchSet>> {
 
 /// Downloads pack `p` (no hurry: a slow line takes its time, and the next start writes it in).
 fn hd_download(p: &Pack) -> Result<()> {
+    hd_download_with(p, &|_, _| {})
+}
+
+/// `hd_download`, telling `on` the bytes read of the pack's data and its size.
+fn hd_download_with(p: &Pack, on: &dyn Fn(u64, u64)) -> Result<()> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .user_agent(concat!("vana-client/", env!("CARGO_PKG_VERSION")))
         .timeout_connect(Some(Duration::from_secs(20)))
@@ -274,14 +279,20 @@ fn hd_download(p: &Pack) -> Result<()> {
         if std::fs::read(d.join(name)).is_ok_and(|b| sha1(&b) == a.sha1.to_ascii_lowercase()) {
             continue;
         }
-        let b = agent
-            .get(&a.url)
-            .call()
-            .with_context(|| a.url.clone())?
-            .body_mut()
-            .with_config()
-            .limit(limit)
-            .read_to_vec()?;
+        let mut res = agent.get(&a.url).call().with_context(|| a.url.clone())?;
+        let size = res.body().content_length().unwrap_or(0);
+        let mut r = res.body_mut().with_config().limit(limit).reader();
+        let (mut b, mut buf) = (Vec::with_capacity(size as usize), vec![0u8; 1 << 16]);
+        loop {
+            let n = r.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            b.extend_from_slice(&buf[..n]);
+            if name == HD_BLOB {
+                on(b.len() as u64, size);
+            }
+        }
         if sha1(&b) != a.sha1.to_ascii_lowercase() {
             bail!("{} is not the file latest.json names (its SHA-1 differs)", a.url);
         }
@@ -298,6 +309,24 @@ fn hd_download(p: &Pack) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+/// The setup wizard: the main set and the HD faces pack written into the new game now (downloaded with progress), so
+/// the first start already has them. `on`: (what, bytes done, total). A failure leaves it to the client's first start.
+pub fn install_all(ffxi: &Path, on: &dyn Fn(&str, u64, u64)) -> Result<()> {
+    on("Adding the Timeless patches", 0, 0);
+    let ps = latest()?;
+    let rep = apply(&ps, ffxi, &dir())?;
+    log::info!("setup: timeless patches {}: {} written", ps.version, rep.written);
+    let Some(p) = hd_wanted() else { return Ok(()) };
+    if hd_cached(&p).is_none() {
+        hd_download_with(&p, &|d, t| on("Downloading the HD faces", d, t))?;
+    }
+    on("Adding the HD faces", 0, 0);
+    let ps = hd_cached(&p).context("the HD faces did not download")??;
+    let rep = apply(&ps, ffxi, &hd_dir().join("state"))?;
+    log::info!("setup: HD faces {}: {} written", ps.version, rep.written);
     Ok(())
 }
 
