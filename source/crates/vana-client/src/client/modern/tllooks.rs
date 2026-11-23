@@ -137,7 +137,7 @@ impl super::Modern {
                         .default_open(false)
                         .show(ui, |ui| light_ui(ui, w));
                     ui.separator();
-                    let has = shown.map_or(looks::Has { iris: true, lips: true, nose: true, marks: true }, |(r, f)| looks::layers_of(r, f));
+                    let has = shown.map_or(looks::Has { iris: true, lips: true, nose: true, marks: true, race: 7 }, |(r, f)| looks::layers_of(r, f));
                     ui.add_enabled_ui(s.on, |ui| body(ui, &mut s, has));
                 });
                 ui.separator();
@@ -189,13 +189,16 @@ fn body(ui: &mut egui::Ui, s: &mut Settings, has: looks::Has) {
     s.marks.resize(MARKS.len(), 0);
     if has.marks {
     heading(ui, "Face markings");
-    ui.label(RichText::new("Left / Right = under your character's own left or right eye.").small().color(muted()));
+    if has.race == 7 {
+        ui.label(RichText::new("Left / Right = under your character's own left or right eye.").small().color(muted()));
+    }
     egui::Grid::new("tl looks marks").num_columns(2).spacing(vec2(10.0, 4.0)).show(ui, |ui| {
-        for (k, name) in MARKS.iter().enumerate() {
+        let mithra = has.race == 7;
+        for (k, name) in looks::mark_names(has.race).iter().enumerate() {
             ui.label(RichText::new(*name).color(text()));
             ui.horizontal(|ui| {
                 let v = &mut s.marks[k];
-                if SIDED[k] {
+                if mithra && SIDED[k] {
                     for (val, label) in [(0, "Off"), (LEFT, "Left"), (BOTH, "Both"), (RIGHT, "Right")] {
                         ui.selectable_value(v, val, label);
                     }

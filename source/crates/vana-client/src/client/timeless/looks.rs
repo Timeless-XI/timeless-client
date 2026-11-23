@@ -73,8 +73,8 @@ pub const FACE_TEXTURES: [(&str, u8); 41] = [
 ];
 /// Each style's median skin brightness in its base (0..255): markings follow the skin's shading against it.
 const SKIN_MID: [f32; 8] = [90.3, 89.9, 88.7, 86.4, 91.6, 91.9, 87.4, 90.7];
-/// The markings, in mask order.
-pub const MARKS: [&str; 9] = [
+/// The markings, in mask order (Mithra; the other races have RACE_MARKS in the same nine slots).
+pub const MARKS: [&str; 12] = [
     "Swept crest",
     "Cheek stripes",
     "Brow & cheek line",
@@ -84,9 +84,51 @@ pub const MARKS: [&str; 9] = [
     "Crescent & tears",
     "War chevrons",
     "Constellation",
+    // 2026-11-23 owner picks: m2 R (the old nose channel), m4 B, m4 A.
+    "Whisker marks",
+    "Fang tears",
+    "Sunset band",
 ];
 /// The markings that can go on one side only (under one eye).
-pub const SIDED: [bool; 9] = [false, true, true, true, true, false, true, true, true];
+pub const SIDED: [bool; 12] = [false, true, true, true, true, false, true, true, true, false, false, false];
+
+/// How a race marking is drawn: in the marking colour, as darker skin (freckles) or as a raised pink scar.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Kind {
+    Ink,
+    Freckle,
+    Scar,
+}
+use Kind::{Freckle, Ink, Scar};
+
+/// Each race's own markings (owner picks 2026-11-23), in mask slot order (m2 G B A, m3 R G B A, m4 R G); drawn on both
+/// sides. Made by Custom_Faces/looks/race_marks.py - keep the two lists the same.
+pub fn race_marks(race: u8) -> &'static [(&'static str, Kind)] {
+    match race {
+        1 => &[("Freckles", Freckle), ("Steam line", Ink), ("Smelter's soot", Ink), ("Cartographer's cross", Ink), ("Foreman's chevrons", Ink)],
+        2 => &[("Freckles", Freckle), ("Steam line", Ink), ("Cartographer's cross", Ink), ("Filigree scroll", Ink), ("Envoy's crescent", Ink)],
+        3 => &[
+            ("Freckles", Freckle),
+            ("Fleur sigil", Ink),
+            ("Shield bars", Ink),
+            ("Sword scar", Scar),
+            ("Claw rake", Scar),
+            ("Iron jaw", Ink),
+            ("Lance stripes", Ink),
+            ("Knight's chevron", Ink),
+        ],
+        4 => &[("Freckles", Freckle), ("Fleur sigil", Ink), ("Shield bars", Ink), ("Lance stripes", Ink), ("Blade tear", Ink), ("Knight's chevron", Ink)],
+        5 => &[("Mana drop", Ink), ("Freckles", Freckle), ("Star map", Ink)],
+        6 => &[("Mana drop", Ink), ("Freckles", Freckle), ("Crescent moon", Ink), ("Petal spray", Ink), ("Comet trail", Ink), ("Twin stars", Ink)],
+        8 => &[("Freckles", Freckle), ("Ember streak", Ink), ("Ash stripes", Ink), ("Brow band", Ink)],
+        _ => &[],
+    }
+}
+
+/// The marking names the window lists for a race.
+pub fn mark_names(race: u8) -> Vec<&'static str> {
+    if race == 7 { MARKS.to_vec() } else { race_marks(race).iter().map(|m| m.0).collect() }
+}
 /// A marking's sides (`Settings::marks`): bit 0 the left (the mesh as stored), bit 1 the right (its mirrored copy).
 pub const LEFT: u8 = 1;
 pub const RIGHT: u8 = 2;
@@ -211,6 +253,9 @@ pub fn supported(race: u8, face: u16) -> bool {
 /// layers it has, and whether its markings have a right side of their own (a face mesh that isn't mirrored).
 #[derive(Deserialize)]
 pub struct RaceFace {
+    /// The race (from the races.json key).
+    #[serde(default)]
+    pub race: u8,
     pub style: u8,
     med: [f32; 5],
     hair: [u8; 3],
@@ -230,12 +275,20 @@ pub struct Has {
     /// Face markings: Mithra only for now (owner 2026-11-23: the other races get their own sets later).
     #[serde(default)]
     pub marks: bool,
+    /// The race (the window's marking list).
+    #[serde(default)]
+    pub race: u8,
 }
 
 fn race_faces() -> &'static HashMap<String, RaceFace> {
     static S: OnceLock<HashMap<String, RaceFace>> = OnceLock::new();
     S.get_or_init(|| {
-        serde_json::from_str(include_str!("../../../assets/timeless/looks/races/races.json")).unwrap_or_default()
+        let mut m: HashMap<String, RaceFace> =
+            serde_json::from_str(include_str!("../../../assets/timeless/looks/races/races.json")).unwrap_or_default();
+        for (k, f) in m.iter_mut() {
+            f.race = k.split('_').next().and_then(|r| r.parse().ok()).unwrap_or(0);
+        }
+        m
     })
 }
 
@@ -246,8 +299,8 @@ pub fn race_face(race: u8, face: u16) -> Option<&'static RaceFace> {
 /// The layers a face has (the window hides the others).
 pub fn layers_of(race: u8, face: u16) -> Has {
     match race_face(race, face) {
-        Some(f) if race != 7 => Has { marks: false, ..f.has },
-        _ => Has { iris: true, lips: true, nose: true, marks: true },
+        Some(f) if race != 7 => Has { marks: !race_marks(race).is_empty(), race, ..f.has },
+        _ => Has { iris: true, lips: true, nose: true, marks: true, race: 7 },
     }
 }
 
@@ -263,6 +316,8 @@ pub fn seed_any(race: u8, face: u16, keep: &Settings) -> Option<Settings> {
         tip: f.tip,
         eyes: f.eyes,
         lips: f.lips,
+        // Another race's own markings (the slots mean something else on each race).
+        marks: vec![0; MARKS.len()],
         ..keep.clone()
     })
 }
@@ -567,21 +622,23 @@ pub fn compose_prep(p: &Prep, s: &Settings, side: u8) -> Vec<u8> {
             sc.spawn(move || compose_race_rows(p, chunk, k * per / 4, s, side));
         }
     });
-    // Markings off on races 1-6 and 8 (owner 2026-11-23: Mithra only until each race has its own set).
-    let _ = (marks_pass as fn(&Prep, &mut [u8], &Settings, u8), side);
+    marks_pass(p, &mut out, s, side);
     out
 }
 
 /// The markings over a composed look (only the texels they touch).
 fn marks_pass(p: &Prep, out: &mut [u8], s: &Settings, side: u8) {
-    let (rl, f) = (p.rl, p.f);
-    let right = f.sides && rl.m.get(4).is_some_and(|m| !m.is_empty());
-    let left_on: Vec<bool> =
-        (0..MARKS.len()).map(|k| if right { s.mark(k) & LEFT != 0 } else { s.mark(k) & side != 0 }).collect();
-    let right_on: Vec<bool> = (0..MARKS.len()).map(|k| right && SIDED[k] && s.mark(k) & RIGHT != 0).collect();
-    if !(left_on.iter().chain(&right_on).any(|o| *o) && s.mark_strength > 0.0) {
+    let f = p.f;
+    // Each race's own markings (2026-11-23): drawn on both sides, in the nine slots; no right-side masks.
+    let list = race_marks(f.race);
+    let _ = side;
+    let left_on: Vec<bool> = (0..9).map(|k| k < list.len() && s.marks.get(k).copied().unwrap_or(0) != 0).collect();
+    let right_on = [false; 12];
+    let right = false;
+    if !(left_on.iter().any(|o| *o) && s.mark_strength > 0.0) {
         return;
     }
+    let rosy = matches!(f.race, 5 | 6);
     let strength = s.mark_strength.clamp(0.0, 1.0);
     let msk = f.med[4].max(20.0) / 255.0;
     let mark = unit(s.mark_colour);
@@ -595,7 +652,17 @@ fn marks_pass(p: &Prep, out: &mut [u8], s: &Settings, side: u8) {
         let mc = mark.map(|x| (x * sk).min(1.0));
         for (k, v) in left.iter().enumerate() {
             if left_on[k] && *v > 0 {
-                c = mix(c, mc, *v as f32 / 255.0 * strength);
+                let a = *v as f32 / 255.0 * strength;
+                c = match list[k].1 {
+                    Ink => mix(c, mc, a),
+                    // The skin itself, darker and warmer (Tarutaru: rosy).
+                    Freckle => {
+                        let t = if rosy { [0.78, 0.6, 0.55] } else { [0.66, 0.55, 0.48] };
+                        mix(c, [c[0] * t[0], c[1] * t[1], c[2] * t[2]], a * 0.75)
+                    }
+                    // A healed scar: raised, lighter and pinker than the skin round it.
+                    Scar => mix(c, [(c[0] * 1.3 + 0.16).min(1.0), (c[1] * 1.3 + 0.03).min(1.0), (c[2] * 1.3 + 0.04).min(1.0)], a * 0.9),
+                };
             }
         }
         if right {
@@ -875,7 +942,7 @@ fn compose_into(l: &Layers, s: &Settings, side: u8, skin_mid: f32, at: usize, ou
         }
         // Nose: left as the model's own (owner 2026-11-23, every race) - no recolour.
         let _ = nose;
-        let cover = [m2[1], m2[2], m2[3], m3[0], m3[1], m3[2], m3[3], m4[0], m4[1]];
+        let cover = [m2[1], m2[2], m2[3], m3[0], m3[1], m3[2], m3[3], m4[0], m4[1], m2[0], m4[2], m4[3]];
         let sk = g * 255.0 / skin_mid;
         for (on, v) in on.iter().zip(cover) {
             if *on && v > 0 {
@@ -1232,7 +1299,7 @@ mod tests {
         assert_eq!(Settings { marks: vec![LEFT], ..Settings::default() }.mark(0), BOTH);
         assert_eq!(Settings { marks: vec![0, RIGHT], ..Settings::default() }.mark(1), RIGHT);
         let old: Settings = serde_json::from_str(r#"{"marks":[true,false,true,false,false,false]}"#).unwrap();
-        assert_eq!(old.marks, vec![BOTH, 0, BOTH, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(old.marks, vec![BOTH, 0, BOTH, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
 
     #[test]
@@ -1256,6 +1323,44 @@ mod tests {
         }
         // Elvaan F's face isn't mirrored: its markings have right sides of their own.
         assert!(race_face(4, 0).unwrap().sides && !race_face(1, 0).unwrap().sides);
+    }
+
+    #[test]
+    fn race_markings_show() {
+        // Every race's own markings (owner 2026-11-23): each one changes the face, freckles darken the skin.
+        for race in [1u8, 2, 3, 4, 5, 6, 8] {
+            let list = race_marks(race);
+            assert!(!list.is_empty() && list.len() <= 9);
+            assert!(layers_of(race, 0).marks);
+            let mut shown = vec![0; list.len()];
+            for style in 1..=8u8 {
+                let face = (style as u16 - 1) * 2;
+                let f = race_face(race, face).unwrap();
+                let rl = race_layers(race, f.style).unwrap();
+                let n = 256u32;
+                let tex = vec![150u8; (n * n * 4) as usize];
+                let prep = Prep::new(rl, f, tex, n, n);
+                let off = compose_prep(&prep, &Settings { marks: vec![0; MARKS.len()], ..Settings::default() }, BOTH);
+                for (k, (name, kind)) in list.iter().enumerate() {
+                    let mut marks = vec![0; MARKS.len()];
+                    marks[k] = BOTH;
+                    let on = compose_prep(&prep, &Settings { marks, ..Settings::default() }, BOTH);
+                    let diff: Vec<usize> = (0..(n * n) as usize).filter(|i| on[i * 4..i * 4 + 3] != off[i * 4..i * 4 + 3]).collect();
+                    // A marking can be under a style's bangs (markings stay behind hair): counted below.
+                    if diff.len() > 3 {
+                        shown[k] += 1;
+                    }
+                    if *kind == Kind::Freckle && !diff.is_empty() {
+                        let i = diff[diff.len() / 2];
+                        assert!(on[i * 4 + 2] < off[i * 4 + 2], "race {race} style {style} freckles darken");
+                    }
+                }
+            }
+            for (k, n) in shown.iter().enumerate() {
+                assert!(*n >= 5, "race {race} {}: shows on {n} of 8 styles", list[k].0);
+            }
+        }
+        assert_eq!(mark_names(7).len(), 12);
     }
 
     #[test]
