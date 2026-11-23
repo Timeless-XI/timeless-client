@@ -567,6 +567,15 @@ pub struct Pointer {
     pub ok: bool,
     pub enter: bool,
     pub random: bool,
+    /// Timeless XI (modern/tlcreate.rs): the size chosen, a step behind clicked, Back, Surprise me, the style's own
+    /// colours, and the camera's drag (degrees) and wheel.
+    pub size: Option<u8>,
+    pub goto: Option<usize>,
+    pub back: bool,
+    pub surprise: bool,
+    pub reset_colours: bool,
+    pub turn: f32,
+    pub zoom: f32,
 }
 
 /// The creator as the modern panels see it: the help line (or the status, `status`), the ok window's text, the

@@ -1231,6 +1231,134 @@ pub fn apply(gpu: &crate::render::Gpu, w: &mut World, r: &crate::render::ZoneRen
     }
 }
 
+/// Timeless XI: a custom look on one actor outside the world (the Create Character screen's model,
+/// client/timeless/ring.rs): the same making as `apply` (a worker thread, then the GPU, shown once its mips are done),
+/// for a given model, race, face and settings.
+#[derive(Default)]
+pub struct ActorLook {
+    made: Option<(MadeKey, Settings)>,
+    pending: Option<(u64, wgpu::BindGroup, Option<wgpu::BindGroup>, (MadeKey, Settings))>,
+    current: Option<(wgpu::BindGroup, Option<wgpu::BindGroup>)>,
+    job: Option<std::sync::mpsc::Receiver<Made>>,
+    prep: Option<(PrepKey, std::sync::Arc<Prep>)>,
+}
+
+impl ActorLook {
+    /// The look is on the model (made and uploaded).
+    pub fn shown(&self) -> bool {
+        self.current.is_some() && self.job.is_none() && self.pending.is_none()
+    }
+
+    /// A new model on the actor: what was made for the old one goes.
+    pub fn forget(&mut self) {
+        (self.made, self.pending, self.current, self.job) = (None, None, None, None);
+    }
+
+    /// The look `s` on `g` (the model `ch`, race 1..8, face as drawn); off or not supported: the model's own face.
+    pub fn update(
+        &mut self,
+        gpu: &crate::render::Gpu,
+        r: &crate::render::ZoneRenderer,
+        g: &mut crate::render::ActorGpu,
+        ch: &crate::dat::character::Character,
+        race: u8,
+        face: u16,
+        s: &Settings,
+    ) {
+        if !s.on {
+            self.forget();
+            return;
+        }
+        let found = if race == 7 {
+            FACE_TEXTURES.iter().find_map(|(n, st)| g.texture_slot(&[n]).map(|k| (k, *st, n.to_string())))
+        } else {
+            race_face(race, face).and_then(|f| {
+                let name = ch.face_texture.clone()?;
+                g.texture_slot(&[name.as_str()]).map(|k| (k, f.style, name))
+            })
+        };
+        let Some((slot, style, tex_name)) = found else { return };
+        let want = ((race, face, tex_name.clone()), s.clone());
+        if let Some(rx) = &self.job {
+            match rx.try_recv() {
+                Ok(m) => {
+                    self.job = None;
+                    if m.prep.is_some() {
+                        self.prep = m.prep;
+                    }
+                    let up = |rgba: Vec<u8>| {
+                        r.actor_texture(gpu, &crate::dat::zone::Texture::new("timeless look".into(), 0, m.w, m.h, rgba))
+                    };
+                    let (left, seq) = up(m.left);
+                    let right = m.right.map(up);
+                    let seq = right.as_ref().map_or(seq, |r| r.1.max(seq));
+                    self.pending = Some((seq, left, right.map(|r| r.0), m.want));
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.job = None,
+            }
+        }
+        if self.job.is_none() && self.made.as_ref() != Some(&want) && self.pending.as_ref().is_none_or(|p| p.3 != want) {
+            let one_sided = want.1.one_sided();
+            let (tx, rx) = std::sync::mpsc::channel();
+            if race == 7 {
+                let w2 = want.clone();
+                std::thread::spawn(move || {
+                    let left = compose(style, &w2.1, LEFT);
+                    let right = one_sided.then(|| compose(style, &w2.1, RIGHT));
+                    let _ = tx.send(Made { want: w2, w: SIZE, h: SIZE, left, right, prep: None });
+                });
+            } else {
+                let Some(t) = ch.textures.iter().find(|t| t.name == tex_name) else { return };
+                let (Some(f), Some(rl)) = (race_face(race, face), race_layers(race, style)) else { return };
+                let (w0, h0) = (t.width, t.height);
+                let key: PrepKey = (race, face, tex_name.clone(), w0, h0);
+                let have = self.prep.as_ref().filter(|p| p.0 == key).map(|p| p.1.clone());
+                let right_too = one_sided && !f.sides;
+                let tex = if have.is_none() { Some(t.rgba().to_vec()) } else { None };
+                let w2 = want.clone();
+                std::thread::spawn(move || {
+                    let (prep, fresh) = match have {
+                        Some(p) => (p, None),
+                        None => {
+                            let p = std::sync::Arc::new(Prep::new(rl, f, tex.unwrap_or_default(), w0, h0));
+                            (p.clone(), Some((key, p)))
+                        }
+                    };
+                    let left = compose_prep(&prep, &w2.1, LEFT);
+                    let right = right_too.then(|| compose_prep(&prep, &w2.1, RIGHT));
+                    let _ = tx.send(Made { want: w2, w: w0, h: h0, left, right, prep: fresh });
+                });
+            }
+            self.job = Some(rx);
+        }
+        if let Some((seq, ..)) = &self.pending
+            && gpu.mips_done() >= *seq
+        {
+            let (_, left, right, made) = self.pending.take().unwrap();
+            self.current = Some((left, right));
+            self.made = Some(made);
+        }
+        if let Some((left, right)) = &self.current {
+            g.set_texture_sides(slot, left, right.as_ref().unwrap_or(left));
+        }
+    }
+}
+
+/// The settings a new character's look starts from: its face's own colours, on (None: no look for this face).
+pub fn start_for(race: u8, face: u16) -> Option<Settings> {
+    let mut s = seed_any(race, face, &Settings::default())?;
+    s.on = true;
+    Some(s)
+}
+
+/// Saves `s` as the look of the character `name` (the Create Character screen, once it is made).
+pub fn save_for(name: &str, s: &Settings) {
+    if let Ok(t) = serde_json::to_string_pretty(s) {
+        let _ = std::fs::write(path(name), t);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

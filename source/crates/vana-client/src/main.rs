@@ -224,6 +224,32 @@ enum Cmd {
         #[arg(long, default_value_t = 900)]
         height: u32,
     },
+    /// Timeless XI: the Create Character screen's stage offscreen (client/timeless/studio.rs).
+    StudioShot {
+        #[arg(long)]
+        out_dir: PathBuf,
+        /// race,face[,size[,main]] (race 1..8; the starting clothes; main: a weapon's model id).
+        #[arg(long = "char")]
+        chars: String,
+        /// The colours: seed (the face's own), none, or a look JSON file.
+        #[arg(long, default_value = "seed")]
+        look: String,
+        /// 0 the whole body .. 1 the face.
+        #[arg(long, default_value_t = 0.0)]
+        zoom: f32,
+        /// The character's turn, degrees.
+        #[arg(long, default_value_t = 0.0)]
+        turn: f32,
+        /// seconds:race,face,size: a new model swaps in then.
+        #[arg(long)]
+        swap: Option<String>,
+        #[arg(long, default_value = "2")]
+        times: String,
+        #[arg(long, default_value_t = 1600)]
+        width: u32,
+        #[arg(long, default_value_t = 900)]
+        height: u32,
+    },
     /// Timeless XI: frames of a Timeless title reel shot (timeless-title.json, else the built-in reel) with its filter
     /// and the logo.
     ReelShot {
@@ -721,6 +747,10 @@ enum Cmd {
         /// title's update gate (gate, gate-updating, gate-checking), in place of the panels.
         #[arg(long)]
         setup: Option<String>,
+        /// Timeless XI: the Create Character screen at retail's step (0 race, 1 likeness, 2 colors, 4 job, 6 homeland,
+        /// 5 name, 7 confirm); `VANA_CREATE=race,style,size,job,nation` picks.
+        #[arg(long)]
+        create: Option<u8>,
     },
     /// Disassemble a zone's event scripts (event DAT), with dialogue text inlined.
     EventDump {
@@ -1499,6 +1529,7 @@ fn main() -> Result<()> {
             mods,
             select,
             setup,
+            create,
         } => {
             let list = font.is_some();
             client::modern_shot(
@@ -1527,6 +1558,7 @@ fn main() -> Result<()> {
                     mods,
                     select,
                     setup,
+                    create,
                 },
             )
         }
@@ -2478,6 +2510,36 @@ fn main() -> Result<()> {
                 .collect();
             let at: Vec<f32> = times.split(',').filter_map(|t| t.trim().parse().ok()).collect();
             shot(&Request { members }, &moves, close_at, &at, &out_dir, [width, height])
+        }
+        Cmd::StudioShot { out_dir, chars, look, zoom, turn, swap, times, width, height } => {
+            use client::tl_studio as studio;
+            let want = |c: &str| {
+                let v: Vec<u16> = c.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                let g = |k: usize| v.get(k).copied().unwrap_or(0);
+                studio::Want {
+                    look: dat::character::Look {
+                        race: g(0) as u8,
+                        face: g(1),
+                        head: 0,
+                        body: 8,
+                        hands: 8,
+                        legs: 8,
+                        feet: 8,
+                        main: g(3),
+                        sub: 0,
+                        range: 0,
+                    },
+                    size: g(2) as u8,
+                }
+            };
+            let w = want(&chars);
+            let settings = studio::look_arg(&w, &look)?;
+            let swap = swap.as_deref().and_then(|s| {
+                let (t, c) = s.split_once(':')?;
+                Some((t.trim().parse().ok()?, want(c)))
+            });
+            let at: Vec<f32> = times.split(',').filter_map(|t| t.trim().parse().ok()).collect();
+            studio::shot(&w, settings, zoom, turn, swap, &at, &out_dir, [width, height])
         }
         Cmd::ReelShot { shot, out_dir, steps, filter, no_logo, width, height } => {
             tlreel::reel_shot(&shot, &out_dir, steps, width, height, filter.as_deref(), !no_logo)

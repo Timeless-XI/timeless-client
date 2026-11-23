@@ -49,6 +49,9 @@ mod rows;
 mod search;
 pub use search::SEARCH_LISTS;
 pub use tlselect::record_played;
+pub use tlcreate::{
+    next_step as tl_next_step, place_of as tl_place_of, prev_step as tl_prev_step, surprise as tl_surprise,
+};
 mod post;
 mod shop;
 pub mod shot;
@@ -66,6 +69,7 @@ pub(super) use tlgate::{Gate, GateOut};
 pub(super) use tlsetup::{SetupAction, SetupUi};
 // Timeless XI: the Timeless title's logo and /titlecam's guide.
 mod tltitle;
+mod tlcreate;
 mod tlselect;
 mod tlbook;
 // Timeless XI: the Timeless Fishing bar game on screen (every interface).

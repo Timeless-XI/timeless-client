@@ -10,6 +10,7 @@ pub mod icons;
 pub mod manifest;
 pub mod ring;
 pub mod setup;
+pub mod studio;
 pub mod title;
 // TimelessXI: the standalone build's server side (Timeless DAT patches, the allowed game version, the required
 // mods at first start), reached as client::timeless::<fn> as before it moved in here.

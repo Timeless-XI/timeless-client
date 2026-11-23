@@ -798,6 +798,51 @@ impl Modern {
         out
     }
 
+    /// Timeless XI: the Create Character screen in Timeless View (modern/tlcreate.rs); `look` the colours being chosen.
+    #[allow(clippy::too_many_arguments)]
+    pub fn tl_creator_screen(
+        &mut self,
+        ctx: &Context,
+        gu: Option<&GameUi>,
+        window: [u32; 2],
+        scale: u32,
+        c: &Page,
+        look: Option<&mut super::super::timeless::looks::Settings>,
+        has: super::super::timeless::looks::Has,
+    ) -> creator::Pointer {
+        self.zoom_to(ctx, window, scale);
+        let mut layout = Default::default();
+        let (mut changed, mut font) = (false, 15.0);
+        let focus = if c.ok.is_some() || c.confirm.is_some() { "tl create confirm" } else { "tl create step" };
+        let mut p = Panels {
+            m: self,
+            ctx,
+            gu,
+            layout: &mut layout,
+            vis: Default::default(),
+            changed: &mut changed,
+            chat_font: &mut font,
+            battle_in_all: &mut true,
+            condense: &mut true,
+            chat_hidden: &mut Vec::new(),
+            folded: &mut Default::default(),
+            scan_kinds: &mut 7,
+            this: Default::default(),
+            rooms: Default::default(),
+            retail: Default::default(),
+            focus: Some(focus),
+            hidden: Vec::new(),
+            placed: Default::default(),
+            opacity: Default::default(),
+        };
+        let mut out = creator::Pointer::default();
+        super::tlcreate::screen(&mut p, gu, c, look, has, &mut out);
+        if !c.free {
+            out = creator::Pointer::default();
+        }
+        out
+    }
+
     /// The title's Config (modern/config.rs's lobby page): its step.
     pub fn config_screen(
         &mut self,
@@ -850,7 +895,7 @@ impl Modern {
 const TL_TEXT: f32 = 1.15;
 
 /// A list row in the pack's art, lit on the cursor; its response.
-fn pick_row(ui: &mut Ui, m: &Modern, text: &str, on: bool, live: bool) -> egui::Response {
+pub(super) fn pick_row(ui: &mut Ui, m: &Modern, text: &str, on: bool, live: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(W - 14.0, 28.0), if live { Sense::click() } else { Sense::hover() });
     let face = match () {
         _ if on => "controls/list_row_selected",
@@ -872,7 +917,7 @@ fn pick_row(ui: &mut Ui, m: &Modern, text: &str, on: bool, live: bool) -> egui::
 
 /// A step's choices: the race's name (group 6), Face / Hair as the stats line words, the size, job and nation rows'
 /// captions.
-fn step_rows(gu: &GameUi, step: usize) -> Vec<String> {
+pub(super) fn step_rows(gu: &GameUi, step: usize) -> Vec<String> {
     let n = creator::STEPS.get(step).map_or(0, |s| s.1);
     let caption = |k: usize| gu.child_caption(creator::STEPS[step].0, k as u16 + 1).filter(|c| !c.is_empty());
     (0..n)
@@ -888,7 +933,7 @@ fn step_rows(gu: &GameUi, step: usize) -> Vec<String> {
 }
 
 /// A text field: the text (or `empty`, dimmed) and the caret at char `caret` while `caret` is Some and blinking on.
-fn field(ui: &mut Ui, m: &Modern, text: &str, empty: &str, caret: Option<usize>) {
+pub(super) fn field(ui: &mut Ui, m: &Modern, text: &str, empty: &str, caret: Option<usize>) {
     let (r, _) = ui.allocate_exact_size(vec2(W - 14.0, 30.0), Sense::hover());
     let face = if caret.is_some() { "controls/input_focused" } else { "controls/input_normal" };
     if let Some(s) = m.art.sprite(face) {

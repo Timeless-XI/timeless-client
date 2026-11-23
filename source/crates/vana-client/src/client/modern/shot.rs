@@ -903,6 +903,8 @@ pub struct Opts {
     /// Timeless XI: the Select Character screen's panels with two sample characters (needs the game's data for the
     /// lobby's texts); 1 = the list, 2 = with the log-in prompt up.
     pub select: u8,
+    /// Timeless XI: the Create Character screen at this (retail) step.
+    pub create: Option<u8>,
     /// Timeless XI: drawn in the Timeless interface (Timeless View).
     pub timeless: bool,
     /// Timeless XI: a setup wizard page or the update gate (tlsetup::mock / tlgate::mock).
@@ -963,6 +965,12 @@ pub fn shot(width: u32, height: u32, scale: u32, backdrop: Option<&Path>, out: &
     // Timeless XI: the setup wizard or the update gate, with sample values.
     let mut setup = opts.setup.as_deref().filter(|p| !p.starts_with("gate")).map(super::tlsetup::mock);
     let mut gate = opts.setup.as_deref().filter(|p| p.starts_with("gate")).map(super::tlgate::mock);
+    let picks: Vec<usize> = std::env::var("VANA_CREATE")
+        .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+        .unwrap_or_default();
+    let pick = |k: usize, d: usize| picks.get(k).copied().unwrap_or(d);
+    let (race, style, size, job, nation) = (pick(0, 6), pick(1, 3), pick(2, 1), pick(3, 4), pick(4, 2));
+    let mut look = super::super::timeless::looks::start_for(race as u8 + 1, (style * 2) as u16);
     // Frame 0 only sets the screen (egui's first frame has its default one); the time steps finish the fades.
     for frame in 0..8 {
         let raw = egui::RawInput {
@@ -997,6 +1005,30 @@ pub fn shot(width: u32, height: u32, scale: u32, backdrop: Option<&Path>, out: &
                 );
                 super::tltitle::hero_logo(ctx, &p, r, 1.0);
                 g.ui(ctx);
+            } else if let Some(step) = opts.create {
+                let step = step as usize;
+                let view = super::super::game_ui::CreatorView {
+                    step,
+                    race,
+                    face: style,
+                    hair: 0,
+                    size,
+                    job,
+                    nation,
+                    name: if step >= 5 { "Aurelle" } else { "" },
+                    world: None,
+                    name_hidden: false,
+                };
+                let page = super::super::creator::Page {
+                    view: &view,
+                    help: String::new(),
+                    status: false,
+                    ok: None,
+                    confirm: (step == 7).then(|| ("Create Aurelle?".to_string(), true)),
+                    free: true,
+                };
+                let has = super::super::timeless::looks::layers_of(race as u8 + 1, (style * 2) as u16);
+                m.tl_creator_screen(ctx, None, [width, height], scale, &page, look.as_mut(), has);
             } else if opts.select > 0 {
                 mock_style(ctx);
                 let v = select_sample(opts.select == 2);

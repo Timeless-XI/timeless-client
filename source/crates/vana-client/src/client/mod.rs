@@ -173,6 +173,7 @@ mod timeless;
 pub(crate) use timeless::title as tl_title;
 // Timeless XI: the Select screen's ring, for main.rs's ring-shot.
 pub(crate) use timeless::ring as tl_ring;
+pub(crate) use timeless::studio as tl_studio;
 mod timers;
 mod trade;
 mod treasure;
@@ -9197,6 +9198,12 @@ pub struct App {
     flyover_next: Vec<String>,
     /// Timeless XI: the Timeless title's logo and match-cut state (client/timeless/title.rs).
     tl_title: timeless::title::TitleLook,
+    /// Timeless XI: the Create Character screen's stage (timeless/studio.rs), and the new character's colours (for the
+    /// race and face they were made for).
+    tl_studio: timeless::studio::Studio,
+    tl_look: Option<((u8, u16), timeless::looks::Settings)>,
+    /// R on the Create Character screen: the seed for the new character's colours (applied once its face is in).
+    tl_surprise: Option<u64>,
     /// Timeless XI: the Timeless login shows Server Type and Server (no server was set when it opened).
     tl_server_rows: bool,
     /// Timeless XI: the Timeless login shows One-time code this run (a login was refused, or two-factor turned on).
@@ -9517,6 +9524,9 @@ impl App {
             flyover_state: LoadState::Idle,
             flyover_next: Vec::new(),
             tl_title: Default::default(),
+            tl_studio: Default::default(),
+            tl_look: None,
+            tl_surprise: None,
             tl_server_rows: false,
             tl_otp_shown: false,
             tl_ring: Default::default(),
@@ -10042,11 +10052,16 @@ impl App {
             }
             self.music_scene = MusicScene::None;
         }
+        let tl_music = self.timeless_title();
         let Some(a) = self.audio.as_mut() else { return };
         let scene = match &self.phase {
             _ if self.opening.is_some() => MusicScene::Opening,
             Phase::Login { .. } => MusicScene::Title,
             // FUN_1022ef00: the race BGM until the nation step (its step 7, where the dancer is also torn down).
+            // Timeless XI: the title's music in the Hall of the Gods until the character is made.
+            Phase::Characters { screen: LobbyScreen::Create, .. } if tl_music && !self.music_created => {
+                MusicScene::Title
+            }
             Phase::Characters { screen: LobbyScreen::Create, .. } if self.creator_simple && self.creator_step < 6 => {
                 MusicScene::Title
             }
@@ -11603,7 +11618,8 @@ impl App {
                     match refused {
                         None => {
                             self.creator_passed = checked;
-                            self.creator_step = 6;
+                            // Timeless XI: the nation came before the name: on to the confirm.
+                            self.creator_step = if self.timeless_title() { 7 } else { 6 };
                             self.creator_yes = false;
                         }
                         Some(code) => {
@@ -11633,6 +11649,10 @@ impl App {
                     self.creator_ok = Some(match refused {
                         None => {
                             let made = list.iter().find(|c| c.name.eq_ignore_ascii_case(new_name)).cloned();
+                            // Timeless XI: the colours chosen are the new character's look (timeless/looks.rs).
+                            if let (Some(c), Some((_, look))) = (&made, &self.tl_look) {
+                                timeless::looks::save_for(&c.name, look);
+                            }
                             *chars = list;
                             let next = match made {
                                 Some(c) => CreatorNext::Login(c),
@@ -15493,6 +15513,12 @@ impl App {
         // Settings' Mouse Camera Speed (ours): scales the drag only; the controller's camera is not touched.
         let k = self.cfg.mouse_camera_speed.clamp(10, 400) as f64 / 100.0;
         let (dx, dy) = (dx * k, dy * k);
+        // Timeless XI: on the Create Character screen a drag turns the new character (timeless/studio.rs); the
+        // pointer is held as for the camera.
+        if matches!(&self.phase, Phase::Characters { screen: LobbyScreen::Create, .. }) && self.timeless_title() {
+            self.tl_studio.turn_by((dx * 0.35) as f32);
+            return;
+        }
         let Phase::World(world) = &mut self.phase else { return };
         let inv = |w: &World, id: u16| if w.game.get(id) == 1 { -1.0 } else { 1.0 };
         match () {
@@ -17105,6 +17131,7 @@ impl App {
                             Some(1) => {
                                 *screen = LobbyScreen::Create;
                                 self.creator_step = 0;
+                                self.tl_look = None;
                                 (self.creator_simple, self.portrait) = (self.cfg.tool("0023") != 0, Default::default());
                                 (self.creator_world, self.creator_passed, self.creator_refused) = (None, None, None);
                                 // FUN_102435f0 → FUN_101ba220 loads the name filter as the creator opens.
@@ -17252,7 +17279,8 @@ impl App {
                         }
                     }
                     LobbyScreen::Create
-                        if self.game_ui.is_some() && (self.creator.is_some() || self.creator_simple) =>
+                        if self.game_ui.is_some()
+                            && (self.creator.is_some() || self.creator_simple || self.cfg.modern_ui && self.cfg.timeless_ui) =>
                     {
                         // Steps and their menus (0x30 layouts); help lines from groups 8 / 0x1b (creator::draw_ui).
                         // Step 7 is the type-5 confirm, 8 the create under way; menu ok popups over any step.
@@ -17270,7 +17298,12 @@ impl App {
                         let (sw, sh) = (screen_size[0] as f32, screen_size[1] as f32);
                         let popup = self.creator_ok.is_some();
                         let keys = !busy && !popup;
-                        let n = STEPS.get(step).map_or(0, |s| s.1);
+                        // Timeless XI: the Hall of Origins (modern/tlcreate.rs, timeless/studio.rs): Origin, Likeness
+                        // (style and size), Colors (the custom look, in step 2's place), Job, Homeland, Name.
+                        let tl = self.cfg.modern_ui && self.cfg.timeless_ui;
+                        let n = if tl && step == 2 { 0 } else { STEPS.get(step).map_or(0, |s| s.1) };
+                        // R: the whole character; Surprise Me (Colors): the colours.
+                        let (mut surprise, mut surprise_colours) = (false, false);
                         let mut sel = match step {
                             0 => *race,
                             1 => *face as usize / 2,
@@ -17282,7 +17315,7 @@ impl App {
                         };
                         // Escape on the confirm does nothing (FUN_1023d050: +0xa5e1 clear); the world step takes its Escape.
                         let world_open = self.creator_world.is_some();
-                        let (mut next, back, mut answer, mut ok) =
+                        let (mut next, mut back, mut answer, mut ok) =
                             (false, escape && keys && step < 7 && !world_open, None, false);
                         let (mut world_se, mut world_check) = (Vec::new(), None);
                         let name_filter = self.name_filter.as_ref();
@@ -17343,6 +17376,15 @@ impl App {
                                     egui::Key::ArrowLeft | egui::Key::ArrowRight if step == 7 => {
                                         self.creator_yes = !self.creator_yes
                                     }
+                                    // Timeless XI: the size beside the style; F the face (or the whole body); R a
+                                    // surprise.
+                                    egui::Key::ArrowLeft if tl && step == 1 => *size = size.saturating_sub(1),
+                                    egui::Key::ArrowRight if tl && step == 1 => *size = (*size + 1).min(2),
+                                    egui::Key::F if tl && step != 5 => {
+                                        let z = self.tl_studio.zoom_wanted();
+                                        self.tl_studio.set_zoom(if z > 0.5 { 0.0 } else { 1.0 });
+                                    }
+                                    egui::Key::R if tl && step != 5 && step < 7 => surprise = true,
                                     egui::Key::Enter if step == 7 => answer = Some(self.creator_yes),
                                     egui::Key::Enter if step < 7 => next = true,
                                     // View modes cycle 0 -> 1 -> 2 (FUN_10243450).
@@ -17357,7 +17399,7 @@ impl App {
                             }
                         }
                         gu.clear();
-                        if self.creator_simple {
+                        if self.creator_simple && !tl {
                             if step < 6 {
                                 let index = self.index.clone();
                                 self.portrait.update(
@@ -17369,7 +17411,7 @@ impl App {
                                 self.portrait = Default::default();
                             }
                         }
-                        if step >= 6 && self.nation.fade < 1.0 {
+                        if step >= 6 && self.nation.fade < 1.0 && !tl {
                             gu.rect(0.0, 0.0, sw, sh, [0.0, 0.0, 0.0, 1.0 - self.nation.fade]);
                         }
                         if let Some(w) = self.creator_world.as_mut() {
@@ -17395,7 +17437,9 @@ impl App {
                         // Modern: the panels draw the steps and prompts; their mouse acts as retail's below.
                         let modern_ui = self.cfg.modern_ui;
                         let (rects, ptr) = if modern_ui {
-                            creator::draw_modern(gu, &view, sw, sh);
+                            if !tl {
+                                creator::draw_modern(gu, &view, sw, sh);
+                            }
                             let page = creator::Page {
                                 view: &view,
                                 help: creator::help_text(gu, &view, status_line),
@@ -17405,16 +17449,15 @@ impl App {
                                 free: !busy,
                             };
                             let m = self.modern.get_or_insert_with(|| modern::Modern::new(ctx));
-                            (
-                                Vec::new(),
-                                m.creator_screen(
-                                    ctx,
-                                    gu,
-                                    [screen_size[0], screen_size[1]],
-                                    self.cfg.modern_scale,
-                                    &page,
-                                ),
-                            )
+                            let ptr = if tl {
+                                let has = timeless::looks::layers_of(*race as u8 + 1, *face as u16);
+                                let look = self.tl_look.as_mut().map(|l| &mut l.1);
+                                let window = [screen_size[0], screen_size[1]];
+                                m.tl_creator_screen(ctx, Some(gu), window, self.cfg.modern_scale, &page, look, has)
+                            } else {
+                                m.creator_screen(ctx, gu, [screen_size[0], screen_size[1]], self.cfg.modern_scale, &page)
+                            };
+                            (Vec::new(), ptr)
                         } else {
                             (creator::draw_ui(gu, &view, sw, sh, status_line, None), creator::Pointer::default())
                         };
@@ -17443,6 +17486,28 @@ impl App {
                                     sel = k;
                                 }
                                 next |= ptr.row.1.is_some() || ptr.enter;
+                                if tl {
+                                    if let Some(z) = ptr.size {
+                                        *size = z.min(2);
+                                    }
+                                    back |= ptr.back;
+                                    surprise_colours |= ptr.surprise;
+                                    if ptr.turn != 0.0 {
+                                        self.tl_studio.turn_by(ptr.turn);
+                                    }
+                                    if ptr.zoom != 0.0 {
+                                        let z = self.tl_studio.zoom_wanted();
+                                        self.tl_studio.set_zoom(z + ptr.zoom);
+                                    }
+                                    if ptr.reset_colours {
+                                        self.tl_look = None;
+                                    }
+                                    if let Some(k) = ptr.goto.filter(|k| modern::tl_place_of(*k) < modern::tl_place_of(step)) {
+                                        self.creator_step = k;
+                                        self.creator_yes = false;
+                                        self.creator_world = None;
+                                    }
+                                }
                                 if ptr.random
                                     && let Some(n) = random_name(*race, *face)
                                 {
@@ -17517,6 +17582,35 @@ impl App {
                                 a.ui(se);
                             }
                         };
+                        // Timeless XI: R or Surprise me: a new pick on this step.
+                        if surprise {
+                            let seed = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map_or(7, |d| d.as_nanos() as u64)
+                                .wrapping_mul(0x9e37_79b9_7f4a_7c15);
+                            let pick = |n: usize, shift: u32| ((seed >> shift) % n as u64) as usize;
+                            // Everything but the name: race, style, size, job, homeland, then the colours (once
+                            // the new face's own are in: the scene loads).
+                            *race = pick(8, 7);
+                            *face = (pick(8, 11) * 2) as u8;
+                            *size = pick(3, 23) as u8;
+                            *job = pick(6, 31);
+                            *nation = pick(3, 41);
+                            self.tl_look = None;
+                            self.tl_surprise = Some(seed.rotate_left(17));
+                            ui_se(&mut self.audio, crate::audio::Ui::Cursor);
+                        }
+                        if surprise_colours {
+                            let seed = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map_or(7, |d| d.as_nanos() as u64)
+                                .wrapping_mul(0x9e37_79b9_7f4a_7c15);
+                            let has = timeless::looks::layers_of(*race as u8 + 1, *face as u16);
+                            if let Some((_, s)) = self.tl_look.as_mut() {
+                                modern::tl_surprise(s, has, seed, *race == 6);
+                            }
+                            ui_se(&mut self.audio, crate::audio::Ui::Cursor);
+                        }
                         for se in world_se {
                             ui_se(&mut self.audio, se);
                         }
@@ -17532,8 +17626,9 @@ impl App {
                             let name = new_name.clone();
                             let triple = (name.clone(), world.clone(), pass.clone());
                             if self.creator_passed.as_ref() == Some(&triple) {
-                                // Checked before: the nation step, no request (the step change plays 0002).
-                                self.creator_step = 6;
+                                // Checked before: the nation step, no request (the step change plays 0002); Timeless:
+                                // the confirm (the nation came first).
+                                self.creator_step = if tl { 7 } else { 6 };
                                 self.creator_yes = false;
                             } else {
                                 ui_se(&mut self.audio, crate::audio::Ui::Select);
@@ -17601,8 +17696,15 @@ impl App {
                                     }
                                 }
                                 _ => {
-                                    // Timeless XI: no Hair step (A or B): one model per style.
-                                    self.creator_step = if step == 1 { 3 } else { step + 1 };
+                                    // Timeless XI: no Hair step (A or B): one model per style. Timeless View: the
+                                    // Hall of Origins' order (modern/tlcreate.rs).
+                                    self.creator_step = if tl {
+                                        modern::tl_next_step(step)
+                                    } else if step == 1 {
+                                        3
+                                    } else {
+                                        step + 1
+                                    };
                                     self.creator_yes = false;
                                     action = Some(Box::new(|app: &mut App| app.status.clear()));
                                 }
@@ -17614,8 +17716,10 @@ impl App {
                                 *screen = LobbyScreen::Main;
                                 ui_se(&mut self.audio, crate::audio::Ui::Cancel);
                             } else {
-                                // Escape on chmktown starts over at the race step, the choices kept.
+                                // Escape on chmktown starts over at the race step, the choices kept. Timeless View:
+                                // one step back on its path.
                                 self.creator_step = match step {
+                                    _ if tl => modern::tl_prev_step(step).unwrap_or(0),
                                     6 => 0,
                                     3 => 1, // Timeless XI: past the skipped Hair step
                                     _ => step - 1,
@@ -17667,7 +17771,8 @@ impl App {
                                     }));
                                 }
                             }
-                            Some(false) => self.creator_step = 6,
+                            // Timeless View: back to the name (the nation came before it).
+                            Some(false) => self.creator_step = if tl { 5 } else { 6 },
                             None => {}
                         }
                     }
@@ -18663,6 +18768,39 @@ impl App {
                 play_fx_sound(a, c);
             }
         }
+        // Timeless XI: on the Create Character screen, the new character alone before Altana (timeless/studio.rs)
+        // in place of retail's dancer, in their colours.
+        let tl_create = matches!(&self.phase, Phase::Characters { screen: LobbyScreen::Create, .. }) && self.timeless_title();
+        if let (true, Phase::Characters { race, face, size, job, .. }) = (tl_create, &self.phase) {
+            let (r, f) = (*race as u8 + 1, *face as u16);
+            // The job's starting weapon, sheathed (the server's starting gear: Onion Sword, Rod, Staff, Dagger, Knife;
+            // the monk's White Belt shows nothing). Model ids from item_equipment.
+            const WEAPONS: [u16; 6] = [264, 0, 220, 291, 164, 159];
+            let main = WEAPONS.get(*job).copied().unwrap_or(0);
+            let want = timeless::studio::Want {
+                look: Look { race: r, face: f, head: 0, body: 8, hands: 8, legs: 8, feet: 8, main, sub: 0, range: 0 },
+                size: *size,
+            };
+            if self.tl_look.as_ref().is_none_or(|l| l.0 != (r, f)) {
+                self.tl_look = timeless::looks::start_for(r, f).map(|s| ((r, f), s));
+            }
+            // R: the whole character surprised: its colours too, once the new face's own are in.
+            if let (Some(seed), Some((_, s))) = (self.tl_surprise.take(), self.tl_look.as_mut()) {
+                modern::tl_surprise(s, timeless::looks::layers_of(r, f), seed, r == 7);
+            }
+            let data = if self.tl_studio.ready() { None } else { self.game_data().ok() };
+            self.tl_studio.want(want, || data);
+            self.tl_studio.set_look(self.tl_look.as_ref().map(|l| l.1.clone()));
+            self.tl_studio.on_step(self.creator_step);
+        } else if !tl_create {
+            for c in self.tl_studio.clear() {
+                let Some(a) = &mut self.audio else { break };
+                play_fx_sound(a, c);
+            }
+            if !matches!(&self.phase, Phase::Characters { .. }) {
+                self.tl_look = None;
+            }
+        }
         if let (true, false, Phase::Characters { chars, .. }) = (in_select, tl_select, &self.phase) {
             let key: String = chars.iter().map(|c| format!("{}:{:?};", c.name, c.looks)).collect();
             if key != self.select_key
@@ -18717,7 +18855,7 @@ impl App {
         if !in_create {
             (self.name_filter, self.name_filter_load) = (None, None);
         }
-        if in_create && !self.creator_simple {
+        if in_create && !self.creator_simple && !self.timeless_title() {
             if self.creator.is_none()
                 && self.creator_state == LoadState::Idle
                 && let Ok((index, keys)) = self.game_data()
@@ -18758,7 +18896,7 @@ impl App {
         }
         // Nation step: the highlighted city's flyover (FUN_1022ea40): a 10-frame settle, a 60-tick fade to
         // black ('ffot', file 33193), file 24 + nation loads, a 60-tick fade back ('ffin').
-        let nation_step = in_create && self.creator_step >= 6; // the flyover stays up behind the confirm (FUN_10233b50)
+        let nation_step = in_create && self.creator_step >= 6 && !self.timeless_title(); // the flyover stays up behind the confirm (FUN_10233b50)
         if let (true, Phase::Characters { nation, .. }) = (nation_step, &self.phase) {
             let want = *nation;
             let ns = &mut self.nation;
@@ -18878,7 +19016,11 @@ impl App {
         self.key_functions(dt);
         perf::timed(|| "movement".into(), || self.update_movement(dt));
         if matches!(&self.phase, Phase::Characters { screen: LobbyScreen::Create, .. })
-            && (self.creator_simple || self.creator.as_ref().is_some_and(|c| c.wants().is_some()))
+            && (if self.timeless_title() {
+                self.tl_studio.ready()
+            } else {
+                self.creator_simple || self.creator.as_ref().is_some_and(|c| c.wants().is_some())
+            })
             && self.lobby_fade.next.is_none()
         {
             self.lobby_fade.scene_to = 1.0;
@@ -19449,6 +19591,9 @@ impl App {
         if !select_ticks {
             paused.extend(self.tl_ring.pause_sounds());
         }
+        if !creating {
+            paused.extend(self.tl_studio.pause_sounds());
+        }
         // The movies' voices too, while their screen is not up.
         if !self.title_backdrop()
             && let Some(f) = self.flyover.as_mut()
@@ -19554,6 +19699,27 @@ impl App {
                 g.drew_world = true;
             }
             for c in self.tl_ring.take_sounds() {
+                let Some(a) = &mut self.audio else { break };
+                play_fx_sound(a, c);
+            }
+        }
+        // Timeless XI: the new character before Altana (client/timeless/studio.rs) in place of retail's dancer.
+        if creating && self.timeless_title() {
+            self.tl_studio.advance(dt);
+            let alive = self.audio.as_ref().map(|a| a.alive());
+            if self.tl_studio.render(
+                &gfx.gpu,
+                gfx.config.format,
+                encoder,
+                (&scene_view, Some(&scene_tex), bg),
+                &scene_depth,
+                aspect,
+                alive,
+                self.cfg.draw_distance,
+            ) {
+                g.drew_world = true;
+            }
+            for c in self.tl_studio.take_sounds() {
                 let Some(a) = &mut self.audio else { break };
                 play_fx_sound(a, c);
             }
@@ -19882,6 +20048,7 @@ impl App {
             fx.after_submit(&gfx.gpu);
         }
         self.tl_ring.after_submit(&gfx.gpu);
+        self.tl_studio.after_submit(&gfx.gpu);
         if let Some(fx) = self.creator.as_mut().and_then(|c| c.effects.as_mut()) {
             fx.after_submit(&gfx.gpu);
         }

@@ -30,14 +30,14 @@ pub const VOICES: u32 = 0x0500_0000;
 /// The ring's radius (inside the platform's rose-window circle, about 6.5), the camera's eye above the floor, its
 /// target's height 10 out, and the focal (dat::title fov_y). `VANA_RING=radius,eye,target,focal` tries others.
 #[derive(Clone, Copy)]
-struct Framing {
-    radius: f32,
+pub(super) struct Framing {
+    pub(super) radius: f32,
     eye_up: f32,
     target_up: f32,
     focal: f32,
 }
 
-fn framing() -> Framing {
+pub(super) fn framing() -> Framing {
     let d = Framing { radius: 3.8, eye_up: 0.9, target_up: 2.6, focal: 320.0 };
     let Some(v) = std::env::var("VANA_RING").ok() else { return d };
     let v: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
@@ -47,12 +47,12 @@ fn framing() -> Framing {
     }
 }
 /// The hall's hour and weather (the title reel's hall_of_the_gods shot).
-const MINUTE: f32 = 20.0 * 60.0;
-const WEATHER: &str = "suny";
+pub(super) const MINUTE: f32 = 20.0 * 60.0;
+pub(super) const WEATHER: &str = "suny";
 /// The platform's floor, should the collision not answer.
-const FLOOR: f32 = -13.1;
-const GLOW: &str = "tl_ring_glow";
-const RING: &str = "tl_ring_ring";
+pub(super) const FLOOR: f32 = -13.1;
+pub(super) const GLOW: &str = "tl_ring_glow";
+pub(super) const RING: &str = "tl_ring_ring";
 
 /// Where each character stands (degrees from +x toward +z), by how many there are.
 pub fn angles(n: usize) -> Vec<f32> {
@@ -66,7 +66,7 @@ pub fn angles(n: usize) -> Vec<f32> {
     }
 }
 
-fn dir_of(deg: f32) -> Vec3 {
+pub(super) fn dir_of(deg: f32) -> Vec3 {
     let r = deg.to_radians();
     Vec3::new(r.cos(), 0.0, r.sin())
 }
@@ -150,7 +150,7 @@ impl RingData {
 }
 
 /// Facing `forward` (model +x toward it) at `feet`, at the model's size (select.rs placement).
-fn placement(feet: Vec3, forward: Vec3, scale: f32) -> Mat4 {
+pub(super) fn placement(feet: Vec3, forward: Vec3, scale: f32) -> Mat4 {
     let f = Vec3::new(forward.x, 0.0, forward.z).normalize_or(Vec3::X);
     Mat4::from_cols(f.extend(0.0), Vec3::Y.extend(0.0), f.cross(Vec3::Y).extend(0.0), feet.extend(1.0))
         * Mat4::from_scale(Vec3::splat(scale))
@@ -177,7 +177,7 @@ fn chunks(anims: &[Animation], name: &str, skirtless: bool) -> Vec<(u8, usize, f
 }
 
 /// Plays `name` as the status motion (looping), blended in over `blend` ticks.
-fn play(q: &mut Queues<usize>, anims: &[Animation], name: &str, skirtless: bool, rate: f32, blend: f32) -> bool {
+pub(super) fn play(q: &mut Queues<usize>, anims: &[Animation], name: &str, skirtless: bool, rate: f32, blend: f32) -> bool {
     let c = chunks(anims, name, skirtless);
     if c.is_empty() {
         return false;
@@ -187,7 +187,7 @@ fn play(q: &mut Queues<usize>, anims: &[Animation], name: &str, skirtless: bool,
 }
 
 /// A soft round light (white, the alpha falling off from the middle) for the aura, its pool and the motes.
-fn glow_texture() -> (u32, u32, Vec<u8>) {
+pub(super) fn glow_texture() -> (u32, u32, Vec<u8>) {
     let n = 64u32;
     let mut px = Vec::with_capacity((n * n * 4) as usize);
     for y in 0..n {
@@ -202,7 +202,7 @@ fn glow_texture() -> (u32, u32, Vec<u8>) {
 }
 
 /// A fine ring of light (white; the alpha a thin soft band near the edge) for the floor ring.
-fn ring_texture() -> (u32, u32, Vec<u8>) {
+pub(super) fn ring_texture() -> (u32, u32, Vec<u8>) {
     let n = 128u32;
     let mut px = Vec::with_capacity((n * n * 4) as usize);
     for y in 0..n {
