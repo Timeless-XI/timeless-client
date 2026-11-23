@@ -137,7 +137,7 @@ impl super::Modern {
                         .default_open(false)
                         .show(ui, |ui| light_ui(ui, w));
                     ui.separator();
-                    let has = shown.map_or(looks::Has { iris: true, lips: true, nose: true }, |(r, f)| looks::layers_of(r, f));
+                    let has = shown.map_or(looks::Has { iris: true, lips: true, nose: true, marks: true }, |(r, f)| looks::layers_of(r, f));
                     ui.add_enabled_ui(s.on, |ui| body(ui, &mut s, has));
                 });
                 ui.separator();
@@ -186,8 +186,9 @@ fn body(ui: &mut egui::Ui, s: &mut Settings, has: looks::Has) {
         heading(ui, "Eyes");
         rgb(ui, &mut s.eyes, &EYES);
     }
-    heading(ui, "Face markings");
     s.marks.resize(MARKS.len(), 0);
+    if has.marks {
+    heading(ui, "Face markings");
     ui.label(RichText::new("Left / Right = under your character's own left or right eye.").small().color(muted()));
     egui::Grid::new("tl looks marks").num_columns(2).spacing(vec2(10.0, 4.0)).show(ui, |ui| {
         for (k, name) in MARKS.iter().enumerate() {
@@ -215,6 +216,7 @@ fn body(ui: &mut egui::Ui, s: &mut Settings, has: looks::Has) {
             ui.label(RichText::new("Strength").color(muted()));
             ui.add(egui::Slider::new(&mut s.mark_strength, 0.2..=1.0).show_value(false));
         });
+    }
     }
     if has.lips {
         heading(ui, "Lips");

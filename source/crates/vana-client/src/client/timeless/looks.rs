@@ -227,6 +227,9 @@ pub struct Has {
     pub iris: bool,
     pub lips: bool,
     pub nose: bool,
+    /// Face markings: Mithra only for now (owner 2026-11-23: the other races get their own sets later).
+    #[serde(default)]
+    pub marks: bool,
 }
 
 fn race_faces() -> &'static HashMap<String, RaceFace> {
@@ -243,8 +246,8 @@ pub fn race_face(race: u8, face: u16) -> Option<&'static RaceFace> {
 /// The layers a face has (the window hides the others).
 pub fn layers_of(race: u8, face: u16) -> Has {
     match race_face(race, face) {
-        Some(f) if race != 7 => f.has,
-        _ => Has { iris: true, lips: true, nose: true },
+        Some(f) if race != 7 => Has { marks: false, ..f.has },
+        _ => Has { iris: true, lips: true, nose: true, marks: true },
     }
 }
 
@@ -564,7 +567,8 @@ pub fn compose_prep(p: &Prep, s: &Settings, side: u8) -> Vec<u8> {
             sc.spawn(move || compose_race_rows(p, chunk, k * per / 4, s, side));
         }
     });
-    marks_pass(p, &mut out, s, side);
+    // Markings off on races 1-6 and 8 (owner 2026-11-23: Mithra only until each race has its own set).
+    let _ = (marks_pass as fn(&Prep, &mut [u8], &Settings, u8), side);
     out
 }
 
