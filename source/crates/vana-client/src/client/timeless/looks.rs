@@ -729,9 +729,8 @@ fn compose_race_rows(p: &Prep, out: &mut [u8], at: usize, s: &Settings, _side: u
         if a[3] > 0 {
             c = mix(c, shade(hw(knee(l * 0.5 / ml)), lips), un(a[3]));
         }
-        if n0 > 0 {
-            c = mix(c, shade(hw(knee(l * 0.5 / mn)), nose), un(n0));
-        }
+        // Nose: left as the model's own (owner 2026-11-23, every race) - no recolour.
+        let _ = (n0, mn, nose);
         for k in 0..3 {
             px[k] = (c[k].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
         }
@@ -870,9 +869,8 @@ fn compose_into(l: &Layers, s: &Settings, side: u8, skin_mid: f32, at: usize, ou
         if m1[3] > 0 {
             c = mix(c, shade(g, lips), w(m1[3]));
         }
-        if m2[0] > 0 {
-            c = mix(c, shade(g, nose), w(m2[0]));
-        }
+        // Nose: left as the model's own (owner 2026-11-23, every race) - no recolour.
+        let _ = nose;
         let cover = [m2[1], m2[2], m2[3], m3[0], m3[1], m3[2], m3[3], m4[0], m4[1]];
         let sk = g * 255.0 / skin_mid;
         for (on, v) in on.iter().zip(cover) {

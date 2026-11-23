@@ -220,7 +220,8 @@ fn body(ui: &mut egui::Ui, s: &mut Settings, has: looks::Has) {
         heading(ui, "Lips");
         rgb(ui, &mut s.lips, &LIPS);
     }
-    if has.nose {
+    // Nose colour removed (owner 2026-11-23: noses stay the standard / original look on every race).
+    if false && has.nose {
         heading(ui, "Nose");
         ui.horizontal(|ui| {
             ui.label(RichText::new("Grey").color(muted()));
