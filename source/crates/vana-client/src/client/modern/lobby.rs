@@ -921,7 +921,8 @@ fn creator_panel(p: &mut Panels, gu: &GameUi, c: &Page, out: &mut creator::Point
     let screen = p.ctx.content_rect();
     let live = c.free && c.ok.is_none() && c.confirm.is_none();
     let at = pos2(screen.width() * 0.0121, screen.height() * 0.06);
-    let note = Some(format!("{}/7", v.step + 1));
+    // Timeless XI: six steps (no Hair step: one model per style).
+    let note = Some(format!("{}/6", if v.step >= 3 { v.step } else { v.step + 1 }));
     // From the confirm on, retail's step windows are closed (the emblem and the prompt stay).
     if v.step >= 7 {
         return;

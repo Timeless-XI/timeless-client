@@ -8087,6 +8087,8 @@ struct World {
     angler: timeless::angler::Angler,
     /// Timeless XI: /titlecam, recording the Timeless title's shots (timeless/title.rs).
     tl_cam: timeless::title::CamState,
+    /// Timeless XI: custom looks (timeless/looks.rs): our recoloured face and the Appearance window.
+    looks: timeless::looks::Looks,
     /// Config `modern_condense` (with `modern`): an action's battle lines merge (combat::condense).
     condense: bool,
     /// The lines later records of their action merge into, and the last action's serial.
@@ -10820,6 +10822,7 @@ impl App {
                             tl_fish: Default::default(),
                             angler: Default::default(),
                             tl_cam: Default::default(),
+                            looks: Default::default(),
                             condense: self.cfg.modern_condense,
                             condensed: Vec::new(),
                             condensed_targets: Vec::new(),
@@ -13371,6 +13374,13 @@ impl App {
                 .collect();
             looks.splice(0..0, again);
         }
+        // Timeless XI: the custom looks' try-on changed: our look again.
+        if world.looks.try_on_ver != world.looks.try_on_seen {
+            world.looks.try_on_seen = world.looks.try_on_ver;
+            if let Some(l) = world.look_base.get(&world.my_id) {
+                looks.push((world.my_id, Source::Pc(*l)));
+            }
+        }
         // Load a character model whenever an actor's look is new or changed.
         let mut wanted = Vec::new();
         for (id, source) in looks {
@@ -13382,7 +13392,9 @@ impl App {
             let source = match source {
                 Source::Pc(l) => {
                     world.look_base.insert(id, l);
-                    Source::Pc(world.lua.model(id).map_or(l, |m| m.applied(l)))
+                    let l = world.lua.model(id).map_or(l, |m| m.applied(l));
+                    // Timeless XI: the custom looks' try-on (timeless/looks.rs), our own model only.
+                    Source::Pc(if id == world.my_id { timeless::looks::try_on(&world.looks, l) } else { l })
                 }
                 other => {
                     world.look_base.remove(&id);
@@ -14630,7 +14642,13 @@ impl App {
             zoom_in: self.input.test(0x4f, input::mode::HELD),
             zoom_out: self.input.test(0x50, input::mode::HELD),
             home: self.input.test(0x51, input::mode::HELD),
-            wheel: std::mem::take(&mut self.wheel),
+            // Timeless XI: the free camera takes the wheel.
+            wheel: if world.looks.cam.on {
+                timeless::looks::cam_wheel(world, std::mem::take(&mut self.wheel));
+                0.0
+            } else {
+                std::mem::take(&mut self.wheel)
+            },
             ..Default::default()
         };
         // First / third person (0x10: Num5, compact V; FUN_100a4580): SE 0014. The dead are third person.
@@ -15480,6 +15498,8 @@ impl App {
         match () {
             // The map's input context (0x26) has no camera functions; its drag scrolls the map.
             _ if world.map.is_some() || world.cnq.is_some() => {}
+            // Timeless XI: the custom looks' free camera takes the drag (middle button: up / down).
+            _ if world.looks.cam.on => timeless::looks::cam_drag(world, dx, dy, self.middle_down),
             // Mouse/Cam. 0x8b / 0x8c invert the third-person camera's X / Y (FUN_1001e030).
             // Down is positive as retail's mode-5 axis 7 (FUN_10122590, the pointer below the drag's start); with
             // 0x8c on, the default, down raises the eye as the camera keys do.
@@ -15654,7 +15674,11 @@ impl App {
     }
 
     fn camera(world: &World) -> Camera {
-        let mut c = rig_camera(world).or_else(|| event::camera(world)).unwrap_or_else(|| camera::view(world));
+        // Timeless XI: the custom looks' free camera (timeless/looks.rs) first.
+        let mut c = timeless::looks::free_camera(world)
+            .or_else(|| rig_camera(world))
+            .or_else(|| event::camera(world))
+            .unwrap_or_else(|| camera::view(world));
         world.camst.shake.apply(&mut c);
         c
     }
@@ -17480,8 +17504,9 @@ impl App {
                         }
                         match step {
                             0 => *race = sel,
-                            1 => *face = (sel * 2 + *face as usize % 2) as u8,
-                            2 => *face = (*face as usize / 2 * 2 + sel) as u8,
+                            // Timeless XI: one model per style (the A face); the custom look covers the colours.
+                            1 => *face = (sel * 2) as u8,
+                            2 => *face = (*face as usize / 2 * 2) as u8,
                             3 => *size = sel as u8,
                             4 => *job = sel,
                             6 => *nation = sel,
@@ -17576,7 +17601,8 @@ impl App {
                                     }
                                 }
                                 _ => {
-                                    self.creator_step = step + 1;
+                                    // Timeless XI: no Hair step (A or B): one model per style.
+                                    self.creator_step = if step == 1 { 3 } else { step + 1 };
                                     self.creator_yes = false;
                                     action = Some(Box::new(|app: &mut App| app.status.clear()));
                                 }
@@ -17589,7 +17615,11 @@ impl App {
                                 ui_se(&mut self.audio, crate::audio::Ui::Cancel);
                             } else {
                                 // Escape on chmktown starts over at the race step, the choices kept.
-                                self.creator_step = if step == 6 { 0 } else { step - 1 };
+                                self.creator_step = match step {
+                                    6 => 0,
+                                    3 => 1, // Timeless XI: past the skipped Hair step
+                                    _ => step - 1,
+                                };
                             }
                         }
                         if ok && let Some((_, then)) = self.creator_ok.take() {
@@ -17850,6 +17880,7 @@ impl App {
                     let m = self.modern.get_or_insert_with(|| modern::Modern::new(ctx));
                     if !world.ui_hidden {
                         m.tl_angler(ctx, world);
+                        m.tl_looks(ctx, world);
                     }
                     m.tl_fishing(ctx, world);
                 }
@@ -21399,6 +21430,8 @@ fn pose_actors(gfx: &Gfx, fg: &mut FrameGpu, w: &mut World, r: &mut ZoneRenderer
         }
         a.q_layers = layers;
     }
+    // Timeless XI: our custom look's face texture (timeless/looks.rs).
+    timeless::looks::apply(&gfx.gpu, w, r);
     // Test 6: the occlusion results, a frame or two late, drop actors hidden behind scenery.
     r.occl.results.retain(|id, _| visible.contains(id));
     visible.retain(|id| r.occl.results.get(id) != Some(&false));
@@ -21589,6 +21622,9 @@ fn draw_scene(
     r.bump_mode = cx.cfg.tool("0017") != 0 && w.zone != Some(182);
     // Light Shading (ours): Smooth lights the scenery's lamps per pixel, Retail per vertex.
     r.smooth_lights = cx.cfg.smooth_lights;
+    // Timeless XI: the `/look` window's "Light both sides" (characters' back faces lit by the flipped normal).
+    r.two_sided_actors = w.looks.light_both_sides && !(w.looks.hold_retail && w.looks.open);
+    r.debug_pieces = w.looks.debug_pieces;
     // Windowed (0034 != 0, no gamma ramp): lights boosted by the channels' ramps (render::light_boost),
     // gamma base 0028 + 1 + Gameplay R / G / B / 100 (FUN_101aa650).
     r.light_boost = if cx.cfg.window_mode() != 0 {

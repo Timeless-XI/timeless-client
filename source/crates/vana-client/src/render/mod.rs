@@ -460,6 +460,12 @@ pub struct ZoneRenderer {
     /// Settings' Light Shading (ours): false Retail (the scenery's point lights per vertex, hard cut at the range),
     /// true Smooth (per pixel, soft edge; not retail).
     pub smooth_lights: bool,
+    /// Timeless XI (`/look` "Light both sides"): characters' back faces lit by their flipped normal (zone.wgsl
+    /// `actor_normal`); retail lights them by the front normal only (the inside of a mane goes near black).
+    pub two_sided_actors: bool,
+    /// Timeless XI (`/look` "Colour character pieces"): every character drawn in a flat colour per texture (zone.wgsl
+    /// `debug_piece`).
+    pub debug_pieces: bool,
     /// Windowed mode's light boost (light_boost; zero = off).
     pub light_boost: [f32; 4],
     /// Ours (client/night.rs): the night uniforms (Uniforms::night, slot_scale); night[0] = 0 leaves retail's.
@@ -833,6 +839,36 @@ enum Depth {
     Lamp,
 }
 
+// Timeless XI: custom looks swap one texture of our own model (client/timeless/looks.rs).
+impl ActorGpu {
+    /// The texture slot of the first of `names` the model has.
+    pub fn texture_slot(&self, names: &[&str]) -> Option<usize> {
+        names.iter().find_map(|n| self.slot.get(*n).copied())
+    }
+
+    pub fn set_texture(&mut self, slot: usize, bind: &wgpu::BindGroup) {
+        if let Some(t) = self.textures.get_mut(slot) {
+            *t = bind.clone();
+        }
+    }
+
+    /// The texture `slot` as `bind`, except on the mirrored copies of the meshes using it (the model's right side),
+    /// which draw with `mirrored` from a slot of their own.
+    pub fn set_texture_sides(&mut self, slot: usize, bind: &wgpu::BindGroup, mirrored: &wgpu::BindGroup) {
+        self.set_texture(slot, bind);
+        let side = *self.side_slot.get_or_insert_with(|| {
+            self.textures.push(bind.clone());
+            self.textures.len() - 1
+        });
+        self.textures[side] = mirrored.clone();
+        for (d, m) in self.draws.iter_mut().zip(&self.mirror) {
+            if *m && d.0 == slot {
+                d.0 = side;
+            }
+        }
+    }
+}
+
 /// A character's GPU side: its textures, and either a vertex buffer re-filled with a CPU-posed mesh
 /// (update_actor) or a static skinned mesh posed on the GPU from its bones (new_skinned / pose_actor).
 /// Clones share the GPU resources (skinned actors of one model share one copy).
@@ -842,6 +878,10 @@ pub struct ActorGpu {
     slot: HashMap<String, usize>,
     vertices: Option<(wgpu::Buffer, usize)>,
     draws: Vec<(usize, std::ops::Range<u32>, u8)>,
+    /// Timeless XI: per draw, whether it is a mirrored copy (custom looks give that side its own texture).
+    mirror: Vec<bool>,
+    /// Timeless XI: the extra texture slot the mirrored side of a custom look draws with.
+    side_slot: Option<usize>,
     instance: wgpu::Buffer,
     /// `wepN` meshes not drawn (bit N; scheduler ops 0x75 / 0xa3, MODLOG "Weapon meshes hidden and shown").
     pub hidden_weps: u16,
@@ -961,11 +1001,27 @@ pub struct SkinMesh {
     verts: Vec<SkinVertex>,
     /// Texture, vertices, and N of a `wepN` part (NO_WEP otherwise).
     groups: Vec<(String, std::ops::Range<u32>, u8)>,
+    /// Timeless XI: per group, whether it is a mirrored mesh's second copy (the model's other side; custom looks).
+    mirrored: Vec<bool>,
     bones: usize,
     /// Cloth particles numbered (SkinVertex.cloth).
     cloth: usize,
     /// Those particles' sheets for the GPU step (render/cloth.rs).
     sim: Option<std::sync::Arc<cloth::ClothModel>>,
+}
+
+/// Timeless XI: a model's textures in debug-colour order (SkinMesh::build's piece numbers), each with the mesh it
+/// first appears on, for the `/look` legend.
+pub fn piece_textures(ch: &crate::dat::character::Character) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for part in &ch.parts {
+        for g in &part.groups {
+            if !out.iter().any(|(t, _)| *t == g.texture) {
+                out.push((g.texture.clone(), part.name.trim_end_matches(['\0', ' ']).to_string()));
+            }
+        }
+    }
+    out
 }
 
 impl SkinMesh {
@@ -974,8 +1030,11 @@ impl SkinMesh {
         let slot_of = |b: usize| if b < bones { b as u32 } else { bones as u32 };
         let mut verts: Vec<SkinVertex> = Vec::new();
         let mut groups = Vec::new();
+        let mut mirrored = Vec::new();
         // Cloth particles in part order, after the bones and the identity slot.
         let mut particles = 0usize;
+        // Timeless XI: each texture's number in this model (debug colours), in the order `piece_textures` lists them.
+        let mut tex_ids: Vec<String> = Vec::new();
         for part in &ch.parts {
             let sim = part.sim.as_ref().filter(|s| particles + s.particles() <= MAX_CLOTH);
             let base = particles;
@@ -990,6 +1049,14 @@ impl SkinMesh {
             let wep = n.strip_prefix("wep").and_then(|d| d.parse::<u8>().ok()).filter(|d| *d < 16).unwrap_or(NO_WEP);
             for g in &part.groups {
                 let start = verts.len() as u32;
+                let piece = match tex_ids.iter().position(|t| *t == g.texture) {
+                    Some(k) => k,
+                    None => {
+                        tex_ids.push(g.texture.clone());
+                        tex_ids.len() - 1
+                    }
+                }
+                .min(127) as u32;
                 for t in &g.triangles {
                     for c in t {
                         let inf = &part.vertices[c.vertex as usize];
@@ -1005,18 +1072,19 @@ impl SkinMesh {
                             w: [i0.weight, w1],
                             uv: c.uv,
                             mat: [g.light, part.cloth as u32 as f32],
-                            cloth: cloth_of(c.vertex),
+                            cloth: cloth_of(c.vertex) | piece << 24,
                         });
                     }
                 }
                 groups.push((g.texture.clone(), start..verts.len() as u32, wep));
+                mirrored.push(part.mirrored);
             }
         }
         if verts.is_empty() {
             verts.push(SkinVertex::zeroed());
         }
         let sim = cloth::ClothModel::build(&ch.parts, &ch.skeleton).map(std::sync::Arc::new);
-        SkinMesh { verts, groups, bones, cloth: particles, sim }
+        SkinMesh { verts, groups, mirrored, bones, cloth: particles, sim }
     }
 }
 
@@ -2607,6 +2675,8 @@ impl ZoneRenderer {
             bump_groups,
             bump_mode: true,
             smooth_lights: false,
+            two_sided_actors: false,
+            debug_pieces: false,
             light_boost: [0.0; 4],
             night: [0.0; 4],
             slot_scale: [1.0; LIGHTS],
@@ -3482,6 +3552,15 @@ impl ZoneRenderer {
         b.tex == b.ch.textures.len() && self.anim.ready(&b.ch)
     }
 
+    /// Timeless XI: an RGBA texture for an actor's model (custom looks, client/timeless/looks.rs), sent whole with
+    /// its mips queued: the bind group and the mips' sequence number.
+    pub fn actor_texture(&self, gpu: &Gpu, t: &crate::dat::zone::Texture) -> (wgpu::BindGroup, u64) {
+        let mut up = upload::TexUp::new(gpu, t, true);
+        let seq = up.step(gpu, t, true).unwrap_or(0);
+        let view = up.texture.create_view(&Default::default());
+        (view_bind_group(gpu, &self.texture_layout, &self.sampler, &view), seq)
+    }
+
     /// An actor skinned on the GPU: its bind-pose corners (SkinMesh) and textures go up once per model.
     pub fn new_skinned(&self, gpu: &Gpu, ch: &crate::dat::character::Character) -> ActorGpu {
         let mut a = self.new_actor(gpu, ch);
@@ -3491,6 +3570,7 @@ impl ZoneRenderer {
             .iter()
             .map(|(tex, r, wep)| (a.slot.get(tex.as_str()).copied().unwrap_or(0), r.clone(), *wep))
             .collect();
+        a.mirror = mesh.mirrored.clone();
         let vertices = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("skinned actor"),
             contents: bytemuck::cast_slice(&mesh.verts),
@@ -3544,6 +3624,8 @@ impl ZoneRenderer {
                 mapped_at_creation: false,
             });
             let actor = ActorGpu {
+                mirror: mesh.mirrored.clone(),
+                side_slot: None,
                 faded_pending: Default::default(),
                 textures: vec![self.magenta.clone(); ch.textures.len() + 1],
                 slot,
@@ -3721,6 +3803,8 @@ impl ZoneRenderer {
             mapped_at_creation: false,
         });
         ActorGpu {
+            mirror: Vec::new(),
+            side_slot: None,
             faded_pending: Default::default(),
             textures,
             slot,
@@ -3830,7 +3914,7 @@ impl ZoneRenderer {
             area_info: [0.0; 4],
             voyage: self.voyage.to_cols_array_2d(),
             two: [[0.0; 4]; 4],
-            modes: [self.bump_mode as u32 as f32, self.smooth_lights as u32 as f32, 0.0, 0.0],
+            modes: [self.bump_mode as u32 as f32, self.smooth_lights as u32 as f32, self.two_sided_actors as u32 as f32, self.debug_pieces as u32 as f32],
             boost: self.light_boost,
             night: self.night,
             slot_scale: bytemuck::cast(self.slot_scale),

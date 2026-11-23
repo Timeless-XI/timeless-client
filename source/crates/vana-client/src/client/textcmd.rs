@@ -719,6 +719,12 @@ pub(super) fn run_unfiltered(w: &mut World, line: &str, mode: Mode) {
         }
         return;
     }
+    // Timeless XI: /look (/appearance) opens the custom look window; /look on|off|reset.
+    if first.eq_ignore_ascii_case("/look") || first.eq_ignore_ascii_case("/appearance") {
+        let args: Vec<&str> = line.split_whitespace().skip(1).collect();
+        super::timeless::looks::command(w, &args);
+        return;
+    }
     if first.eq_ignore_ascii_case("/tfish") {
         let args: Vec<&str> = line.split_whitespace().skip(1).collect();
         if args.first().is_some_and(|a| a.eq_ignore_ascii_case("practice")) {

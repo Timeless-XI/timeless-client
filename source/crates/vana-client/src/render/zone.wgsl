@@ -163,6 +163,8 @@ struct VertexOut {
     @location(12) nscale: f32,
     // Actors: the snow settled on them (client/storm.rs settle, 0..1); 0 for scenery.
     @location(13) @interpolate(flat) snow: f32,
+    // Timeless XI: actors, the texture's number in the model (`/look` debug colours, SkinMesh::build); 0 otherwise.
+    @location(14) @interpolate(flat) piece: u32,
 };
 
 // Ours (Night Lighting Modern): a point light's intensity (the table's, plights[2 (s - 1) + 1].w) for slot s + 1,
@@ -402,7 +404,7 @@ fn skin(v: SkinIn) -> VertexOut {
     var p = qrot(pose[a], pose[a + 2u].xyz * v.p0) + pose[a + 1u].xyz * v.w.x + qrot(pose[b], pose[b + 2u].xyz * v.p1) + pose[b + 1u].xyz * v.w.y;
     var n = qrot(pose[a], v.n0) + qrot(pose[b], v.n1);
     // A cloth particle (client/cloth.rs): the simulation's normal, and its position when free (w 1 = set).
-    let c = v.cloth & 0x7fffffffu;
+    let c = v.cloth & 0x00ffffffu;   // bits 24-30: the texture's number (Timeless XI debug colours)
     if (c != 0u) {
         let cp = pose[c];
         let cn = pose[c + 1u];
@@ -432,6 +434,7 @@ fn skin(v: SkinIn) -> VertexOut {
     out.snow = fract(pose[5].x) / 0.98;
     out.tint = pose[5].yzw;
     out.nscale = 1.0;
+    out.piece = (v.cloth >> 24u) & 0x7fu;
     return out;
 }
 
@@ -608,21 +611,60 @@ fn fs_opaque(in: VertexOut) -> @location(0) vec4<f32> {
 
 // Characters carry no baked lighting: shade by the normal. Placeholder until the D3D8 light setup is known.
 @fragment
-fn fs_actor(in: VertexOut) -> @location(0) vec4<f32> {
-    return actor_colour(in);
+fn fs_actor(in: VertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4<f32> {
+    return actor_colour(in, ff);
 }
 
-fn actor_colour(in: VertexOut) -> vec4<f32> {
+// Timeless XI (modes.w = 1, `/look` "Colour character pieces"): each texture of a character in a flat colour of its
+// own (the window lists them), shaded by how it faces us; the back of a triangle striped, so holes, back faces and
+// whose surface is whose can be told apart.
+fn debug_piece(in: VertexOut, ff: bool) -> vec4<f32> {
+    let pal = array<vec3<f32>, 8>(vec3<f32>(0.95, 0.25, 0.25), vec3<f32>(0.25, 0.85, 0.3), vec3<f32>(0.3, 0.45, 1.0),
+        vec3<f32>(1.0, 0.85, 0.2), vec3<f32>(0.9, 0.3, 0.95), vec3<f32>(0.2, 0.9, 0.95), vec3<f32>(1.0, 0.55, 0.15),
+        vec3<f32>(0.85, 0.85, 0.85));
+    let c = pal[in.piece % 8u] * select(1.0, 0.55, in.piece >= 8u);
+    let nv = abs(dot(normalize(in.normal), normalize(u.eye.xyz - in.world)));
+    var k = 0.45 + 0.55 * nv;
+    if (!ff && fract((in.clip.x + in.clip.y) * 0.125) < 0.5) {
+        k = k * 0.35;
+    }
+    return vec4<f32>(c * k, 1.0);
+}
+
+// Timeless XI (modes.z = 1, `/look` "Soft fill light"): a surface whose normal points away from the camera is seen from
+// behind (the inside of a mane, a cape): its normal is turned toward the camera (by the view, not the triangle's
+// winding, which the models don't keep consistently). Retail lights it by the stored normal (near black).
+fn actor_normal(in: VertexOut, ff: bool) -> vec3<f32> {
+    let n = normalize(in.normal);
+    let v = normalize(u.eye.xyz - in.world);
+    return select(n, -n, u.modes.z > 0.5 && dot(n, v) < 0.0);
+}
+
+// The sun term with the fill (modes.z = 1): every surface we see gets at least half the light of one facing the sun,
+// by how much it faces us, so nothing visible is left at the ambient level (black at night). 0 off: retail's N.L.
+fn actor_ndl(in: VertexOut, ff: bool, l: vec3<f32>) -> f32 {
+    let n = actor_normal(in, ff);
+    let ndl = max(dot(n, l), 0.0);
+    if (u.modes.z < 0.5) {
+        return ndl;
+    }
+    return max(ndl, 0.5 * max(dot(n, normalize(u.eye.xyz - in.world)), 0.0));
+}
+
+fn actor_colour(in: VertexOut, ff: bool) -> vec4<f32> {
     let texel = textureSample(tex, samp, in.uv);
     if (texel.a < 0.3) {
         discard;
     }
+    if (u.modes.w > 0.5) {
+        return debug_piece(in, ff);
+    }
     // Vertex alpha carries the model colour alpha (0x80 = 1.0).
     let alpha = clamp(in.color.a * 2.0, 0.0, 1.0);
     if (u.sun.w > 0.5) {
-        return vec4<f32>(lit_actor(in, texel).rgb, alpha);
+        return vec4<f32>(lit_actor(in, texel, ff).rgb, alpha);
     }
-    let diffuse = max(dot(normalize(in.normal), normalize(-u.light.xyz)), 0.0);
+    let diffuse = actor_ndl(in, ff, normalize(-u.light.xyz));
     let lit = texel.rgb * (u.light.w + (1.0 - u.light.w) * diffuse) * in.tint;
     return vec4<f32>(shade(in, vec4<f32>(lit, 1.0)).rgb, alpha);
 }
@@ -630,8 +672,8 @@ fn actor_colour(in: VertexOut) -> vec4<f32> {
 // A faded actor's offscreen pass (FUN_1002b6e0 with FUN_1001d240 on): drawn opaque, alpha test only (ALPHAREF 0x45,
 // TFACTOR alpha fixed 0x80), into a target cleared to 0; render_faded then blends it as one quad.
 @fragment
-fn fs_actor_solid(in: VertexOut) -> @location(0) vec4<f32> {
-    let c = actor_colour(in);
+fn fs_actor_solid(in: VertexOut, @builtin(front_facing) ff: bool) -> @location(0) vec4<f32> {
+    let c = actor_colour(in, ff);
     return vec4<f32>(c.rgb, 1.0);
 }
 
@@ -829,7 +871,7 @@ fn fs_bump(in: VertexOut) -> @location(0) vec4<f32> {
 // Actors: no vertex colour; material diffuse 0.5, ambient 0x80 / 128 = 1 (DAT_10346380, FUN_1002a8c0). Lit by the
 // zone, or by the area they stand in (the actor update FUN_1018b9a0 and draw FUN_1018b9e0 / FUN_1018ba20 with vtable
 // +0x188's area).
-fn lit_actor(in: VertexOut, t: vec4<f32>) -> vec4<f32> {
+fn lit_actor(in: VertexOut, t: vec4<f32>, ff: bool) -> vec4<f32> {
     // Area 0x10000: model +0xa8 set (event op 0x59 7 / 8), the scenery's lights (FUN_1018b9a0 mode 0).
     let bg = (in.area & 0x10000u) != 0u;
     let slot = in.area & 0xffffu;
@@ -847,7 +889,7 @@ fn lit_actor(in: VertexOut, t: vec4<f32>) -> vec4<f32> {
         fog = a.fog.xy;
     }
     color = boost(color);
-    let ndl = max(dot(normalize(in.normal), -sun), 0.0);
+    let ndl = actor_ndl(in, ff, -sun);
     // D3DRS_AMBIENT (ambient_rs); the target flash mixes those bytes toward 220 and scales the fog colour
     // (FUN_100c94a0).
     let amb = floor(mix(ambient_rs(ambient), vec3<f32>(220.0), in.flash.x)) / 255.0;

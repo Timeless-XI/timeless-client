@@ -1281,6 +1281,7 @@ mod tests {
             mount: None,
             init_hidden: Default::default(),
             grips: [None; 2],
+            face_texture: None,
             log: Vec::new(),
             packed: None,
             skin: None,
