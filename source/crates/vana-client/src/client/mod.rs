@@ -167,6 +167,8 @@ mod tilt;
 mod timeless;
 // Timeless XI: the title reel, for main.rs's reel-shot (tlreel.rs).
 pub(crate) use timeless::title as tl_title;
+// Timeless XI: the Select screen's ring, for main.rs's ring-shot.
+pub(crate) use timeless::ring as tl_ring;
 mod timers;
 mod trade;
 mod treasure;
@@ -9148,6 +9150,8 @@ pub struct App {
     tl_server_rows: bool,
     /// Timeless XI: the Timeless login shows One-time code this run (a login was refused, or two-factor turned on).
     tl_otp_shown: bool,
+    /// Timeless XI: the Select screen's ring of characters in the Hall of the Gods (client/timeless/ring.rs).
+    tl_ring: timeless::ring::Ring,
     /// The character select scene, its loading state and the character list it was built for.
     select: Option<select::SelectScene>,
     select_state: LoadState,
@@ -9453,6 +9457,7 @@ impl App {
             tl_title: Default::default(),
             tl_server_rows: false,
             tl_otp_shown: false,
+            tl_ring: Default::default(),
             select: None,
             select_state: LoadState::Idle,
             select_key: String::new(),
@@ -16987,7 +16992,7 @@ impl App {
                             }
                             let m = self.modern.get_or_insert_with(|| modern::Modern::new(ctx));
                             let ptr =
-                                m.select_screen(ctx, gu, [screen_size[0], screen_size[1]], self.cfg.modern_scale, &v);
+                                m.select_screen(ctx, Some(gu), [screen_size[0], screen_size[1]], self.cfg.modern_scale, &v);
                             let more = self.select_ui.pointer(gu, ptr, &list, chars, deleting, busy);
                             out.sounds.extend(more.sounds);
                             out.action = out.action.or(more.action);
@@ -17011,6 +17016,8 @@ impl App {
                         match out.action {
                             Some(select::Action::Login(i)) => {
                                 if let (Some(l), Some(c)) = (lobby.take(), chars.get(i).cloned()) {
+                                    // Timeless XI: the Select list's "Last played" (client/modern/tlselect.rs).
+                                    modern::record_played(&c.world, &c.name);
                                     action = Some(Box::new(move |app: &mut App| app.start_login_run(l, c)));
                                     fade_action = true;
                                 }
@@ -18413,7 +18420,53 @@ impl App {
         }
         let in_select =
             matches!(&self.phase, Phase::Characters { screen: LobbyScreen::Select | LobbyScreen::Delete, .. });
-        if let (true, Phase::Characters { chars, .. }) = (in_select, &self.phase) {
+        // Timeless XI: on the Select screen, the account's characters in a ring in the Hall of the Gods in place of
+        // retail's ring (client/timeless/ring.rs).
+        let tl_select = in_select && self.timeless_title();
+        let tl_req = match (&self.phase, tl_select) {
+            (Phase::Characters { chars, .. }, true) => {
+                let list = select::List::new(chars);
+                let members = (0..list.entries.len())
+                    .filter_map(|i| list.get(chars, i))
+                    .map(|c| {
+                        let l = &c.looks;
+                        timeless::ring::Member {
+                            name: c.name.clone(),
+                            look: Look {
+                                race: c.race as u8,
+                                face: c.face,
+                                head: l[1],
+                                body: l[2],
+                                hands: l[3],
+                                legs: l[4],
+                                feet: l[5],
+                                main: l[6],
+                                sub: l[7],
+                                range: 0,
+                            },
+                            size: c.size,
+                        }
+                    })
+                    .collect();
+                Some(timeless::ring::Request { members })
+            }
+            _ => None,
+        };
+        if let Some(req) = tl_req {
+            let data = if self.tl_ring.wanted() != req.key() { self.game_data().ok() } else { None };
+            self.tl_ring.want(req, || data);
+            self.tl_ring.focus(self.select_ui.cursor);
+            // The log-in prompt up, or the log-in under way (the lobby taken): the camera moves in on them.
+            let logging_in = matches!(&self.phase, Phase::Characters { lobby: None, .. });
+            self.tl_ring
+                .confirm(logging_in || matches!(self.select_ui.focus, select::Focus::Prompt(select::Prompt::Login, _)));
+        } else if !tl_select {
+            for c in self.tl_ring.clear() {
+                let Some(a) = &mut self.audio else { break };
+                play_fx_sound(a, c);
+            }
+        }
+        if let (true, false, Phase::Characters { chars, .. }) = (in_select, tl_select, &self.phase) {
             let key: String = chars.iter().map(|c| format!("{}:{:?};", c.name, c.looks)).collect();
             if key != self.select_key
                 && self.select_state != LoadState::Loading
@@ -18637,7 +18690,12 @@ impl App {
         if matches!(&self.phase, Phase::Characters { screen: LobbyScreen::Select | LobbyScreen::Delete, .. })
             && self.lobby_fade.next.is_none()
         {
-            let up = if self.select.is_some() || self.select_state == LoadState::Failed { 1.0 } else { 0.0 };
+            let ready = if self.timeless_title() {
+                self.tl_ring.ready()
+            } else {
+                self.select.is_some() || self.select_state == LoadState::Failed
+            };
+            let up = if ready { 1.0 } else { 0.0 };
             (self.lobby_fade.ui_to, self.lobby_fade.scene_to) = (up, up);
         }
         if let Some(next) = self.lobby_fade.step(dt * 60.0) {
@@ -19191,6 +19249,9 @@ impl App {
         if !select_ticks && let Some(fx) = self.select.as_mut().and_then(|s| s.effects()) {
             paused.extend(fx.pause_sounds());
         }
+        if !select_ticks {
+            paused.extend(self.tl_ring.pause_sounds());
+        }
         // The movies' voices too, while their screen is not up.
         if !self.title_backdrop()
             && let Some(f) = self.flyover.as_mut()
@@ -19279,7 +19340,29 @@ impl App {
             }
             g.drew_world = true;
         }
+        // Timeless XI: the ring of characters in the Hall of the Gods (client/timeless/ring.rs) in place of retail's.
+        if select_ticks && self.timeless_title() {
+            self.tl_ring.advance(dt);
+            let alive = self.audio.as_ref().map(|a| a.alive());
+            if self.tl_ring.render(
+                &gfx.gpu,
+                gfx.config.format,
+                encoder,
+                (&scene_view, Some(&scene_tex), bg),
+                &scene_depth,
+                aspect,
+                alive,
+                self.cfg.draw_distance,
+            ) {
+                g.drew_world = true;
+            }
+            for c in self.tl_ring.take_sounds() {
+                let Some(a) = &mut self.audio else { break };
+                play_fx_sound(a, c);
+            }
+        }
         if matches!(&self.phase, Phase::Characters { screen: LobbyScreen::Select | LobbyScreen::Delete, .. })
+            && !self.timeless_title()
             && let Some(sel) = &mut self.select
         {
             sel.advance(dt, self.select_ui.cursor);
@@ -19601,6 +19684,7 @@ impl App {
         if let Some(fx) = self.select.as_mut().and_then(|s| s.effects()) {
             fx.after_submit(&gfx.gpu);
         }
+        self.tl_ring.after_submit(&gfx.gpu);
         if let Some(fx) = self.creator.as_mut().and_then(|c| c.effects.as_mut()) {
             fx.after_submit(&gfx.gpu);
         }

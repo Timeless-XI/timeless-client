@@ -244,7 +244,9 @@ pub fn paint_button(p: &egui::Painter, m: &Modern, r: Rect, label: &str, font: &
         let (fill, line) = match () {
             _ if s.off => (Color32::from_black_alpha(60), edge.gamma_multiply(0.5)),
             _ if s.lit => (m.theme.color("focus").gamma_multiply(0.32), super::borders::lighter(edge, 0.35)),
-            _ if hovered => (super::borders::lighter(m.theme.color("surface"), 0.1), super::borders::lighter(edge, 0.2)),
+            _ if hovered => {
+                (super::borders::lighter(m.theme.color("surface"), 0.1), super::borders::lighter(edge, 0.2))
+            }
             _ => (m.theme.color("surface"), edge),
         };
         p.rect(r.shrink(0.5), 3.0, fill, Stroke::new(1.0, line), StrokeKind::Inside);
@@ -787,6 +789,47 @@ pub fn yes_no(ui: &mut Ui, m: &Modern, question: &str, labels: [&str; 2], yes: b
         let font = FontId::proportional(size);
         for (val, label) in [(true, labels[0]), (false, labels[1])] {
             let (r, resp) = ui.allocate_exact_size(vec2((size * 7.5).max(120.0), size + 16.0), Sense::click());
+            paint_button(
+                ui.painter(),
+                m,
+                r,
+                label,
+                &font,
+                Btn { lit: val == yes, cursor: val == yes, off: false },
+                resp.hovered(),
+            );
+            if resp.clicked() {
+                out = Some(val);
+            }
+        }
+    });
+    out
+}
+
+/// `yes_no` laid out centred: the question centred over two buttons of one width, centred under it (Timeless XI: the
+/// Select screen's log-in prompt, owner 2026-11-22).
+pub fn yes_no_centred(
+    ui: &mut Ui,
+    m: &Modern,
+    question: &str,
+    labels: [&str; 2],
+    yes: bool,
+    size: f32,
+) -> Option<bool> {
+    if !question.is_empty() {
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new(question).size(size).color(m.theme.color("text")));
+        });
+        ui.add_space(12.0);
+    }
+    let mut out = None;
+    let font = FontId::proportional(size);
+    let (w, gap) = ((size * 6.0).max(120.0), 14.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        ui.add_space(((ui.available_width() - (w * 2.0 + gap)) * 0.5).max(0.0));
+        for (val, label) in [(true, labels[0]), (false, labels[1])] {
+            let (r, resp) = ui.allocate_exact_size(vec2(w, size + 16.0), Sense::click());
             paint_button(
                 ui.painter(),
                 m,

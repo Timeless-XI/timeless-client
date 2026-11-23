@@ -48,6 +48,7 @@ mod points;
 mod rows;
 mod search;
 pub use search::SEARCH_LISTS;
+pub use tlselect::record_played;
 mod post;
 mod shop;
 pub mod shot;
@@ -60,6 +61,7 @@ mod theme;
 mod tlbar;
 // Timeless XI: the Timeless title's logo and /titlecam's guide.
 mod tltitle;
+mod tlselect;
 mod tlbook;
 // Timeless XI: the Timeless Fishing bar game on screen (every interface).
 mod tlfish;

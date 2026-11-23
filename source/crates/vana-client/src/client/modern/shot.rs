@@ -479,6 +479,69 @@ fn titles_sample(p: &mut Panels) {
     );
 }
 
+/// The mock-ups' variants: `VANA_SELECT_MOCK=card=portrait|medallion,right=nation|played`, the faces from
+/// `VANA_SELECT_PORTRAITS=Name=path.png;...` (loaded once).
+fn mock_style(ctx: &egui::Context) {
+    use super::tlselect::{CardStyle, RowRight, STYLE};
+    STYLE.with(|s| {
+        let mut s = s.borrow_mut();
+        let spec = std::env::var("VANA_SELECT_MOCK").unwrap_or_default();
+        for kv in spec.split(',') {
+            match kv.trim() {
+                "card=portrait" => s.card = CardStyle::Portrait,
+                "card=medallion" => s.card = CardStyle::Medallion,
+                "right=nation" => s.right = RowRight::Nation,
+                "right=played" => s.right = RowRight::Played,
+                _ => {}
+            }
+        }
+        s.played.insert("Solinvictus".into(), "Today".into());
+        s.played.insert("Timeless".into(), "3 days ago".into());
+        if s.portraits.is_empty() {
+            for pair in std::env::var("VANA_SELECT_PORTRAITS").unwrap_or_default().split(';') {
+                let Some((name, path)) = pair.split_once('=') else { continue };
+                let Ok((size, rgba)) = load_png(Path::new(path)) else { continue };
+                let img = egui::ColorImage::from_rgba_unmultiplied(size, &rgba);
+                let t = ctx.load_texture(format!("portrait {name}"), img, egui::TextureOptions::LINEAR);
+                s.portraits.insert(name.to_string(), t.id());
+                std::mem::forget(t);
+            }
+        }
+    });
+}
+
+/// Two characters as on the owner's account (2026-11-22), the first highlighted.
+fn select_sample(prompt: bool) -> crate::client::select::View {
+    use crate::client::select::{RowView, View};
+    let row = |name: &str, info: [&str; 5], job: u8, sub_job: u8, nation: u8, rank: u8| RowView {
+        name: name.into(),
+        tint: 0xffff_ffff,
+        info: info.map(String::from),
+        job,
+        sub_job,
+        nation,
+        rank,
+    };
+    View {
+        rows: vec![
+            row("Solinvictus", ["Timeless", "Mithra Female", "Monk", "2", "Windurst Waters"], 2, 0, 2, 1),
+            row("Timeless", ["Timeless", "Galka Male", "Warrior", "75", "Rolanberry Fields"], 1, 13, 1, 10),
+        ],
+        labels: ["World", "Race", "Job", "Level", "Area"].map(String::from),
+        cursor: 0,
+        list_focus: !prompt,
+        deleting: false,
+        help: "Select a character to play.".into(),
+        counts: ["Characters: 2".into(), "".into(), "".into()],
+        options: None,
+        slots: None,
+        prompt: prompt.then(|| ("Log in with \"Solinvictus\"?".to_string(), false)),
+        ok: None,
+        rename: None,
+        button: false,
+    }
+}
+
 fn sample(m: &Modern, ctx: &egui::Context, layout: &mut Layout, opts: &Opts) {
     let top = crate::client::hudtop::TopView {
         title: "Status".into(),
@@ -837,6 +900,9 @@ pub struct Opts {
     pub alliance: bool,
     /// Title rows with long notes.
     pub titles: bool,
+    /// Timeless XI: the Select Character screen's panels with two sample characters (needs the game's data for the
+    /// lobby's texts); 1 = the list, 2 = with the log-in prompt up.
+    pub select: u8,
     /// Timeless XI: drawn in the Timeless interface (Timeless View).
     pub timeless: bool,
 }
@@ -861,8 +927,9 @@ pub fn shot(width: u32, height: u32, scale: u32, backdrop: Option<&Path>, out: &
     let mut warm = ctx.run_ui(egui::RawInput { max_texture_side: side, ..Default::default() }, |_| {});
     let mut deltas: Vec<_> = warm.textures_delta.set.drain().collect();
     warm.textures_delta.clear();
-    let m = Modern::new(&ctx);
+    let mut m = Modern::new(&ctx);
     m.set_opacity(opts.opacity);
+
     // Timeless XI: the Timeless interface, as Modern::ui sets it each frame.
     if opts.timeless {
         m.theme.set_timeless(true);
@@ -912,7 +979,13 @@ pub fn shot(width: u32, height: u32, scale: u32, backdrop: Option<&Path>, out: &
                     Color32::WHITE,
                 );
             }
-            sample(&m, ctx, &mut layout, opts);
+            if opts.select > 0 {
+                mock_style(ctx);
+                let v = select_sample(opts.select == 2);
+                m.select_screen(ctx, None, [width, height], scale, &v);
+            } else {
+                sample(&m, ctx, &mut layout, opts);
+            }
         });
         // Taken as they come (a TexturesDelta dropped unapplied is an error in debug builds).
         deltas.extend(output.textures_delta.set.drain());

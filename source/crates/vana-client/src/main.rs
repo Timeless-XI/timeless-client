@@ -190,6 +190,27 @@ enum Cmd {
         #[arg(allow_hyphen_values = true)]
         z: f32,
     },
+    /// Timeless XI: the Select screen's ring in the Hall of the Gods (client/timeless/ring.rs), a PNG at each time.
+    RingShot {
+        #[arg(long)]
+        out_dir: PathBuf,
+        /// A character: race,face,head,body,hands,legs,feet[,main,sub[,size]]; once per character, in order.
+        #[arg(long = "char", required = true)]
+        chars: Vec<String>,
+        /// Focus changes: seconds:index, comma-separated (the first is where it starts).
+        #[arg(long, default_value = "0:0")]
+        focus: String,
+        /// Seconds from which the log-in close-up is on (the prompt up).
+        #[arg(long)]
+        close_at: Option<f32>,
+        /// Seconds to shoot at.
+        #[arg(long, default_value = "2")]
+        times: String,
+        #[arg(long, default_value_t = 1600)]
+        width: u32,
+        #[arg(long, default_value_t = 900)]
+        height: u32,
+    },
     /// Timeless XI: frames of a Timeless title reel shot (timeless-title.json, else the built-in reel) with its filter
     /// and the logo.
     ReelShot {
@@ -680,6 +701,9 @@ enum Cmd {
         /// Timeless XI: in the Timeless interface (Timeless View: its palette, frames, rows, fonts and icons).
         #[arg(long)]
         timeless: bool,
+        /// Timeless XI: the Select Character panels (1), with the log-in prompt (2).
+        #[arg(long, default_value_t = 0)]
+        select: u8,
     },
     /// Disassemble a zone's event scripts (event DAT), with dialogue text inlined.
     EventDump {
@@ -1450,6 +1474,7 @@ fn main() -> Result<()> {
             gm,
             controller,
             mods,
+            select,
         } => {
             let list = font.is_some();
             client::modern_shot(
@@ -1476,6 +1501,7 @@ fn main() -> Result<()> {
                     gm,
                     controller,
                     mods,
+                    select,
                 },
             )
         }
@@ -2390,6 +2416,42 @@ fn main() -> Result<()> {
         }
         Cmd::DialogueShot { out, zone, id, speaker, choice, frame, width, height } => {
             dialogshot::dialogue_shot(&out, zone, id, &speaker, choice, frame, width, height)
+        }
+        Cmd::RingShot { out_dir, chars, focus, close_at, times, width, height } => {
+            use client::tl_ring::{Member, Request, shot};
+            let members = chars
+                .iter()
+                .enumerate()
+                .map(|(i, c)| {
+                    let v: Vec<u16> = c.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                    let g = |k: usize| v.get(k).copied().unwrap_or(0);
+                    Member {
+                        name: format!("Char{}", i + 1),
+                        look: dat::character::Look {
+                            race: g(0) as u8,
+                            face: g(1),
+                            head: g(2),
+                            body: g(3),
+                            hands: g(4),
+                            legs: g(5),
+                            feet: g(6),
+                            main: g(7),
+                            sub: g(8),
+                            range: 0,
+                        },
+                        size: g(9) as u8,
+                    }
+                })
+                .collect();
+            let moves: Vec<(f32, usize)> = focus
+                .split(',')
+                .filter_map(|m| {
+                    let (t, i) = m.split_once(':')?;
+                    Some((t.trim().parse().ok()?, i.trim().parse().ok()?))
+                })
+                .collect();
+            let at: Vec<f32> = times.split(',').filter_map(|t| t.trim().parse().ok()).collect();
+            shot(&Request { members }, &moves, close_at, &at, &out_dir, [width, height])
         }
         Cmd::ReelShot { shot, out_dir, steps, filter, no_logo, width, height } => {
             tlreel::reel_shot(&shot, &out_dir, steps, width, height, filter.as_deref(), !no_logo)

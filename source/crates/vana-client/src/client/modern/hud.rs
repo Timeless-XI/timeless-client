@@ -809,7 +809,7 @@ pub fn party_panel(
 /// box's bottom; the main job's level at the tablet's right. Centred on `cy` from `x`; dimmed when the member is not
 /// here. Job colours are the Timeless palette's `job_war` .. (from each job's artifact and relic armour); a job
 /// without one takes the pewter edge's. The width it takes.
-fn tl_job_plaque(
+pub(super) fn tl_job_plaque(
     painter: &egui::Painter,
     m: &Modern,
     x: f32,
