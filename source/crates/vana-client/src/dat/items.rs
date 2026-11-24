@@ -526,6 +526,10 @@ impl Items {
 
     /// The record without taking a slot of the record cache (a mod's reads, our scans over every id).
     pub fn peek(&self, id: u32) -> Option<Item> {
+        // Timeless XI: our own items have no record in the item DATs.
+        if id == crate::client::aquarium::ITEM as u32 {
+            return self.timeless_aquarium();
+        }
         let (kind, r) = self.record(id)?;
         let it = parse(&r, kind, self.lang, r.len() == 0x1400);
         (it.id == id).then_some(it)
@@ -595,6 +599,39 @@ impl Items {
 
     pub fn icon(&self, id: u32) -> Option<(u32, u32, Vec<u8>)> {
         self.item(id)?.icon_rgba()
+    }
+
+    /// Timeless XI: the Timeless Aquarium (item 75, client/timeless/aquarium.rs). It borrows the Freshwater
+    /// Aquarium's furnishing record (item 120: kind, type, the furnishing fields) with its own name, text, flags
+    /// (Rare, Ex, no delivery / sale / auction, as timeless-server's item_basic) and icon.
+    fn timeless_aquarium(&self) -> Option<Item> {
+        const NAME: &str = "Timeless Aquarium";
+        const DESC: &str = "A tank for the Elder fish.\nEach Elder fish you land\nswims here from then on.";
+        let (kind, r) = self.record(120)?;
+        let mut it = parse(&r, kind, self.lang, r.len() == 0x1400);
+        if it.id != 120 {
+            return None;
+        }
+        it.id = crate::client::aquarium::ITEM as u32;
+        it.flags = 0xf040;
+        it.name = NAME.into();
+        it.description = DESC.into();
+        it.article = 0;
+        it.singular = NAME.into();
+        it.plural = "Timeless Aquariums".into();
+        let n = it.fields.len();
+        for (k, f) in it.fields.iter_mut().enumerate() {
+            *f = match (k, &*f) {
+                (0, _) => Field::Text(NAME.into()),
+                (1, Field::Num(_)) => Field::Num(0),
+                (2, Field::Text(_)) if n >= 5 => Field::Text(NAME.into()),
+                (3, Field::Text(_)) if n >= 5 => Field::Text("Timeless Aquariums".into()),
+                (k, Field::Text(_)) if k + 1 == n => Field::Text(DESC.into()),
+                (_, f) => f.clone(),
+            };
+        }
+        it.icon = crate::client::aquarium::icon_record().map(<[u8]>::to_vec);
+        Some(it)
     }
 }
 

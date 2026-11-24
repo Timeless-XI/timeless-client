@@ -2,6 +2,7 @@
 //! their own files so upstream merges stay small.
 
 pub mod angler;
+pub mod aquarium;
 pub mod book;
 pub mod fishing;
 pub mod hdicon;
