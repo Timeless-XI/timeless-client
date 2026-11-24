@@ -22224,11 +22224,11 @@ impl ApplicationHandler for App {
         // don't ask for focus and say so in the title, so they never take the user's keyboard.
         let setup_mode = timeless::setup::wanted();
         let title = if self.drive.driven() {
-            "TimelessXI [test]"
+            "Timeless XI [test]"
         } else if setup_mode {
             "Timeless XI Setup"
         } else {
-            "TimelessXI"
+            "Timeless XI"
         };
         // No game files yet: the first-start window is a fixed size, whatever the config says.
         let bootstrap = setup_mode || firstrun::needed(&self.cfg.ffxi_dir());
