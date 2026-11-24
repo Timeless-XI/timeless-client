@@ -3,8 +3,6 @@
 - Charcoal-glass frame with the logo's stepped bars and engraved pewter hairlines; the hourglass emblem on the stand.
 - Back wall: a dusk-to-night sky full of stars, faint lilac cloud, a distant ridge and the Lufaise rock arch with its
   ruins as a crisp silhouette.
-- The void: a slowly turning star vortex on the back wall, framed by a pewter clock-face ring (12 ticks), with a
-  second layer of star motes turning the other way.
 - The logo hourglass stands in the sand: stepped bars, glass, a spinning star crystal in the upper bulb, grains
   falling to the pile below.
 - A spinning star crystal crowns the tank.
@@ -157,16 +155,6 @@ def group_tank():
     box(m, (-0.1, -0.29, zf - 0.002), (0.1, -0.282, zf + 0.004), HAIR)
     box(m, (-0.1, -0.518, zf - 0.002), (0.1, -0.51, zf + 0.004), HAIR)
     octa(m, (0, -0.40, zf + 0.008), 0.016, 0.022, 0.008, EMBLEM, 45)
-    # clock-face ring round the void, with twelve ticks
-    disc(m, VOID_C, VOID_R, VOID_R + 0.045, RING, 3, 96, z_off=0.03)
-    disc(m, VOID_C, VOID_R + 0.05, VOID_R + 0.058, RING, 2, 96, z_off=0.031)
-    for k in range(12):
-        a = k / 12 * 2 * np.pi; big = k % 3 == 0
-        r0, r1 = VOID_R + 0.006, VOID_R + (0.04 if big else 0.026)
-        w = 0.009 if big else 0.005
-        d = np.array([np.sin(a), np.cos(a)]); pp = np.array([np.cos(a), -np.sin(a)])
-        q = [VOID_C[:2] + d * r0 + pp * w, VOID_C[:2] + d * r1 + pp * w, VOID_C[:2] + d * r1 - pp * w, VOID_C[:2] + d * r0 - pp * w]
-        m.add(*flat_poly([(x, y, VOID_C[2] + 0.034) for x, y in q], (0, 0, 1)), HAIR)
     # ruins as dark silhouettes: a broken column, a stub, a fallen drum, an arch fragment; rocks
     for (x, z, h, r) in ((1.0, -0.32, 0.5, 0.075), (-1.05, -0.3, 0.3, 0.065), (0.62, -0.36, 0.16, 0.07)):
         m.add(*tube(lambda u, x=x, z=z, h=h: np.stack([np.full_like(u, x), 0.0 + h * u, np.full_like(u, z)], -1), r, 6, 18), RUIN)
@@ -219,21 +207,6 @@ def group_grains():
     for k in range(int((HG['h'] * 0.27) / sp) + 1):
         m.add(*sphere((HG['x'], top - k * sp, HG['z']), 0.0055, 6), GRAIN)
     return m, ('fall', (0, -1, 0), sp, 0.5)
-
-
-def group_swirl():
-    m = Mesh(); disc(m, VOID_C, 0.0, VOID_R, SWIRL, 14, 96, layer=1, z_off=0.005)
-    return m, ('spin', VOID_C, (0, 0, 1), 150.0)
-
-
-def group_motes():
-    rng = np.random.default_rng(57)
-    m = Mesh()
-    for _ in range(70):
-        r = VOID_R * np.sqrt(rng.uniform(0.02, 0.86)); a = rng.uniform(0, 2 * np.pi)
-        s = rng.choice([0.006, 0.009, 0.013, 0.02], p=[0.45, 0.3, 0.17, 0.08])
-        quad(m, VOID_C + [r * np.cos(a), r * np.sin(a), 0.045], s, MOTE)
-    return m, ('spin', VOID_C, (0, 0, 1), -70.0)
 
 
 # ----------------------------------------------------------------------------- materials
@@ -399,8 +372,7 @@ def anim_matrix(anim, t):
 def groups(names):
     """All groups for a fill: (name, mesh parts, material, transform-to-tank or None, anim)."""
     out = [('tank', group_tank().build(), material, None, ('none',))]
-    for name, fn in (('crown', group_crown), ('hgcrystal', group_hgcrystal), ('grains', group_grains), ('swirl', group_swirl),
-                     ('motes', group_motes)):
+    for name, fn in (('crown', group_crown), ('hgcrystal', group_hgcrystal), ('grains', group_grains)):
         mm, anim = fn()
         out.append((name, mm.build(), material, None, anim))
     for nm in names:

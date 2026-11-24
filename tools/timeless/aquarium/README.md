@@ -9,7 +9,7 @@ read, and no outside art is used.
 | `r3d.py` | Mesh builders (loft, fin sheet, tube, sphere, prism) and a small numpy software renderer for mock-ups. `LOD` scales mesh resolution; `SEAM` gives lofts a seam column for baking. |
 | `fishlib.py` | Fish parts: body, fins, eyes, whiskers, part ids. |
 | `fish_<name>.py` | The eight Elder fish: `build()` (mesh) and `material()` (procedural textures). |
-| `tank2.py` | The Timeless Aquarium (v2): the frame, night sky, void, hourglass and crown, the fish places, the animations (`anim_matrix`), and mock-up renders (`python3 tank2.py full\|empty\|three\|close`). |
+| `tank2.py` | The Timeless Aquarium (v2): the frame, night sky, hourglass and crown, the fish places, the animations (`anim_matrix`), and mock-up renders (`python3 tank2.py full\|empty\|three\|close`). |
 | `export_aquarium2.py` | Bakes every part's texture in uv space, bakes the lighting into vertex colours, converts to furniture space (-y up, origin = the middle of the 3 x 2 footprint on the floor, scale `K`), and writes the bundle (version 2; the format is described at the top of the file and in `aquarium.rs`). |
 | `export_aquarium.py` | Helpers the v2 exporter uses: bake, PNG, model packing, item icon record. Its own `bundle()` is the older v1 format, no longer read. |
 | `make_aq_icon2.py` | The item icon: 32 x 32 (written into the bundle as an item-DAT icon record) and 128 px. |
@@ -30,8 +30,6 @@ Groups, and how they move:
 - `crown`: spins about its vertical axis every 14 s.
 - `hgcrystal`: spins every 9 s.
 - `grains`: fall one spacing every 0.5 s.
-- `swirl`: turns every 150 s.
-- `motes`: turn the other way, every 70 s.
 - `fish0`..`fish7`: each drifts in a small figure-eight, with its own period and phase.
 
 Variants:

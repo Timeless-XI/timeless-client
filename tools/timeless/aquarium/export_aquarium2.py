@@ -5,7 +5,7 @@ and animates on its own:
   mesh = u8 anim kind, f32 x 8 params, then u32 models + models as v1.
   kind 0 none; 1 spin (pivot xyz, axis xyz, period s, 0); 2 bob (pivot xyz, amplitude, period s, phase, yaw deg, 0);
   3 fall (direction xyz, spacing, period s, 0, 0, 0). All in furniture space (-y up).
-Groups: tank, crown, hgcrystal, grains, swirl, motes, fish0..fish7.
+Groups: tank, crown, hgcrystal, grains, fish0..fish7.
 Variants: 0 always; 1 lit (1+ fish) / 2 dark (none); 3 crown off (none) / 4 dim (1-7) / 5 full (all 8).
 """
 import struct, sys
@@ -107,8 +107,7 @@ def bundle():
     for bit, name in enumerate(T.FISH_ORDER):
         entries.append((0, f'fish{bit}', fish_group(bit, name)))
     r3d.LOD = 0.7
-    for gname, fn in (('tank', None), ('crown', T.group_crown), ('hgcrystal', T.group_hgcrystal), ('grains', T.group_grains),
-                      ('swirl', T.group_swirl), ('motes', T.group_motes)):
+    for gname, fn in (('tank', None), ('crown', T.group_crown), ('hgcrystal', T.group_hgcrystal), ('grains', T.group_grains)):
         if fn is None:
             mesh, anim = T.group_tank().build(), ('none',)
         else:

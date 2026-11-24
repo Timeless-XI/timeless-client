@@ -14,9 +14,9 @@
 //! - Animation (`Anim`): 0 none; 1 spin (pivot xyz, axis xyz, period s); 2 bob (pivot xyz, amplitude, period s,
 //!   phase, yaw degrees); 3 fall (direction xyz, spacing, period s): a looped slide by one spacing.
 //! - Variant: 0 always; 1 lit (1+ fish) / 2 dark (none); crown 3 off (none) / 4 dim (1-7) / 5 full (all 8).
-//! - Groups: `tank` (frame, night sky, sand, ruins, kelp, the void's clock ring, the hourglass), `crown` (the star
-//!   crystal on top, spins), `hgcrystal` (the hourglass's star crystal, spins), `grains` (falling sand), `swirl` and
-//!   `motes` (the star void, turning both ways), `fish0`..`fish7` (placed in the tank, each drifts). The PNGs by
+//! - Groups: `tank` (frame, night sky, sand, ruins, kelp, the hourglass), `crown` (the star
+//!   crystal on top, spins), `hgcrystal` (the hourglass's star crystal, spins), `grains` (falling sand),
+//!   `fish0`..`fish7` (placed in the tank, each drifts). The PNGs by
 //!   texture name; `icon32` the item icon in the item DAT layout (dat/items.rs `icon_rgba`).
 //!
 //! Model space is furniture space: origin at the middle of the 3 x 2 footprint on the floor, -y up.
@@ -44,7 +44,7 @@ pub fn file_id(group: usize, mask: u8) -> u32 {
 }
 
 /// The groups always drawn, then the fish.
-const GROUPS: [&str; 6] = ["tank", "crown", "hgcrystal", "grains", "swirl", "motes"];
+const GROUPS: [&str; 4] = ["tank", "crown", "hgcrystal", "grains"];
 
 /// A group's movement, in its piece's model space (furniture space, -y up).
 #[derive(Clone, Copy, Debug, PartialEq)]
