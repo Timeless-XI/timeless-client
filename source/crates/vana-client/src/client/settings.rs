@@ -480,6 +480,13 @@ fn rows(kind: Kind, tab: usize, in_game: bool, modern: bool) -> &'static [SRow] 
             &[(0, "Compressed"), (1, "Full"), (2, "High")],
             Restart,
         ),
+        row(
+            "Anisotropic Filtering",
+            "Keeps ground and walls sharp when you look at them at a slant. Higher is sharper.",
+            Aniso,
+            &[(1, "Off"), (2, "2x"), (4, "4x"), (8, "8x"), (16, "16x")],
+            NextZone,
+        ),
     ];
     const EFFECTS: &[SRow] = &[
         row(
@@ -627,13 +634,6 @@ fn rows(kind: Kind, tab: usize, in_game: bool, modern: bool) -> &'static [SRow] 
             &[],
             Now,
         ),
-        row(
-            "Anisotropic Filtering",
-            "Keeps ground and walls sharp when you look at them at a slant. Higher is sharper.",
-            Aniso,
-            &[(1, "Off"), (2, "2x"), (4, "4x"), (8, "8x"), (16, "16x")],
-            NextZone,
-        ),
         row("Party TP", "Shows each member's TP in the party window.", PartyTp, OFF_ON, Now),
         row(
             "Interface",
@@ -705,7 +705,7 @@ fn rows(kind: Kind, tab: usize, in_game: bool, modern: bool) -> &'static [SRow] 
             Now,
         ),
         row(
-            "Colour Grading",
+            "Color Grading",
             "Gives the 3D world a colour tint. Menus and text keep their colours (not retail).",
             Grading,
             &[(0, "Off"), (1, "Vivid"), (2, "Warm"), (3, "Cool"), (4, "Film")],

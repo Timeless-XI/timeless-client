@@ -261,7 +261,7 @@ impl MapSession {
         log::info!("map out (login): header {} [{}]", hex::encode(&dgram[..HEADER]), sub_ids(&dgram[HEADER..]));
         let digest = Md5::digest(&dgram[HEADER..]);
         dgram.extend_from_slice(&digest);
-        self.sock.send(&dgram)?;
+        send_dgram(&self.sock, &dgram)?;
         Ok(())
     }
 
@@ -353,7 +353,7 @@ impl MapSession {
         body.extend_from_slice(&digest);
         self.cipher.encrypt(&mut body);
         dgram.extend_from_slice(&body);
-        self.sock.send(&dgram)?;
+        send_dgram(&self.sock, &dgram)?;
         self.bytes_out += dgram.len() as u64;
         Ok(())
     }
@@ -410,6 +410,13 @@ impl MapSession {
             }
             // Windows fails the read of a datagram longer than the buffer (WSAEMSGSIZE), as retail's does.
             Err(e) if e.raw_os_error() == Some(10040) => return Ok(None),
+            // Timeless XI: Windows can end a timed-out read on our (overlapped) socket with ERROR_IO_PENDING (997) or
+            // ERROR_OPERATION_ABORTED (995) instead of a time-out; that is no datagram, not a lost connection
+            // (players were sent back to the title with "Overlapped I/O operation is in progress").
+            Err(e) if transient(&e) => {
+                log::debug!("map in: {e} (taken as no datagram)");
+                return Ok(None);
+            }
             Err(e) => return Err(e.into()),
         };
         // FUN_100dd6c0 reads 0x2d..=0x550 bytes; FUN_100dc670's read fails on more. LSB sends an empty datagram when
@@ -499,8 +506,36 @@ impl MapSession {
     }
 }
 
+/// Timeless XI: a socket error Windows can report for a read or write that merely didn't happen this time:
+/// ERROR_IO_PENDING (997) and ERROR_OPERATION_ABORTED (995) on an overlapped socket, WSAEWOULDBLOCK (10035) and
+/// WSAENOBUFS (10055).
+fn transient(e: &std::io::Error) -> bool {
+    matches!(e.raw_os_error(), Some(995 | 997 | 10035 | 10055)) || e.kind() == std::io::ErrorKind::WouldBlock
+}
+
+/// Timeless XI: sends a datagram; one Windows couldn't send this time is dropped like one lost on the way (what
+/// isn't acknowledged goes again with the next), rather than ending the session.
+fn send_dgram(sock: &std::net::UdpSocket, dgram: &[u8]) -> std::io::Result<()> {
+    match sock.send(dgram) {
+        Ok(_) => Ok(()),
+        Err(e) if transient(&e) => {
+            log::warn!("map out: {e} (datagram dropped, sent again with the next)");
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn windows_pending_io_is_not_a_disconnect() {
+        for code in [995, 997, 10035, 10055] {
+            assert!(super::transient(&std::io::Error::from_raw_os_error(code)));
+        }
+        assert!(!super::transient(&std::io::Error::from_raw_os_error(10054)));
+    }
+
     use super::*;
 
     /// The sequence steps over 0, and the lag is the next sequence less the server's ack.

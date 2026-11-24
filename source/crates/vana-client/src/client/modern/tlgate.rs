@@ -156,7 +156,7 @@ impl Gate {
             let inner = r.shrink2(vec2(34.0, 26.0));
             let target = m.target();
             let p = ui.painter();
-            spaced(p, pos2(inner.center().x, inner.min.y), &format!("NEW VERSION  ·  {}", target.trim_start_matches('v')), font(ctx, body(11.5)), FOCUS, 3.0, true);
+            spaced(p, pos2(inner.center().x, inner.min.y), &format!("NEW VERSION  ·  {}", manifest::shown(&target).to_uppercase()), font(ctx, body(11.5)), FOCUS, 3.0, true);
             let title = match &job {
                 Some(Job::Done) => "Updated",
                 Some(Job::Running(..)) => "Updating Timeless XI",
@@ -173,22 +173,22 @@ impl Gate {
                     ctx.request_repaint();
                 }
                 Some(Job::Done) => {
-                    para(p, pos2(inner.min.x, body_y), "The new client is in place. Timeless XI restarts now.", font(ctx, body(15.0)), TEXT, inner.width());
+                    para(p, pos2(inner.min.x, body_y), "The update is in place. Timeless XI is restarting now.", font(ctx, body(15.0)), TEXT, inner.width());
                     out = GateOut::Restart;
                 }
                 Some(Job::Failed(e)) => {
-                    let h = para(p, pos2(inner.min.x, body_y), "The update didn't finish. Check your connection and try again.", font(ctx, body(15.0)), TEXT, inner.width());
+                    let h = para(p, pos2(inner.min.x, body_y), "The update didn't finish. Check your internet connection, then choose Try Again.", font(ctx, body(15.0)), TEXT, inner.width());
                     para(p, pos2(inner.min.x, body_y + h + 6.0), e, font(ctx, body(12.5)), ALERT, inner.width());
                 }
                 None => {
                     let text = if m.message.trim().is_empty() {
-                        "A new version of the Timeless XI client is out, and it's needed to play. Updating takes a moment \
-                         and keeps your settings, hotbars and characters."
+                        "A new version of Timeless XI is out, and you'll need it to play. Updating takes a moment, and \
+                         your settings and hotbars stay just as they are."
                     } else {
                         m.message.trim()
                     };
                     let h = para(p, pos2(inner.min.x, body_y), text, font(ctx, body(15.0)), TEXT, inner.width());
-                    p.text(pos2(inner.min.x, body_y + h + 6.0), egui::Align2::LEFT_TOP, format!("You have {}.", manifest::current()), font(ctx, body(12.5)), MUTED);
+                    p.text(pos2(inner.min.x, body_y + h + 6.0), egui::Align2::LEFT_TOP, format!("This computer has {}.", manifest::shown(manifest::current())), font(ctx, body(12.5)), MUTED);
                 }
             }
             let running = matches!(job, Some(Job::Running(..)) | Some(Job::Done));

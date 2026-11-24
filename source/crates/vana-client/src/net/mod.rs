@@ -29,6 +29,13 @@ pub fn tcp(host: &str, port: u16) -> std::io::Result<std::net::TcpStream> {
     Err(last)
 }
 
+/// A timed read that ended with nothing read: a time-out, or (Timeless XI) what Windows can report in its place on
+/// our overlapped sockets, ERROR_IO_PENDING (997) or ERROR_OPERATION_ABORTED (995).
+pub fn timed_out(e: &std::io::Error) -> bool {
+    matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)
+        || matches!(e.raw_os_error(), Some(995 | 997))
+}
+
 #[cfg(test)]
 mod tests {
     /// A name's addresses are tried in turn until one answers (localhost: ::1 first where it resolves to it).

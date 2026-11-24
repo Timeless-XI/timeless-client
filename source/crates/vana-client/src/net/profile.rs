@@ -614,7 +614,7 @@ fn irc_run(c: &Cred, tx: &mpsc::Sender<Irc>, stop: &mpsc::Receiver<()>) -> Resul
             }
             Ok(_) if line.len() > MAX_IRC_LINE => bail!("an IRC line over {MAX_IRC_LINE} bytes"),
             Ok(_) => {}
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+            Err(e) if crate::net::timed_out(&e) => {}
             Err(e) => return Err(e.into()),
         }
     }

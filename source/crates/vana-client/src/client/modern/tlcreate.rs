@@ -43,8 +43,8 @@ pub fn prev_step(step: usize) -> Option<usize> {
 
 /// The races' words (Timeless's own), by retail's race row: Hume ♂ ♀, Elvaan ♂ ♀, Tarutaru ♂ ♀, Mithra, Galka.
 const RACE_WORDS: [(&str, &str); 8] = [
-    ("Adaptable folk found in every corner of Vana'diel.", "Even in every art: no strength, no weakness."),
-    ("Adaptable folk found in every corner of Vana'diel.", "Even in every art: no strength, no weakness."),
+    ("Adaptable folk found in every corner of Vana'diel.", "Balanced in every art, with no great strength or weakness."),
+    ("Adaptable folk found in every corner of Vana'diel.", "Balanced in every art, with no great strength or weakness."),
     ("Proud knights of the forests of San d'Oria.", "Strong of arm and spirit; slow to magic."),
     ("Proud knights of the forests of San d'Oria.", "Strong of arm and spirit; slow to magic."),
     ("Small of stature, vast of magical talent.", "Born to the arcane arts of Windurst."),
@@ -660,7 +660,7 @@ fn colors(
             }
         }
         3 => colour(ui, m, "lips", &mut s.lips, &LIPS),
-        _ => slider(ui, m, "nose", &mut s.nose, (0.0, 1.0), ("Grey", "Black")),
+        _ => slider(ui, m, "nose", &mut s.nose, (0.0, 1.0), ("Gray", "Black")),
     }
     ui.add_space(8.0);
     ui.horizontal(|ui| {
@@ -753,9 +753,9 @@ fn step_window(
     ui.add_space((1.0 - k) * 8.0);
     let help = match v.step {
         0 => "Five peoples walk Vana'diel. Which blood will carry your legend?",
-        1 => "Choose a likeness and a size. Its colors are yours next.",
+        1 => "Choose a likeness and a size. You'll pick the colors next.",
         2 => "Make the colors your own: hair, eyes, markings.",
-        4 => "Your first calling. Every job can be learned in time.",
+        4 => "Your first calling. You can learn other jobs in time.",
         6 => "The nation you will serve, and where you will begin.",
         _ if v.world.is_some() => "",
         _ => "Name your character.",
@@ -905,7 +905,7 @@ fn step_window(
     if v.step != 5 {
         ui.add_space(12.0);
         ui.horizontal(|ui| {
-            let back = prev_step(v.step).map_or("Leave".to_string(), |p| STEPS[place_of(p)].0.to_string());
+            let back = prev_step(v.step).map_or("Cancel".to_string(), |p| STEPS[place_of(p)].0.to_string());
             if button(ui, m, &format!("‹  {back}"), 150.0, false, !live) {
                 out.back = true;
             }

@@ -291,7 +291,7 @@ fn verify(r: &Release, file: &Path) -> Result<()> {
     let text = signed_text(&r.tag, asset_name(), &std::fs::read(file)?);
     if !SIGNING_KEYS.iter().any(|k| signed_by(k, &text, &sig)) {
         let _ = std::fs::remove_file(file);
-        bail!("the downloaded TimelessXI client {} is not signed by the release key; not installed", r.tag);
+        bail!("the downloaded Timeless XI client {} is not signed by the release key; not installed", r.tag);
     }
     Ok(())
 }
@@ -551,11 +551,11 @@ impl UpdateUi {
                     // TimelessXI: an updated game file is Square Enix's again; the Timeless patches go back in.
                     match super::timeless::repatch(&root) {
                         Ok(r) if r.written > 0 => {
-                            lines.push(format!("TimelessXI patches written again ({} changes); restart to use them.", r.written));
+                            lines.push(format!("Timeless XI's game file changes are back in ({} files); restart to use them.", r.written));
                             restart = true;
                         }
                         Ok(_) => {}
-                        Err(e) => lines.push(format!("TimelessXI patches: {e:#}")),
+                        Err(e) => lines.push(format!("Timeless XI's game file changes: {e:#}")),
                     }
                 }
                 let plan = if viewer {
@@ -588,7 +588,7 @@ impl UpdateUi {
                     let dest = exe().context("no executable path")?.with_extension("new");
                     download(&r.url, &dest, &|d, t| {
                         set(Progress {
-                            label: format!("Downloading the TimelessXI client {}", r.tag),
+                            label: format!("Downloading Timeless XI {}", super::timeless::manifest::shown(&r.tag)),
                             done: d,
                             total: t.max(r.size),
                             detail: format!("{:.1} of {:.1} MB", d as f64 / 1e6, t.max(r.size) as f64 / 1e6),
@@ -597,7 +597,7 @@ impl UpdateUi {
                     verify(&r, &dest)?;
                     replace_self(&dest)?;
                     status.lock().unwrap().client = Client::Current;
-                    lines.push(format!("TimelessXI client {} is installed; restart to use it.", r.tag));
+                    lines.push(format!("Timeless XI {} is installed; restart to use it.", super::timeless::manifest::shown(&r.tag)));
                     restart = true;
                     // The notes since this version, for the restarted client to show (none if GitHub won't say).
                     let from = env!("CARGO_PKG_VERSION");
@@ -746,7 +746,7 @@ impl UpdateUi {
         match self.cursor {
             0 => "The game's data files, from the PlayOnline patch server.".into(),
             1 => "The PlayOnline Viewer's files, which a PlayOnline log-in needs current (kept, never run).".into(),
-            2 => "The TimelessXI client itself, from its latest release.".into(),
+            2 => "The Timeless XI client itself, from its latest release.".into(),
             UPDATE => "Download and install what is checked.".into(),
             _ => "Close this window.".into(),
         }

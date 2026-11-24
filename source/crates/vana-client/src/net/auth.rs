@@ -17,7 +17,7 @@ pub const TIMELESS_CLIENT: &str = "timelessxi";
 /// TimelessXI: this build's number, raised with each release. The server can turn away builds below its minimum
 /// (TIMELESS_CLIENT_MIN_BUILD), which is how a required update is enforced. The crate's version ends in
 /// "-timeless.<this>" (Cargo.toml), so the release tag and the updater agree with it.
-pub const TIMELESS_BUILD: u32 = 11;
+pub const TIMELESS_BUILD: u32 = 12;
 /// The most of a login reply taken before giving up: xi_connect's replies are a few hundred bytes of JSON.
 const MAX_REPLY: usize = 64 * 1024;
 
@@ -124,7 +124,7 @@ fn read_reply(stream: &mut impl Read) -> Result<Value> {
     let mut chunk = [0u8; 4096];
     loop {
         let n = match stream.read(&mut chunk) {
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+            Err(e) if crate::net::timed_out(&e) => {
                 bail!("the login server did not reply (it ignores requests it considers malformed)")
             }
             r => r.context("reading the login reply")?,

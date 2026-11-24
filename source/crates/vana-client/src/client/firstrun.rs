@@ -195,7 +195,7 @@ pub fn existing(picked: &Path) -> Result<PathBuf> {
     };
     if needed(&game_dir.join("FINAL FANTASY XI")) {
         anyhow::bail!(
-            "The install in {} did not finish: choose Download and install with that folder to resume it.",
+            "The install in {} did not finish: choose Download and Install with that folder to pick it up again.",
             game_dir.display()
         );
     }
@@ -205,11 +205,11 @@ pub fn existing(picked: &Path) -> Result<PathBuf> {
 /// What closing the client does to the step under way.
 fn closing_note(phase: &str) -> &'static str {
     if phase.starts_with("Downloading") {
-        "Closing the TimelessXI client stops this; the download resumes next time."
+        "Closing Timeless XI stops this; the download resumes next time."
     } else if phase.starts_with("Unpacking") || phase.starts_with("Installing") {
-        "Closing the TimelessXI client stops this; installing starts over next time (the download is kept)."
+        "Closing Timeless XI stops this; installing starts over next time (the download is kept)."
     } else if phase.starts_with("Updating") || phase.starts_with("Checking") {
-        "Closing the TimelessXI client stops this; the update picks up where it left off next time."
+        "Closing Timeless XI stops this; the update picks up where it left off next time."
     } else {
         ""
     }
@@ -409,10 +409,10 @@ impl FirstRun {
                                     ui.add_space(4.0);
                                     let picking = self.picking.is_some();
                                     ui.horizontal(|ui| {
-                                        if secondary(ui, !picking, "Change install folder...", 15.0).clicked() {
+                                        if secondary(ui, !picking, "Change install folder…", 15.0).clicked() {
                                             self.pick(Pick::Install);
                                         }
-                                        if secondary(ui, !picking, "Use existing game files...", 15.0).clicked() {
+                                        if secondary(ui, !picking, "Use existing game files…", 15.0).clicked() {
                                             self.pick(Pick::Existing);
                                         }
                                     });
@@ -421,7 +421,7 @@ impl FirstRun {
                                     }
                                     ui.add_space(12.0);
                                     ui.horizontal(|ui| {
-                                        if primary(ui, !picking, "Download and install").clicked() {
+                                        if primary(ui, !picking, "Download and Install").clicked() {
                                             self.start();
                                             action = Action::Begin(self.game_dir.clone());
                                         }
@@ -439,13 +439,13 @@ impl FirstRun {
                                                 .color(look::ACCENT),
                                         );
                                         ui.label(egui::RichText::new(
-                                            "If they are behind the current version, the Update button on the title screen brings them up to date.",
+                                            "Timeless XI keeps them at the version its server needs.",
                                         ).size(14.0).color(look::MUTED));
                                     } else {
                                         ui.label(egui::RichText::new("The game files are installed and up to date.").size(16.0));
                                     }
                                     ui.add_space(10.0);
-                                    ui.checkbox(&mut self.menu, egui::RichText::new("Add TimelessXI to the application menu").size(15.0));
+                                    ui.checkbox(&mut self.menu, egui::RichText::new("Add Timeless XI to the application menu").size(15.0));
                                     ui.checkbox(&mut self.shortcut, egui::RichText::new("Add a shortcut to the desktop").size(15.0));
                                     if !self.note.is_empty() {
                                         ui.label(egui::RichText::new(&self.note).color(look::MUTED));
@@ -483,7 +483,7 @@ impl FirstRun {
                                     ui.label(egui::RichText::new(&failed).color(look::BAD));
                                     ui.add_space(12.0);
                                     ui.horizontal(|ui| {
-                                        if primary(ui, true, "Try again").clicked() {
+                                        if primary(ui, true, "Try Again").clicked() {
                                             self.start();
                                         }
                                         if secondary(ui, true, "Quit", 18.0).clicked() {

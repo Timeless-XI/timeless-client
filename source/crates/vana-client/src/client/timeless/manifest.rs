@@ -79,6 +79,15 @@ pub fn current() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// A version as players see it: "1.0.14-timeless.11" (or "v1.0.14-timeless.11") is "Build 11"; anything else as is.
+pub fn shown(v: &str) -> String {
+    let v = v.trim().trim_start_matches('v');
+    match v.rsplit_once("-timeless.") {
+        Some((_, n)) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => format!("Build {n}"),
+        _ => v.to_string(),
+    }
+}
+
 impl Manifest {
     /// This client is older than `required`.
     pub fn requires_update(&self, current: &str) -> bool {
@@ -235,6 +244,13 @@ mod tests {
 
     fn m(latest: &str, required: &str) -> Manifest {
         Manifest { format: 1, latest: latest.into(), required: required.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn versions_show_as_builds() {
+        assert_eq!(shown("1.0.14-timeless.11"), "Build 11");
+        assert_eq!(shown("v1.0.14-timeless.3"), "Build 3");
+        assert_eq!(shown("1.0.14"), "1.0.14");
     }
 
     #[test]
