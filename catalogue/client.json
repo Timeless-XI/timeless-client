@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "latest": "1.0.14-timeless.12",
+  "required": "1.0.14-timeless.12",
+  "message": "",
+  "server": {
+    "name": "Timeless XI",
+    "host": "play.timelessxi.gg",
+    "previous": [
+      "74.208.79.201"
+    ],
+    "auth_port": 54231,
+    "data_port": 54230,
+    "view_port": 54001,
+    "profile_port": 51220,
+    "client_version": ""
+  },
+  "game_version": "30261102_0"
+}
