@@ -1,8 +1,8 @@
 """The Timeless Aquarium, v2: a night-sky tank in the Timeless style.
 
 - Charcoal-glass frame with the logo's stepped bars and engraved pewter hairlines; the hourglass emblem on the stand.
-- Back wall: a dusk-to-night sky full of stars, faint lilac cloud, a distant ridge and the Lufaise rock arch with its
-  ruins as a crisp silhouette.
+- Back wall: a dusk-to-night sky full of stars, faint lilac cloud, and the logo's own Lufaise landmark (the mesa with
+  its window arch and ruins, landmark.png) as a night near-silhouette fading into mist at its base.
 - The logo hourglass stands in the sand: stepped bars, glass, a spinning star crystal in the upper bulb, grains
   falling to the pile below.
 - A spinning star crystal crowns the tank.
@@ -11,6 +11,7 @@
 Every part is a group with an animation (tank space, y up):
   ('none',), ('spin', pivot, axis, period_s), ('bob', pivot, amp, period_s, phase, yaw_deg), ('fall', dir, spacing, period_s)
 """
+import os
 import sys, importlib, numpy as np
 from r3d import *
 from r3d import _n
@@ -211,6 +212,38 @@ def group_grains():
 
 # ----------------------------------------------------------------------------- materials
 
+_LM = None
+LM_BOX = (0.08, 1.0, 0.22)    # u0, u1, v of the image's bottom edge; height keeps the image's aspect on the 2.6 x 1.1 wall
+
+
+def landmark(u, v):
+    """The logo's landmark (landmark.png, 2442 x 750, alpha), placed on the back wall: linear rgb, alpha."""
+    global _LM
+    if _LM is None:
+        from PIL import Image
+        im = np.asarray(Image.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'landmark.png')).convert('RGBA'), float) / 255
+        _LM = (im[..., :3] ** 2.2, im[..., 3])
+    rgb, a = _LM
+    h, w = a.shape
+    u0, u1, v0 = LM_BOX
+    hv = (u1 - u0) * (X1 - X0) * h / w / (Y1 - Y0)
+    x = (u - u0) / (u1 - u0) * (w - 1)
+    y = (1 - (v - v0) / hv) * (h - 1)
+    ok = (x >= 0) & (x <= w - 1) & (y >= 0) & (y <= h - 1)
+    xi = np.clip(x, 0, w - 1.001); yi = np.clip(y, 0, h - 1.001)
+    x0 = xi.astype(int); y0 = yi.astype(int); fx = xi - x0; fy = yi - y0
+    def bil(img):
+        return (img[y0, x0] * ((1 - fx) * (1 - fy))[..., None] if img.ndim == 3 else img[y0, x0] * (1 - fx) * (1 - fy)) + \
+               (img[y0, x0 + 1] * (fx * (1 - fy))[..., None] if img.ndim == 3 else img[y0, x0 + 1] * fx * (1 - fy)) + \
+               (img[y0 + 1, x0] * ((1 - fx) * fy)[..., None] if img.ndim == 3 else img[y0 + 1, x0] * (1 - fx) * fy) + \
+               (img[y0 + 1, x0 + 1] * (fx * fy)[..., None] if img.ndim == 3 else img[y0 + 1, x0 + 1] * fx * fy)
+    c = bil(rgb); al = bil(a) * ok
+    # below the image: the mist it fades into keeps going, darker toward the sand
+    below = (v < v0) & (u > u0) & (u < u1)
+    al = np.where(below, 0.0, al)
+    return c, al
+
+
 def sky(uv, side=False):
     u, v = uv[:, 0], uv[:, 1]
     lit = STATE['lit']
@@ -225,24 +258,10 @@ def sky(uv, side=False):
         star *= np.clip((v - 0.12) * 2.5, 0, 1)
         emit += np.outer(star * b * (0.25 + 0.75 * lit), C('#dfe8ff'))
     if not side:
-        # distant ridge
-        ridge = 0.16 + 0.05 * fbm(u * 6, 1.3, 4)
-        base = np.where((v < ridge)[:, None], C('#0b0e22')[None], base)
-        emit[v < ridge] = 0
-        # the Lufaise rock arch with its ruins, on the right third
-        ax, aw = 0.72, 0.16
-        dx = (u - ax) / aw
-        outer = (np.abs(dx) < 1.0) & (v < 0.62 - 0.22 * dx ** 2 + 0.015 * fbm(u * 40, v * 10))
-        inner = (np.abs(dx) < 0.62) & (v < 0.44 - 0.24 * dx ** 2)
-        rock = outer & ~inner
-        ruins = ((np.abs(u - 0.66) < 0.012) & (v < 0.70)) | ((np.abs(u - 0.70) < 0.02) & (v < 0.67)) | \
-                ((np.abs(u - 0.78) < 0.01) & (v < 0.69)) | ((u > 0.64) & (u < 0.8) & (v < 0.655) & (v > 0.62))
-        ruins &= (u > 0.6) & (u < 0.84)
-        hill = v < 0.2 + 0.08 * np.exp(-((u - ax) / 0.2) ** 2)
-        sil = rock | ruins | hill
-        base = np.where(sil[:, None], C('#03040c')[None], base)
-        emit[sil] = 0
-        # a faint rim of moonlight along the silhouette tops
+        # the Lufaise landmark from the logo (the mesa, its window arch and the ruins), a night silhouette
+        rgb, al = landmark(u, v)
+        base = base * (1 - al)[:, None] + rgb * al[:, None]
+        emit *= (1 - al)[:, None]
     return dict(albedo=base * 0.12, spec=0.0, emit=emit + base * 0.55 * (0.35 + 0.65 * lit))
 
 
@@ -317,12 +336,12 @@ def material(part, uv, p, n):
 
 PLACE = {  # name: (scale, yaw, pitch, position)
     'herald': (0.62, 8, 3, (-0.5, 0.86, -0.2)),
-    'barbel': (0.62, 192, -4, (0.62, 0.62, 0.06)),
+    'barbel': (0.62, 192, -4, (0.68, 0.8, 0.06)),
     'moonfin': (0.6, 18, 4, (-0.62, 0.5, 0.2)),
     'admiral': (0.55, 205, 0, (0.84, 0.25, -0.1)),
     'oreeater': (0.55, -22, 0, (-0.86, 0.16, 0.02)),
     'whiskerwise': (0.55, 168, 0, (0.45, 0.1, -0.14)),
-    'rimecoil': (0.52, 185, 0, (0.3, 0.95, -0.27)),
+    'rimecoil': (0.52, 185, 0, (0.08, 0.98, -0.27)),
     'siren': (0.52, 28, 0, (-0.98, 0.72, 0.18)),
 }
 FISH_ORDER = ['barbel', 'oreeater', 'whiskerwise', 'admiral', 'moonfin', 'rimecoil', 'herald', 'siren']
