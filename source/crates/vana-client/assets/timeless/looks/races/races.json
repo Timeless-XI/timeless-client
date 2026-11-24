@@ -4366,5 +4366,980 @@
 "nose": true
 },
 "sides": false
+},
+"7_0": {
+"race": 7,
+"face": 0,
+"style": 1,
+"med": [
+37.1,
+31.4,
+59.9,
+111.5,
+82.8
+],
+"hair": [
+66,
+28,
+8
+],
+"two_tone": false,
+"tip": [
+57,
+24,
+0
+],
+"eyes": [
+33,
+32,
+25
+],
+"lips": [
+82,
+54,
+33
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_1": {
+"race": 7,
+"face": 1,
+"style": 1,
+"med": [
+27.3,
+32.4,
+62.6,
+111.5,
+83.1
+],
+"hair": [
+35,
+25,
+16
+],
+"two_tone": false,
+"tip": [
+27,
+20,
+13
+],
+"eyes": [
+33,
+32,
+28
+],
+"lips": [
+84,
+56,
+33
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_2": {
+"race": 7,
+"face": 2,
+"style": 2,
+"med": [
+171.4,
+46.6,
+64.0,
+111.5,
+86.7
+],
+"hair": [
+186,
+167,
+153
+],
+"two_tone": false,
+"tip": [
+170,
+152,
+139
+],
+"eyes": [
+62,
+44,
+24
+],
+"lips": [
+88,
+58,
+33
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_3": {
+"race": 7,
+"face": 3,
+"style": 2,
+"med": [
+169.7,
+46.6,
+65.9,
+111.5,
+86.8
+],
+"hair": [
+175,
+166,
+173
+],
+"two_tone": false,
+"tip": [
+159,
+152,
+156
+],
+"eyes": [
+61,
+43,
+28
+],
+"lips": [
+90,
+60,
+33
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_4": {
+"race": 7,
+"face": 4,
+"style": 3,
+"med": [
+168.9,
+42.8,
+47.8,
+111.5,
+89.2
+],
+"hair": [
+189,
+182,
+187
+],
+"two_tone": true,
+"tip": [
+140,
+126,
+128
+],
+"eyes": [
+40,
+44,
+43
+],
+"lips": [
+63,
+44,
+30
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_5": {
+"race": 7,
+"face": 5,
+"style": 3,
+"med": [
+73.3,
+37.2,
+48.3,
+111.5,
+69.4
+],
+"hair": [
+134,
+69,
+38
+],
+"two_tone": true,
+"tip": [
+66,
+40,
+24
+],
+"eyes": [
+38,
+35,
+38
+],
+"lips": [
+71,
+41,
+24
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_6": {
+"race": 7,
+"face": 6,
+"style": 4,
+"med": [
+112.4,
+37.1,
+84.3,
+111.5,
+77.2
+],
+"hair": [
+151,
+121,
+79
+],
+"two_tone": true,
+"tip": [
+98,
+71,
+49
+],
+"eyes": [
+31,
+38,
+42
+],
+"lips": [
+115,
+75,
+46
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_7": {
+"race": 7,
+"face": 7,
+"style": 4,
+"med": [
+42.4,
+37.4,
+83.9,
+112.1,
+72.4
+],
+"hair": [
+76,
+32,
+8
+],
+"two_tone": false,
+"tip": [
+51,
+20,
+5
+],
+"eyes": [
+31,
+40,
+42
+],
+"lips": [
+115,
+75,
+41
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_8": {
+"race": 7,
+"face": 8,
+"style": 5,
+"med": [
+50.8,
+37.2,
+86.3,
+111.5,
+63.5
+],
+"hair": [
+82,
+40,
+27
+],
+"two_tone": false,
+"tip": [
+76,
+39,
+24
+],
+"eyes": [
+38,
+35,
+38
+],
+"lips": [
+120,
+77,
+43
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_9": {
+"race": 7,
+"face": 9,
+"style": 5,
+"med": [
+24.9,
+38.0,
+86.0,
+111.5,
+57.9
+],
+"hair": [
+33,
+23,
+16
+],
+"two_tone": false,
+"tip": [
+32,
+22,
+13
+],
+"eyes": [
+38,
+36,
+38
+],
+"lips": [
+117,
+77,
+49
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_10": {
+"race": 7,
+"face": 10,
+"style": 6,
+"med": [
+177.5,
+36.8,
+63.5,
+111.5,
+89.9
+],
+"hair": [
+189,
+174,
+164
+],
+"two_tone": false,
+"tip": [
+178,
+162,
+150
+],
+"eyes": [
+38,
+37,
+31
+],
+"lips": [
+90,
+56,
+33
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_11": {
+"race": 7,
+"face": 11,
+"style": 6,
+"med": [
+37.9,
+38.9,
+61.4,
+111.5,
+65.9
+],
+"hair": [
+74,
+25,
+0
+],
+"two_tone": false,
+"tip": [
+60,
+21,
+0
+],
+"eyes": [
+42,
+38,
+33
+],
+"lips": [
+85,
+56,
+35
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_12": {
+"race": 7,
+"face": 12,
+"style": 7,
+"med": [
+121.0,
+37.4,
+54.1,
+111.5,
+72.4
+],
+"hair": [
+156,
+125,
+84
+],
+"two_tone": true,
+"tip": [
+126,
+98,
+66
+],
+"eyes": [
+34,
+38,
+38
+],
+"lips": [
+74,
+48,
+33
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_13": {
+"race": 7,
+"face": 13,
+"style": 7,
+"med": [
+33.0,
+38.9,
+54.1,
+111.5,
+62.6
+],
+"hair": [
+41,
+31,
+22
+],
+"two_tone": false,
+"tip": [
+33,
+25,
+16
+],
+"eyes": [
+53,
+35,
+22
+],
+"lips": [
+71,
+48,
+33
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_14": {
+"race": 7,
+"face": 14,
+"style": 8,
+"med": [
+22.2,
+38.9,
+59.9,
+111.5,
+80.1
+],
+"hair": [
+30,
+20,
+11
+],
+"two_tone": false,
+"tip": [
+24,
+16,
+8
+],
+"eyes": [
+41,
+37,
+37
+],
+"lips": [
+82,
+54,
+33
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_15": {
+"race": 7,
+"face": 15,
+"style": 8,
+"med": [
+108.9,
+37.1,
+61.2,
+112.4,
+85.2
+],
+"hair": [
+132,
+105,
+71
+],
+"two_tone": false,
+"tip": [
+148,
+117,
+77
+],
+"eyes": [
+38,
+35,
+38
+],
+"lips": [
+82,
+56,
+33
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_16": {
+"race": 7,
+"face": 16,
+"style": 1,
+"med": [
+165.6,
+31.2,
+61.2,
+111.5,
+80.4
+],
+"hair": [
+205,
+181,
+123
+],
+"two_tone": true,
+"tip": [
+172,
+142,
+87
+],
+"eyes": [
+34,
+30,
+25
+],
+"lips": [
+82,
+56,
+33
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_17": {
+"race": 7,
+"face": 17,
+"style": 2,
+"med": [
+52.3,
+43.6,
+63.5,
+111.5,
+85.2
+],
+"hair": [
+60,
+36,
+21
+],
+"two_tone": true,
+"tip": [
+99,
+63,
+32
+],
+"eyes": [
+59,
+39,
+21
+],
+"lips": [
+87,
+57,
+33
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_18": {
+"race": 7,
+"face": 18,
+"style": 2,
+"med": [
+81.1,
+43.9,
+63.8,
+111.5,
+85.2
+],
+"hair": [
+126,
+34,
+32
+],
+"two_tone": true,
+"tip": [
+172,
+74,
+24
+],
+"eyes": [
+63,
+39,
+21
+],
+"lips": [
+90,
+56,
+33
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_19": {
+"race": 7,
+"face": 19,
+"style": 3,
+"med": [
+32.1,
+40.4,
+43.3,
+111.5,
+72.7
+],
+"hair": [
+57,
+56,
+63
+],
+"two_tone": true,
+"tip": [
+16,
+16,
+16
+],
+"eyes": [
+37,
+40,
+41
+],
+"lips": [
+57,
+39,
+24
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_20": {
+"race": 7,
+"face": 20,
+"style": 4,
+"med": [
+42.4,
+37.2,
+84.0,
+111.5,
+78.3
+],
+"hair": [
+79,
+48,
+30
+],
+"two_tone": true,
+"tip": [
+27,
+16,
+10
+],
+"eyes": [
+31,
+38,
+42
+],
+"lips": [
+115,
+75,
+46
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_21": {
+"race": 7,
+"face": 21,
+"style": 5,
+"med": [
+113.8,
+36.8,
+86.7,
+109.3,
+61.2
+],
+"hair": [
+165,
+129,
+71
+],
+"two_tone": true,
+"tip": [
+134,
+101,
+52
+],
+"eyes": [
+38,
+35,
+34
+],
+"lips": [
+120,
+77,
+43
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_22": {
+"race": 7,
+"face": 22,
+"style": 6,
+"med": [
+66.7,
+36.5,
+64.1,
+111.5,
+80.4
+],
+"hair": [
+82,
+54,
+35
+],
+"two_tone": true,
+"tip": [
+172,
+135,
+82
+],
+"eyes": [
+38,
+36,
+31
+],
+"lips": [
+90,
+57,
+33
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_23": {
+"race": 7,
+"face": 23,
+"style": 7,
+"med": [
+68.4,
+30.0,
+54.1,
+111.5,
+71.5
+],
+"hair": [
+165,
+43,
+57
+],
+"two_tone": true,
+"tip": [
+117,
+16,
+38
+],
+"eyes": [
+40,
+26,
+25
+],
+"lips": [
+74,
+48,
+33
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
+},
+"7_24": {
+"race": 7,
+"face": 24,
+"style": 8,
+"med": [
+97.9,
+37.1,
+63.5,
+112.4,
+85.2
+],
+"hair": [
+186,
+100,
+41
+],
+"two_tone": true,
+"tip": [
+205,
+149,
+77
+],
+"eyes": [
+38,
+35,
+38
+],
+"lips": [
+90,
+56,
+33
+],
+"has": {
+"iris": true,
+"lips": true,
+"nose": true
+},
+"sides": false
 }
 }

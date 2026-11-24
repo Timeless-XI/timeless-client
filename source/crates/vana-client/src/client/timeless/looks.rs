@@ -306,7 +306,7 @@ pub fn layers_of(race: u8, face: u16) -> Has {
 
 /// Any race's face as settings: its own colours (Mithra: and nearest markings); the other settings as given.
 pub fn seed_any(race: u8, face: u16, keep: &Settings) -> Option<Settings> {
-    if race == 7 {
+    if race == 7 && race_face(7, face).is_none() {
         return seed(face, keep);
     }
     let f = race_face(race, face)?;
@@ -545,7 +545,7 @@ pub struct Prep {
     /// The hair's grey at each texel (0..255, middle tone 128).
     g: Vec<u8>,
     /// The texels with any marking: index, the nine markings' cover (MARKS order) and the right-side masks' seven.
-    marks: Vec<(u32, [u8; 9], [u8; 7])>,
+    marks: Vec<(u32, [u8; 12], [u8; 7])>,
 }
 
 impl Prep {
@@ -555,7 +555,7 @@ impl Prep {
         let none = vec![0u8; 0];
         let (m1, m2) = (rl.m.first().unwrap_or(&none), rl.m.get(1).unwrap_or(&none));
         if !m1.is_empty() {
-            let ks = mask_scale(rl, w);
+            let ks = mask_scale(rl, w, f.race);
             let level = hair_level(rl, &tex, w, h, ks);
             let mh = f.med[0].max(20.0) / 255.0;
             let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 8);
@@ -590,14 +590,16 @@ impl Prep {
         let mut marks = Vec::new();
         let (m3, m4, m5, m6) = (rl.m.get(2), rl.m.get(3), rl.m.get(4), rl.m.get(5));
         if let (Some(m3), Some(m4)) = (m3, m4) {
-            let ks = mask_scale(rl, w);
+            let ks = mask_scale(rl, w, f.race);
             for i in 0..n {
                 let (x, y) = (i % w as usize, i / w as usize);
                 let (u, v) = (ks * (x as f32 + 0.5) / w as f32, ks * (y as f32 + 0.5) / h as f32);
                 let (c3, d) = (sample(m3, u, v), sample(m4, u, v));
                 let bb = b[i];
                 let q = |v: f32| (v * 255.0 + 0.5) as u8;
-                let left = [bb[1], bb[2], bb[3], q(c3[0]), q(c3[1]), q(c3[2]), q(c3[3]), q(d[0]), q(d[1])];
+                // MARKS order; Mithra's last three (whisker marks, fang tears, sunset band) in m2 R, m4 B, m4 A.
+                let (x0, x1, x2) = if f.race == 7 { (bb[0], q(d[2]), q(d[3])) } else { (0, 0, 0) };
+                let left = [bb[1], bb[2], bb[3], q(c3[0]), q(c3[1]), q(c3[2]), q(c3[3]), q(d[0]), q(d[1]), x0, x1, x2];
                 let mut right = [0u8; 7];
                 if let (Some(m5), Some(m6)) = (m5.filter(|m| !m.is_empty()), m6.filter(|m| !m.is_empty())) {
                     let (e, g6) = (sample(m5, u, v), sample(m6, u, v));
@@ -630,9 +632,12 @@ pub fn compose_prep(p: &Prep, s: &Settings, side: u8) -> Vec<u8> {
 fn marks_pass(p: &Prep, out: &mut [u8], s: &Settings, side: u8) {
     let f = p.f;
     // Each race's own markings (2026-11-23): drawn on both sides, in the nine slots; no right-side masks.
-    let list = race_marks(f.race);
-    let _ = side;
-    let left_on: Vec<bool> = (0..9).map(|k| k < list.len() && s.marks.get(k).copied().unwrap_or(0) != 0).collect();
+    // Mithra (on its own HD face, 2026-11-24): the twelve markings in ink, each on the sides picked.
+    const MITHRA: [(&str, Kind); 12] = [("", Ink); 12];
+    let list: &[(&str, Kind)] = if f.race == 7 { &MITHRA } else { race_marks(f.race) };
+    let left_on: Vec<bool> = (0..12)
+        .map(|k| k < list.len() && if f.race == 7 { s.mark(k) & side != 0 } else { s.marks.get(k).copied().unwrap_or(0) != 0 })
+        .collect();
     let right_on = [false; 12];
     let right = false;
     if !(left_on.iter().any(|o| *o) && s.mark_strength > 0.0) {
@@ -685,9 +690,10 @@ fn marks_pass(p: &Prep, out: &mut [u8], s: &Settings, side: u8) {
 const LEVEL: usize = 32;
 /// A 1024 mask set is laid out for a remapped 2048 face (the old layout in its top-left quarter); on a face that isn't
 /// remapped (the stock 128 face, an older HD one) the masks are read from that quarter: (u, v) x 0.5.
-fn mask_scale(rl: &RaceLayers, w: u32) -> f32 {
+/// Mithra's masks are 1024 in the face's own layout (no remap): read whole.
+fn mask_scale(rl: &RaceLayers, w: u32, race: u8) -> f32 {
     let big = rl.m.first().is_some_and(|m| m.len() == 1024 * 1024 * 4);
-    if big && w < 2048 { 0.5 } else { 1.0 }
+    if big && w < 2048 && race != 7 { 0.5 } else { 1.0 }
 }
 
 fn hair_level(rl: &RaceLayers, tex: &[u8], w: u32, h: u32, k: f32) -> Vec<f32> {
@@ -1186,7 +1192,8 @@ pub fn apply(gpu: &crate::render::Gpu, w: &mut World, r: &crate::render::ZoneRen
     if l.job.is_none() && l.made.as_ref() != Some(&want) && l.pending.as_ref().is_none_or(|p| p.3 != want) {
         let one_sided = want.1.one_sided();
         let (tx, rx) = std::sync::mpsc::channel();
-        if race == 7 {
+        // Mithra: on its own HD face like the other races (2026-11-24); the neutral base only without that data.
+        if race == 7 && (race_face(7, face).is_none() || race_layers(7, style).is_none()) {
             let w2 = want.clone();
             std::thread::spawn(move || {
                 let left = compose(style, &w2.1, LEFT);
@@ -1301,7 +1308,7 @@ impl ActorLook {
         if self.job.is_none() && self.made.as_ref() != Some(&want) && self.pending.as_ref().is_none_or(|p| p.3 != want) {
             let one_sided = want.1.one_sided();
             let (tx, rx) = std::sync::mpsc::channel();
-            if race == 7 {
+            if race == 7 && (race_face(7, face).is_none() || race_layers(7, style).is_none()) {
                 let w2 = want.clone();
                 std::thread::spawn(move || {
                     let left = compose(style, &w2.1, LEFT);
@@ -1561,7 +1568,7 @@ mod tests {
             for _ in 0..3 { let _ = compose_prep(&prep, &s, LEFT); }
             eprintln!("race {r} {n} compose {:?}", t.elapsed() / 3);
             let t = std::time::Instant::now();
-            let _ = hair_level(rl, &tex, n, n, mask_scale(rl, n));
+            let _ = hair_level(rl, &tex, n, n, mask_scale(rl, n, f.race));
             eprintln!("  hair_level {:?}", t.elapsed());
         }
     }
