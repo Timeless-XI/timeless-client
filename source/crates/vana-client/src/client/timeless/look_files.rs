@@ -69,3 +69,27 @@ pub static RACE_MASKS: &[(u8, u8, &[&[u8]])] = &[
     (7, 7, &[include_bytes!("../../../assets/timeless/looks/mithra7_m1.png"), include_bytes!("../../../assets/timeless/looks/mithra7_m2.png"), include_bytes!("../../../assets/timeless/looks/mithra7_m3.png"), include_bytes!("../../../assets/timeless/looks/mithra7_m4.png")]),
     (7, 8, &[include_bytes!("../../../assets/timeless/looks/mithra8_m1.png"), include_bytes!("../../../assets/timeless/looks/mithra8_m2.png"), include_bytes!("../../../assets/timeless/looks/mithra8_m3.png"), include_bytes!("../../../assets/timeless/looks/mithra8_m4.png")]),
 ];
+
+/// Mithra faces' own markings taken out of their custom look (Custom_Faces/looks/make_unmark.py): per face, RGBA 1024 -
+/// RGB the skin there, A how much.
+pub static MITHRA_UNMARK: &[(u16, &[u8])] = &[
+    (2, include_bytes!("../../../assets/timeless/looks/mithra_unmark_2.png")),
+    (3, include_bytes!("../../../assets/timeless/looks/mithra_unmark_3.png")),
+    (4, include_bytes!("../../../assets/timeless/looks/mithra_unmark_4.png")),
+    (5, include_bytes!("../../../assets/timeless/looks/mithra_unmark_5.png")),
+    (6, include_bytes!("../../../assets/timeless/looks/mithra_unmark_6.png")),
+    (7, include_bytes!("../../../assets/timeless/looks/mithra_unmark_7.png")),
+    (8, include_bytes!("../../../assets/timeless/looks/mithra_unmark_8.png")),
+    (9, include_bytes!("../../../assets/timeless/looks/mithra_unmark_9.png")),
+    (10, include_bytes!("../../../assets/timeless/looks/mithra_unmark_10.png")),
+    (11, include_bytes!("../../../assets/timeless/looks/mithra_unmark_11.png")),
+    (14, include_bytes!("../../../assets/timeless/looks/mithra_unmark_14.png")),
+    (15, include_bytes!("../../../assets/timeless/looks/mithra_unmark_15.png")),
+    (17, include_bytes!("../../../assets/timeless/looks/mithra_unmark_17.png")),
+    (18, include_bytes!("../../../assets/timeless/looks/mithra_unmark_18.png")),
+    (19, include_bytes!("../../../assets/timeless/looks/mithra_unmark_19.png")),
+    (20, include_bytes!("../../../assets/timeless/looks/mithra_unmark_20.png")),
+    (21, include_bytes!("../../../assets/timeless/looks/mithra_unmark_21.png")),
+    (22, include_bytes!("../../../assets/timeless/looks/mithra_unmark_22.png")),
+    (24, include_bytes!("../../../assets/timeless/looks/mithra_unmark_24.png")),
+];

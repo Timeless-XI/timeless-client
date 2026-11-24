@@ -256,6 +256,9 @@ pub struct RaceFace {
     /// The race (from the races.json key).
     #[serde(default)]
     pub race: u8,
+    /// The face number (Mithra: which face's markings come out).
+    #[serde(default)]
+    pub face: u16,
     pub style: u8,
     med: [f32; 5],
     hair: [u8; 3],
@@ -551,6 +554,20 @@ pub struct Prep {
 impl Prep {
     pub fn new(rl: &'static RaceLayers, f: &'static RaceFace, tex: Vec<u8>, w: u32, h: u32) -> Self {
         let n = (w * h) as usize;
+        // Mithra: the face's own markings out of the look (owner 2026-11-24), the skin there only; the custom
+        // markings take their place.
+        let un = mithra_unmark(f, w, h);
+        let mut tex = tex;
+        if let Some(un) = &un {
+            for (t, u) in tex.chunks_exact_mut(4).zip(un.chunks_exact(4)) {
+                if u[3] > 0 {
+                    let k = u[3] as f32 / 255.0;
+                    for c in 0..3 {
+                        t[c] = (t[c] as f32 * (1.0 - k) + u[c] as f32 * k + 0.5) as u8;
+                    }
+                }
+            }
+        }
         let (mut a, mut b, mut g) = (vec![[0u8; 4]; n], vec![[0u8; 4]; n], vec![0u8; n]);
         let none = vec![0u8; 0];
         let (m1, m2) = (rl.m.first().unwrap_or(&none), rl.m.get(1).unwrap_or(&none));
@@ -560,7 +577,7 @@ impl Prep {
             let mh = f.med[0].max(20.0) / 255.0;
             let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 8);
             let per = (h as usize).div_ceil(threads) * w as usize;
-            let (tex, level) = (&tex, &level);
+            let (tex, level, un) = (&tex, &level, un.as_deref());
             std::thread::scope(|sc| {
                 for (k, ((ca, cb), cg)) in a.chunks_mut(per).zip(b.chunks_mut(per)).zip(g.chunks_mut(per)).enumerate() {
                     sc.spawn(move || {
@@ -569,7 +586,10 @@ impl Prep {
                             let (x, y) = (i % w as usize, i / w as usize);
                             let (u, v) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
                             let q = |c: [f32; 4]| c.map(|v| (v * 255.0 + 0.5) as u8);
-                            let sa = sample(m1, u * ks, v * ks);
+                            let mut sa = sample(m1, u * ks, v * ks);
+                            if let Some(un) = un {
+                                sa[0] *= 1.0 - un[i * 4 + 3] as f32 / 255.0;
+                            }
                             *pa = q(sa);
                             *pb = q(sample(m2, u * ks, v * ks));
                             if sa[0] > 0.0 {
@@ -612,6 +632,16 @@ impl Prep {
         }
         Prep { rl, f, w, h, tex, a, b, g, marks }
     }
+}
+
+/// A Mithra face's markings-out layer at the texture's size (1024 only), None for other faces.
+fn mithra_unmark(f: &RaceFace, w: u32, h: u32) -> Option<Vec<u8>> {
+    if f.race != 7 || (w, h) != (1024, 1024) {
+        return None;
+    }
+    let (_, b) = super::look_files::MITHRA_UNMARK.iter().find(|(k, _)| *k == f.face)?;
+    let v = png_square(b);
+    (v.len() == 1024 * 1024 * 4 && v.iter().skip(3).step_by(4).any(|a| *a > 0)).then_some(v)
 }
 
 /// A look from a face's Prep (see compose_race).
