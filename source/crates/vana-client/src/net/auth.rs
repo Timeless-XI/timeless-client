@@ -124,7 +124,7 @@ fn read_reply(stream: &mut impl Read) -> Result<Value> {
     let mut chunk = [0u8; 4096];
     loop {
         let n = match stream.read(&mut chunk) {
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+            Err(e) if crate::net::timed_out(&e) => {
                 bail!("the login server did not reply (it ignores requests it considers malformed)")
             }
             r => r.context("reading the login reply")?,

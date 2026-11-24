@@ -362,7 +362,7 @@ fn read_toward(link: &mut Link, buf: &mut Vec<u8>, len: fn(&[u8]) -> Result<usiz
         match link.read(&mut chunk[..want]) {
             Ok(0) => return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into()),
             Ok(n) => buf.extend_from_slice(&chunk[..n]),
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+            Err(e) if crate::net::timed_out(&e) => {
                 if watch.given_up() {
                     return Err(Abandoned.into());
                 }
