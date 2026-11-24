@@ -354,7 +354,7 @@ impl NotesUi {
     }
 
     pub fn title(&self) -> String {
-        format!("What's New in the TimelessXI client {}", self.saved.to.trim_start_matches('v'))
+        format!("What's New in Timeless XI {}", super::timeless::manifest::shown(&self.saved.to))
     }
 
     pub fn help(&self) -> String {
@@ -563,7 +563,8 @@ fn classic_lines(gu: &GameUi, blocks: &[Block], width: f32) -> Vec<Line> {
         match b {
             Block::Release(v, date) => {
                 blank(&mut out);
-                let t = if date.is_empty() { format!("TimelessXI client {v}") } else { format!("TimelessXI client {v}  ({date})") };
+                let v = super::timeless::manifest::shown(v);
+                let t = if date.is_empty() { format!("Timeless XI {v}") } else { format!("Timeless XI {v}  ({date})") };
                 out.push(Line { strip: true, ..one(4.0, t, WHITE) });
                 out.push(Line { x: 0.0, bullet: None, cells: Vec::new(), colour: BODY, strip: false });
             }

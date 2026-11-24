@@ -405,8 +405,8 @@ impl SetupUi {
         self.picking = true;
         let (start, out) = (self.dir.clone(), self.picked.clone());
         let title = match what {
-            Pick::Dir => "Install Timeless XI in",
-            Pick::Source => "Your FINAL FANTASY XI folder (or Square Enix's installer)",
+            Pick::Dir => "Choose where to install Timeless XI",
+            Pick::Source => "Choose your FINAL FANTASY XI folder, or Square Enix's installer",
         };
         std::thread::spawn(move || {
             let mut d = rfd::FileDialog::new().set_title(title);
@@ -423,7 +423,7 @@ impl SetupUi {
             && free < plan.source.space()
         {
             self.note = format!(
-                "There isn't room on that drive: it has {} free and needs about {}. Free some space or choose another folder.",
+                "There isn't enough room on that drive: it has {} free and needs about {}. Free up some space, or choose another folder.",
                 bytes(free),
                 bytes(plan.source.space())
             );
@@ -520,7 +520,7 @@ impl SetupUi {
         spaced(
             &bg,
             pos2(left.min.x + 64.0, screen.max.y - 34.0),
-            &format!("TIMELESS XI SETUP  ·  {}", super::super::timeless::manifest::current()),
+            &format!("TIMELESS XI SETUP  ·  {}", super::super::timeless::manifest::shown(super::super::timeless::manifest::current()).to_uppercase()),
             font(ctx, body(10.5)),
             MUTED.gamma_multiply(0.6),
             1.5,
@@ -558,7 +558,7 @@ impl SetupUi {
             Page::Working | Page::Failed => 2,
             Page::Done => 3,
         };
-        let names = ["Welcome", "Game files", "Install", "Play"];
+        let names = ["Welcome", "Game Files", "Install", "Play"];
         for (i, name) in names.iter().enumerate() {
             let y = at.y + i as f32 * 40.0;
             let (fill, colour) = match i.cmp(&stage) {
@@ -605,7 +605,7 @@ impl SetupUi {
     }
 
     fn welcome(&mut self, ui: &mut Ui, inner: Rect) -> SetupAction {
-        let y = Self::title(ui, inner, "WELCOME, ADVENTURER", "Your journey through Vana'diel begins here");
+        let y = Self::title(ui, inner, "STEP I  ·  WELCOME", "Your journey through Vana'diel begins here");
         let ctx = ui.ctx().clone();
         let p = ui.painter();
         let w = inner.width();
@@ -613,16 +613,16 @@ impl SetupUi {
         y += para(
             p,
             pos2(inner.min.x, y),
-            "This sets up everything Timeless XI needs, start to finish. When it's done you go straight to the title \
-             screen, ready to log in.",
+            "This installs everything Timeless XI needs, start to finish. When it's done, you go straight to the \
+             title screen, ready to log in.",
             font(&ctx, body(16.5)),
             TEXT,
             w,
         ) + 22.0;
         let items = [
-            ("The Timeless XI client", "Our own client, with Timeless View, hotbars and built-in fishing."),
-            ("FINAL FANTASY XI's game files", "From Square Enix's free client, or the copy you already have."),
-            ("Your connection to the server", "Set up for you. No PlayOnline, no launcher, no add-ons."),
+            ("The Timeless XI client", "Our own client, with a refreshed interface, hotbars and built-in fishing."),
+            ("The FINAL FANTASY XI game files", "From Square Enix's free download, or the copy you already have."),
+            ("Your connection to the server", "Set up for you. No PlayOnline, no separate launcher, no add-ons."),
         ];
         for (head, line) in items {
             diamond(p, pos2(inner.min.x + 6.0, y + 10.0), 4.5, SAND, Some(PEWTER));
@@ -638,7 +638,7 @@ impl SetupUi {
             Some(Source::Installer(_)) => {
                 "Square Enix's installer is already in your Downloads, so there's nothing big to download."
             }
-            _ => "You'll need about 25 GB of free space and an internet connection for the game download.",
+            _ => "The game download needs an internet connection and about 28 GB of free space.",
         };
         para(p, pos2(inner.min.x, y + 4.0), note, font(&ctx, body(14.5)), FOCUS.gamma_multiply(0.95), w);
         let enter = ui.ctx().input(|i| i.key_pressed(Key::Enter));
@@ -650,7 +650,7 @@ impl SetupUi {
     }
 
     fn choose(&mut self, ui: &mut Ui, inner: Rect) -> SetupAction {
-        let mut y = Self::title(ui, inner, "STEP II  ·  GAME FILES", "Where they come from");
+        let mut y = Self::title(ui, inner, "STEP II  ·  GAME FILES", "Choose your game files");
         let ctx = ui.ctx().clone();
         let w = inner.width();
         for i in 0..self.sources.len() {
@@ -707,7 +707,7 @@ impl SetupUi {
         ui.painter().text(
             other.min,
             Align2::LEFT_TOP,
-            "Have it somewhere else? Choose the folder…",
+            "Have the game somewhere else? Choose its folder…",
             font(&ctx, body(13.5)),
             if resp.hovered() { SILVER } else { FOCUS },
         );
@@ -760,7 +760,7 @@ impl SetupUi {
     }
 
     fn working(&mut self, ui: &mut Ui, inner: Rect, t: f64) -> SetupAction {
-        let mut y = Self::title(ui, inner, "STEP III", "Preparing your adventure");
+        let mut y = Self::title(ui, inner, "STEP III  ·  INSTALL", "Preparing your adventure");
         let ctx = ui.ctx().clone();
         let Some(work) = self.work.clone() else { return SetupAction::None };
         let step = work.step.load(Ordering::Relaxed);
@@ -829,23 +829,23 @@ impl SetupUi {
         }
         y += 40.0;
         let tip = if phase.starts_with("Downloading") {
-            "You can close this window: the download picks up where it left off when you run setup again."
+            "You can close this window. The download picks up where it left off when you run setup again."
         } else {
-            "This can take a while on the first install. Grab a drink, it's nearly time."
+            "The first install takes a while. Feel free to step away: it carries on by itself."
         };
         para(p, pos2(inner.min.x, y), tip, font(&ctx, body(13.5)), MUTED.gamma_multiply(0.8), inner.width());
         SetupAction::None
     }
 
     fn done(&mut self, ui: &mut Ui, inner: Rect) -> SetupAction {
-        let mut y = Self::title(ui, inner, "STEP IV", "Timeless XI is ready");
+        let mut y = Self::title(ui, inner, "STEP IV  ·  PLAY", "Timeless XI is ready");
         let ctx = ui.ctx().clone();
         let p = ui.painter();
         y += para(
             p,
             pos2(inner.min.x, y),
-            "Everything is in place. Log in with your Timeless XI account on the title screen, or choose Create Account \
-             there to make one. Your adventure starts the moment you step in.",
+            "Everything is in place. On the title screen, log in with your Timeless XI account, or choose Create \
+             Account to make one. Your adventure starts the moment you step in.",
             font(&ctx, body(16.0)),
             TEXT,
             inner.width(),
@@ -883,13 +883,14 @@ impl SetupUi {
     }
 
     fn failed(&mut self, ui: &mut Ui, inner: Rect) -> SetupAction {
-        let mut y = Self::title(ui, inner, "SOMETHING WENT WRONG", "Setup couldn't finish");
+        let mut y = Self::title(ui, inner, "SETUP STOPPED", "Setup couldn't finish");
         let ctx = ui.ctx().clone();
         let p = ui.painter();
         y += para(
             p,
             pos2(inner.min.x, y),
-            "Nothing is lost: what's already done is kept, and Try Again carries on from there.",
+            "Nothing is lost: what's already done is kept, and Try Again carries on from there. If it keeps \
+             happening, ask for help on the Timeless XI Discord (linked at timelessxi.gg).",
             font(&ctx, body(16.0)),
             TEXT,
             inner.width(),

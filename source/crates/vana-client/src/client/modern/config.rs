@@ -190,7 +190,7 @@ const PAGES: [(&str, &str, &[Item]); 13] = [
         &[
             Head("World"),
             Ours("Environment Animation"),
-            Ours("Colour Grading"),
+            Ours("Color Grading"),
             Head("Effects"),
             Retail("conf12wi", 1),
             Open(SUB_EFFECTS),

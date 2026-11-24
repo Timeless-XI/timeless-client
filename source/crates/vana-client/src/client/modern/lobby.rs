@@ -1500,7 +1500,7 @@ fn notes_layout(
                 gap(&mut y, size * 1.4);
                 let mut j = LayoutJob::default();
                 j.append(
-                    &format!("TimelessXI {v}"),
+                    &format!("Timeless XI {}", super::super::timeless::manifest::shown(v)),
                     0.0,
                     TextFormat { font_id: FontId::new(size * 1.25, strong.clone()), color: gold, ..Default::default() },
                 );

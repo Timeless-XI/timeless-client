@@ -1221,7 +1221,7 @@ fn login_window(
     let ay = row(n + 1) + 6.0 * f;
     // Config-page buttons (88 px, wider for a longer caption), centred 24 px apart.
     const ACTIONS: [&str; 3] = ["Log in", "Create account", "Exit"];
-    const TL_ACTIONS: [&str; 3] = ["Log in", "Create account", "Exit Game"];
+    const TL_ACTIONS: [&str; 3] = ["Log In", "Create Account", "Exit Game"];
     let actions = if tl { TL_ACTIONS } else { ACTIONS };
     let widths = ACTIONS.map(|a| ((lu.label_width(a) + 14.0).max(88.0) * f).round());
     let mut bx = (wx + (ww - widths.iter().sum::<f32>() - 48.0 * f) / 2.0).round();
@@ -1526,27 +1526,31 @@ fn login_window(
     } else if *focus == upd {
         "Update the game files or vana-client."
     } else if *focus == stay_at {
-        "Log in by itself next time and go straight to the character menu (this also keeps the password). Log out \
-         to this screen to turn it off."
+        "Log in automatically next time and go straight to your characters (your password is saved too). To turn \
+         it off, log out to this screen and untick it."
     } else if *focus == trust_at {
-        "With two-factor sign-in: log in once with the code, then this computer needs none until the server stops \
+        "For two-factor sign-in: enter the code once, and this computer won't need one again until the server stops \
          trusting it."
     } else if *focus >= first && !(if *focus == twofa { filled } else { enabled[*focus - first] }) {
         if playonline {
             "Enter the PlayOnline ID and password and the Square Enix ID and password first."
         } else {
-            "Enter the server, account name and password first."
+            if fields.iter().any(|f| f.label == "Server") {
+                "Enter the server, your account name and password first."
+            } else {
+                "Enter your account name and password first."
+            }
         }
     } else if *focus < n && !fields[*focus].help.is_empty() {
         fields[*focus].help
     } else {
         match *focus {
-            f if f == check => "Keep the passwords on this computer, encrypted, and fill them in next time.",
+            f if f == check => "Save your password on this computer (encrypted) and fill it in next time.",
             f if f == twofa => {
                 "Change this account's password, or turn two-factor sign-in (a code from an authenticator app) on or off."
             }
             f if f == first => "Log in with this account.",
-            f if f == first + 1 => "Create a new account on this server with the account name and password above.",
+            f if f == first + 1 => "Create a new account with the account name and password above.",
             f if f == first + 2 => "Exit the game.",
             _ => "Enter your account information to log in.",
         }
@@ -10288,14 +10292,14 @@ impl App {
         // xi_connect silently drops requests it considers malformed, so check its rules here.
         let printable = |s: &str| s.bytes().all(|b| (0x20..0x7F).contains(&b));
         if self.cfg.username.is_empty() || self.cfg.username.len() > 16 || !printable(&self.cfg.username) {
-            self.status = "The account name must be 1-16 plain ASCII characters.".into();
+            self.status = "Account names are 1 to 16 characters: letters, numbers and plain symbols (no accents).".into();
             return;
         }
         if password.is_empty() || password.len() > 32 || !printable(&password) {
             self.status = if password.is_empty() {
                 "Enter your password.".into()
             } else {
-                "Passwords must be 1-32 plain ASCII characters (no accents or symbols outside ASCII).".into()
+                "Passwords are 1 to 32 characters: letters, numbers and plain symbols (no accents).".into()
             };
             return;
         }
@@ -10608,7 +10612,7 @@ impl App {
             Task::AccountCreated(Ok(())) => {
                 // In the OK window, with the cursor then on Log in.
                 self.status.clear();
-                self.login_error = Some(format!("The account {} was created.\nYou can log in now.", self.cfg.username));
+                self.login_error = Some(format!("Your account {} is ready.\nYou can log in now.", self.cfg.username));
                 if let Phase::Login { focus, .. } = &mut self.phase {
                     *focus = 5;
                 }
@@ -16616,7 +16620,7 @@ impl App {
                             items[4] = ("Exit Game", "Close the game.");
                         }
                         if client_update {
-                            items[0] = ("Update", "A newer Timeless XI client is out: update it to play.");
+                            items[0] = ("Update", "A new version of Timeless XI is out: update to play.");
                         }
                         // FUN_10235fa0: while lobycwin (or our settings screen) is up the title takes no input.
                         // The change notes an update left (or the start asked for) open first, over everything else on the

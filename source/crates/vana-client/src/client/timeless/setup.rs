@@ -99,7 +99,7 @@ impl Source {
             }
             Source::Installer(p) => format!("No download  ·  {}", p.display()),
             Source::Download => {
-                "The official free client, 7.7 GB  ·  a paused download picks up where it stopped".into()
+                "The official free download, 7.7 GB  ·  if it's interrupted, it picks up where it stopped".into()
             }
         }
     }
@@ -340,7 +340,7 @@ fn put_client(dest: &Path) -> Result<()> {
     if dest.is_file() {
         let old = dest.with_extension("old");
         let _ = std::fs::remove_file(&old);
-        std::fs::rename(dest, &old).context("Timeless XI is running: close it, then try again")?;
+        std::fs::rename(dest, &old).context("Timeless XI is open: close it, then choose Try Again")?;
     }
     std::fs::rename(&part, dest).with_context(|| dest.display().to_string())?;
     Ok(())
@@ -526,13 +526,13 @@ pub fn uninstall() -> Result<()> {
     };
     let exe = std::env::current_exe().context("no executable path")?;
     let dir = exe.parent().context("no folder")?.to_path_buf();
-    if !ask("Remove Timeless XI from this computer?\n\nYour settings, hotbars and characters are kept.") {
+    if !ask("Remove Timeless XI from this computer?\n\nYour characters are safe on the server, and your settings and hotbars stay on this computer for next time.") {
         return Ok(());
     }
     let game = game_dir_in(&dir);
     let drop_game = game.is_dir()
         && ask(&format!(
-            "Also delete the FINAL FANTASY XI game files in\n{}?\n\nKeep them (No) to reinstall later without downloading them again.",
+            "Also delete the FINAL FANTASY XI game files in\n{}?\n\nChoose No to keep them, so a reinstall won't need to download them again.",
             game.display()
         ));
     #[cfg(windows)]
