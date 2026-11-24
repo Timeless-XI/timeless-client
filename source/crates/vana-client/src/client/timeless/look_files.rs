@@ -83,6 +83,8 @@ pub static MITHRA_UNMARK: &[(u16, &[u8])] = &[
     (9, include_bytes!("../../../assets/timeless/looks/mithra_unmark_9.png")),
     (10, include_bytes!("../../../assets/timeless/looks/mithra_unmark_10.png")),
     (11, include_bytes!("../../../assets/timeless/looks/mithra_unmark_11.png")),
+    (12, include_bytes!("../../../assets/timeless/looks/mithra_unmark_12.png")),
+    (13, include_bytes!("../../../assets/timeless/looks/mithra_unmark_13.png")),
     (14, include_bytes!("../../../assets/timeless/looks/mithra_unmark_14.png")),
     (15, include_bytes!("../../../assets/timeless/looks/mithra_unmark_15.png")),
     (17, include_bytes!("../../../assets/timeless/looks/mithra_unmark_17.png")),
@@ -91,5 +93,6 @@ pub static MITHRA_UNMARK: &[(u16, &[u8])] = &[
     (20, include_bytes!("../../../assets/timeless/looks/mithra_unmark_20.png")),
     (21, include_bytes!("../../../assets/timeless/looks/mithra_unmark_21.png")),
     (22, include_bytes!("../../../assets/timeless/looks/mithra_unmark_22.png")),
+    (23, include_bytes!("../../../assets/timeless/looks/mithra_unmark_23.png")),
     (24, include_bytes!("../../../assets/timeless/looks/mithra_unmark_24.png")),
 ];
