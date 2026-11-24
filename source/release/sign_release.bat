@@ -28,14 +28,26 @@ echo.
 echo Release %TAG% is ready in %CD%\%OUT%:
 dir /b "%OUT%"
 echo.
+rem GitHub's command-line tool: on PATH, else the copy in C:\FFXILocal\tools\gh.
+set "GH=gh"
 where gh >nul 2>nul
-if not errorlevel 1 (
-    choice /m "Publish %TAG% on GitHub now with gh"
-    if !errorlevel!==1 (
-        gh release create %TAG% -R Timeless-XI/timeless-client --title "Timeless XI Build %BUILD%" --notes-file "%NOTES%" "%OUT%\vana-client-windows-x86_64.exe" "%OUT%\vana-client-windows-x86_64.exe.sig" "%OUT%\TimelessXI-Setup.exe"
-        goto :done
-    )
+if errorlevel 1 set "GH=C:\FFXILocal\tools\gh\bin\gh.exe"
+if /i not "%GH%"=="gh" if not exist "%GH%" goto :manual
+"%GH%" auth status >nul 2>nul
+if errorlevel 1 (
+    echo Sign in to GitHub once so releases can be published from this computer.
+    "%GH%" auth login --hostname github.com --git-protocol https --web
+    "%GH%" auth status >nul 2>nul
+    if errorlevel 1 goto :manual
 )
+echo Publishing %TAG% on GitHub ...
+"%GH%" release create %TAG% -R Timeless-XI/timeless-client --target timeless-release --title "Timeless XI Build %BUILD%" --notes-file "%NOTES%" "%OUT%\vana-client-windows-x86_64.exe" "%OUT%\vana-client-windows-x86_64.exe.sig" "%OUT%\TimelessXI-Setup.exe"
+if errorlevel 1 ( echo Publishing failed: see the message above. & goto :manual )
+echo.
+echo Published: https://github.com/Timeless-XI/timeless-client/releases/tag/%TAG%
+echo Player download: https://github.com/Timeless-XI/timeless-client/releases/latest/download/TimelessXI-Setup.exe
+goto :done
+:manual
 echo Upload the three files to a new release tagged %TAG%, and paste %NOTES% as its description:
 start "" "https://github.com/Timeless-XI/timeless-client/releases/new?tag=%TAG%&title=Timeless%%20XI%%20Build%%20%BUILD%"
 start "" "%OUT%"
