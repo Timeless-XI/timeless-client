@@ -104,12 +104,120 @@ fn hourglass(ctx: &Context, p: &egui::Painter, rect: Rect, a: f32) {
 /// Timeless XI: the whole hero logo (no tagline) in `rect` at `alpha`, the hourglass moving: the setup wizard and the
 /// Update Required card draw it where there is no title reel.
 pub(super) fn hero_logo(ctx: &Context, p: &egui::Painter, rect: Rect, alpha: f32) {
-    let Some(base) = texture(ctx, "timeless/title_logo_base", BASE_PNG) else { return };
+    let px = (rect.width() * ctx.pixels_per_point()).round().max(1.0) as usize;
+    let Some(base) = small_logo(ctx, px) else { return };
     let a = alpha.clamp(0.0, 1.0);
-    let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
-    p.image(base.id(), rect, uv, Color32::from_white_alpha((a * 255.0) as u8));
+    // Down to the "Reforged" line, which is drawn as text below: at this size the picture's letters would be a few
+    // pixels tall.
+    let cut = REFORGED_TOP / LOGO_H;
+    let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, cut));
+    // On whole pixels, so the picture made at this size is drawn one to one (not blurred between pixels).
+    let ppp = ctx.pixels_per_point();
+    let snap = |v: f32| (v * ppp).round() / ppp;
+    let min = pos2(snap(rect.min.x), snap(rect.min.y));
+    let size = vec2(px as f32 / ppp, (px as f32 * LOGO_H / (LOGO_H * LOGO_ASPECT)).round() / ppp);
+    let top = Rect::from_min_size(min, vec2(size.x, size.y * cut));
+    p.image(base.id(), top, uv, Color32::from_white_alpha((a * 255.0) as u8));
+    reforged(ctx, p, rect, a);
     hourglass(ctx, p, rect, a);
     ctx.request_repaint();
+}
+
+/// The logo picture's height in pixels, and the top of its "Reforged" line (the rules, diamonds and letters).
+const LOGO_H: f32 = 846.0;
+const REFORGED_TOP: f32 = 780.0;
+
+/// The "— ◆ R E F O R G E D ◆ —" line under the small logo, as text and lines placed where the picture has them,
+/// the letters at a size that reads.
+fn reforged(ctx: &Context, p: &egui::Painter, rect: Rect, a: f32) {
+    let k = rect.width() / (LOGO_H * LOGO_ASPECT);
+    let at = |x: f32| rect.min.x + x * k;
+    let y = rect.min.y + 808.5 * k;
+    let ink = Color32::from_rgb(0xd6, 0xe2, 0xf2);
+    // The letters as large as the picture's (at least 10 points, easy to read), centred; the diamonds just
+    // outside them and the rules outside those, as in the picture.
+    let size = (24.0 * k).max(10.0);
+    let f = super::tlsetup::font(ctx, super::tlsetup::serif(size));
+    let spacing = (34.0 * k).max(size * 0.45);
+    let cx = at(668.0);
+    let h = p.layout_no_wrap("R".into(), f.clone(), ink).size().y;
+    let mut job = egui::text::LayoutJob::default();
+    let tint = ink.gamma_multiply(a * 0.92);
+    job.append(
+        "REFORGED",
+        0.0,
+        egui::TextFormat { font_id: f, color: tint, extra_letter_spacing: spacing, ..Default::default() },
+    );
+    let g = p.layout_job(job);
+    // The letters' own extent (no spacing beyond the first and last).
+    let gl = || g.rows.iter().flat_map(|r| r.glyphs.iter());
+    let x0 = gl().map(|gl| gl.pos.x).fold(f32::MAX, f32::min);
+    let x1 = gl().map(|gl| gl.pos.x + gl.advance_width).fold(0.0f32, f32::max);
+    let half = (x1 - x0) / 2.0;
+    p.galley(pos2(cx - half - x0, y - h / 2.0), g.clone(), tint);
+    let d = (4.0 * k).max(2.0);
+    let gap = (size * 0.9).max(22.0 * k);
+    let rule = (110.0 * k).max(size * 2.5);
+    let line = egui::Stroke::new(1.0, ink.gamma_multiply(a * 0.55));
+    for side in [-1.0f32, 1.0] {
+        let dx = cx + side * (half + gap);
+        p.add(egui::Shape::convex_polygon(
+            vec![pos2(dx, y - d), pos2(dx + d, y), pos2(dx, y + d), pos2(dx - d, y)],
+            ink.gamma_multiply(a * 0.8),
+            egui::Stroke::NONE,
+        ));
+        let r0 = dx + side * (d + 4.0 * k.max(0.5));
+        p.line_segment([pos2(r0, y), pos2(r0 + side * rule, y)], line);
+    }
+}
+
+/// The logo picture shrunk to `px` pixels wide with an area average (a GPU's single sample per pixel skips the thin
+/// strokes of its letters); the last size made is kept.
+fn small_logo(ctx: &Context, px: usize) -> Option<TextureHandle> {
+    let id = Id::unique("timeless/title_logo_small");
+    if let Some((w, t)) = ctx.data(|d| d.get_temp::<(usize, TextureHandle)>(id)) {
+        if w.abs_diff(px) * 50 <= px {
+            return Some(t);
+        }
+    }
+    let src = decode(BASE_PNG)?;
+    let [sw, sh] = src.size;
+    let w = px.clamp(16, sw);
+    let h = ((sh as f32) * w as f32 / sw as f32).round().max(1.0) as usize;
+    let img = area_average(&src, w, h);
+    let t = ctx.load_texture("timeless/title_logo_small", img, egui::TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(id, (px, t.clone())));
+    Some(t)
+}
+
+/// `src` resampled to `w`×`h` by averaging each output pixel's footprint (premultiplied, so edges keep their colour).
+fn area_average(src: &egui::ColorImage, w: usize, h: usize) -> egui::ColorImage {
+    let [sw, sh] = src.size;
+    let (fx, fy) = (sw as f32 / w as f32, sh as f32 / h as f32);
+    let mut out = Vec::with_capacity(w * h);
+    for oy in 0..h {
+        let (y0, y1) = (oy as f32 * fy, (oy + 1) as f32 * fy);
+        for ox in 0..w {
+            let (x0, x1) = (ox as f32 * fx, (ox + 1) as f32 * fx);
+            let mut acc = [0f32; 4];
+            let mut wsum = 0f32;
+            for sy in (y0.floor() as usize)..(y1.ceil() as usize).min(sh) {
+                let wy = (y1.min(sy as f32 + 1.0) - y0.max(sy as f32)).max(0.0);
+                for sx in (x0.floor() as usize)..(x1.ceil() as usize).min(sw) {
+                    let wx = (x1.min(sx as f32 + 1.0) - x0.max(sx as f32)).max(0.0);
+                    let c = src.pixels[sy * sw + sx];
+                    let wgt = wx * wy;
+                    for (i, v) in c.to_array().iter().enumerate() {
+                        acc[i] += *v as f32 * wgt;
+                    }
+                    wsum += wgt;
+                }
+            }
+            let v = |i: usize| (acc[i] / wsum.max(1e-6)).round().clamp(0.0, 255.0) as u8;
+            out.push(Color32::from_rgba_premultiplied(v(0), v(1), v(2), v(3)));
+        }
+    }
+    egui::ColorImage::new([w, h], out)
 }
 
 /// The logo's width over its height.
