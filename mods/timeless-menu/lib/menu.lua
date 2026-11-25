@@ -36,6 +36,16 @@ M.KNOWN = {
       desc = "Your missions and quests, and what to do next." } },
   },
   {
+    id = "timeless-artisan", order = 44,
+    cards = { { title = "Artisan", open = "//artisan", command = "/artisan", category = "Crafting & Shops",
+      desc = "Recipes with your chances, favorites, today's guild items, a craft queue and your crafting storage.",
+      buttons = {
+        { label = "Recipes", command = "//artisan recipes" }, { label = "Favorites", command = "//artisan favorites" },
+        { label = "Guilds", command = "//artisan guilds" }, { label = "Storage", command = "//artisan storage" },
+        { label = "Queue", command = "//artisan queue" },
+      } } },
+  },
+  {
     id = "timeless-gauges", order = 30,
     cards = { { title = "Job Gauges", open = "//gauges", command = "/gauges",
       desc = "Your job's own meters (Faith, Essence, Ki, Hot Streak...) on the screen's edge." } },
@@ -116,7 +126,7 @@ M.CATEGORIES = {
   { key = "Companions", tip = "Your companions." },
   { key = "World", tip = "The world around you: maps, towns, notorious monsters, your quests and fame." },
   { key = "Combat", tip = "In a fight: your gauges, enmity, monsters' moves and casts, Champions." },
-  { key = "Crafting & Shops", tip = "Shops, crafting and Masterworks." },
+  { key = "Crafting & Shops", tip = "Shops, crafting (Artisan) and Masterworks." },
   { key = "Games", tip = "Cardian and other games." },
   { key = "Other", tip = "Mods that don't name a category." },
   { key = "Server", tip = "The server's commands; the answers come in chat." },
@@ -127,7 +137,7 @@ M.CATEGORY_OF = {
   ["Companion Manager"] = "Companions", ["Companion View"] = "Companions",
   ["World Map"] = "World", ["Town"] = "World", ["NM Atlas"] = "World", ["Journal"] = "World", ["Reputation"] = "World",
   ["Job Gauges"] = "Combat", ["Enmity"] = "Combat", ["Telegraphs"] = "Combat", ["Champions"] = "Combat", ["Cast Bars"] = "Combat",
-  ["Shops"] = "Crafting & Shops", ["Masterworks"] = "Crafting & Shops",
+  ["Shops"] = "Crafting & Shops", ["Masterworks"] = "Crafting & Shops", ["Artisan"] = "Crafting & Shops",
   ["Cardian"] = "Games",
 }
 

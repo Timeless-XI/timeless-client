@@ -3120,6 +3120,139 @@
       "version": "1.0.2"
     },
     {
+      "id": "timeless-artisan",
+      "name": "Timeless Artisan",
+      "kind": "lua",
+      "version": "2.0.0",
+      "authors": [
+        "TimelessXI"
+      ],
+      "description": "Crafting made easy (/artisan, or the Timeless menu): every recipe with your success, high-quality and skill-up chances, recipe search by name or material, Favorites, today's guild point items with a Craft button for the number still needed, a craft queue of up to 12 synths, and an account-wide crafting storage (crystals, clusters and materials) that crafting takes from, with Deposit all, Withdraw and auto-deposit. A small HUD window keeps the queue, Repeat and your favorites on screen. Needs the server's timeless_artisan module.",
+      "files": [
+        {
+          "path": "init.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-artisan/init.lua",
+          "sha256": "bc2eb08f57574c62e84304272df28509e4a856468984d202997a2ac76e293deb",
+          "size": 5597
+        },
+        {
+          "path": "lib/action.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-artisan/lib/action.lua",
+          "sha256": "61c8da67cfb35a50f5618b5c0d5b039037d7aaf3615a0b2d7f96abf314626e79",
+          "size": 757
+        },
+        {
+          "path": "lib/amount.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-artisan/lib/amount.lua",
+          "sha256": "12fc063a760869f0b1019934a90f0893572003bf35742c751ed1b58e572e9614",
+          "size": 1544
+        },
+        {
+          "path": "lib/canvas.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-artisan/lib/canvas.lua",
+          "sha256": "8aefe1988225bedb0703d74ea4519b209f68558626c580c32a8039df1e3d5ee3",
+          "size": 10638
+        },
+        {
+          "path": "lib/card.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-artisan/lib/card.lua",
+          "sha256": "b19e05c2f042282ae99e3ea6828cee28a2bb59328bd4375398bbb5f37a425fc6",
+          "size": 7693
+        },
+        {
+          "path": "lib/core.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-artisan/lib/core.lua",
+          "sha256": "869a17b57db90ea45eb45cca79ae50f07e7933e834558b414062e6a305035488",
+          "size": 19237
+        },
+        {
+          "path": "lib/data.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-artisan/lib/data.lua",
+          "sha256": "960d00a2e67fcaa245fb294f0cf9d326f888b38d0a2ea327b8507bf3f9134b9c",
+          "size": 283400
+        },
+        {
+          "path": "lib/hud.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-artisan/lib/hud.lua",
+          "sha256": "de80f6850638d90a4bf16ff94ad691b74bde0042b1295ebf76fbccf212ce6357",
+          "size": 4397
+        },
+        {
+          "path": "lib/logic.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-artisan/lib/logic.lua",
+          "sha256": "0a09763479d6f4599df3c01aabbd159ac8de5f8b357a68a459a7afb5504fa92f",
+          "size": 22899
+        },
+        {
+          "path": "lib/style.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-artisan/lib/style.lua",
+          "sha256": "c906bac41070aed7af413fa07cb10bc308baf1ab1be99c9f5e4c24e2ff3961f2",
+          "size": 2753
+        },
+        {
+          "path": "lib/window.lua",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-artisan/lib/window.lua",
+          "sha256": "601f21b675a5d3ebb572cc7a15c2222d2da8a35172f054e0e8e539fcdae5e923",
+          "size": 30033
+        },
+        {
+          "path": "mod.toml",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-artisan/mod.toml",
+          "sha256": "7076b7faf621ed3b6835e600c8eff7f501502de7636f7d8061562babf733a0fe",
+          "size": 2845
+        }
+      ],
+      "required": true,
+      "commands": {
+        "artisan": {
+          "help": "Opens or closes Timeless Artisan.",
+          "args": "",
+          "forms": [
+            {
+              "args": "recipes",
+              "help": "Opens the Recipes tab."
+            },
+            {
+              "args": "favorites",
+              "help": "Opens your Favorites."
+            },
+            {
+              "args": "guilds",
+              "help": "Opens today's guild items."
+            },
+            {
+              "args": "storage",
+              "help": "Opens your crafting storage."
+            },
+            {
+              "args": "queue",
+              "help": "Opens the craft queue and this session's log."
+            },
+            {
+              "args": "hud",
+              "help": "Shows or hides the small HUD window."
+            },
+            {
+              "args": "repeat",
+              "help": "Queues your last craft again."
+            },
+            {
+              "args": "stop",
+              "help": "Stops the craft queue after the synth in progress."
+            },
+            {
+              "args": "deposit",
+              "help": "Stores every crafting material in your bags."
+            }
+          ]
+        },
+        "timelessartisan": {
+          "help": "The same as /artisan.",
+          "args": ""
+        }
+      }
+    },
+    {
       "id": "timeless-atlas",
       "name": "Timeless NM Atlas",
       "kind": "lua",
@@ -3516,6 +3649,12 @@
       "description": "TimelessXI companions, live: Companion View (/cv) for gear, stats and role, Companion Manager (/cmgr) to call, keep, save and set them up; role-coloured name plates, rings and speech bubbles in the world.",
       "files": [
         {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-companions/README.md",
+          "sha256": "0d1573eb67693dcdce5a0a494f16e54ac896aaf3b5bf8df65439441ddaa128ca",
+          "size": 4802
+        },
+        {
           "path": "init.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-companions/init.lua",
           "sha256": "f20216dd8c0324d5052c5b6e0537e32a42cd3271359411613602ae0f219996b8",
@@ -3592,12 +3731,6 @@
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-companions/mod.toml",
           "sha256": "f0b507daf34a099712d5da333fe342ff421076aab5aff7cb0e03cdff8df70a3e",
           "size": 1806
-        },
-        {
-          "path": "README.md",
-          "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-companions/README.md",
-          "sha256": "0d1573eb67693dcdce5a0a494f16e54ac896aaf3b5bf8df65439441ddaa128ca",
-          "size": 4802
         }
       ],
       "required": true,
@@ -3986,7 +4119,7 @@
       "id": "timeless-menu",
       "name": "TimelessMenu",
       "kind": "lua",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "authors": [
         "TimelessXI"
       ],
@@ -4013,8 +4146,8 @@
         {
           "path": "lib/menu.lua",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-menu/lib/menu.lua",
-          "sha256": "fcde92bc2cc151d76b83c98cd3d297958907514dc89ef24f2daeecbcf0dce8cf",
-          "size": 13805
+          "sha256": "6cfe0dc06296c283e457db4f11f4c845c697d18f14d51de49abe04d4f97f3b34",
+          "size": 14446
         },
         {
           "path": "lib/style.lua",
@@ -4025,7 +4158,7 @@
         {
           "path": "mod.toml",
           "url": "https://raw.githubusercontent.com/Timeless-XI/timeless-client/main/mods/timeless-menu/mod.toml",
-          "sha256": "c8a73d5a2cbed37b14ba66a9c70bb83bf9d75b9985412490105522d2415db278",
+          "sha256": "c6ba1e6e10c19809340497beaf9c7a12827567e06bb78471096342349ddb98bf",
           "size": 824
         }
       ],

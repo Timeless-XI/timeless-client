@@ -1,5 +1,5 @@
 name = "TimelessMenu"
-version = "1.1.0"
+version = "1.1.1"
 authors = ["TimelessXI"]
 description = "Every TimelessXI mod in one menu (/tm or the hourglass button), sorted into categories (Companions, World, Combat, Crafting & Shops, Games) with your pinned mods first: open them, jump to their tabs, start a mod that isn't running, and say the server's commands."
 permissions = ["actions", "mods"]
