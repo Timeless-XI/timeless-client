@@ -3,6 +3,7 @@ import numpy as np
 from r3d import *
 
 # part ids
+TAIL_TAG = 0   # added to the tail fin's part id when set (tank3 splits the tail off to make it beat)
 BODY, FIN, EYE, METAL, WOOD, CLOTH, GLOW, CRYSTAL, WHISK, FIN2, TEETH, BRASS, JAW = range(13)
 
 
@@ -72,7 +73,7 @@ def tail_fin(m, body, shape, size, part=FIN, ns=60, nt=18, ruffle=0.004, skew=0.
     def edge(s):
         dx, dy = shape(s)
         return base[None, :] - t[None, :] * (dx * size)[:, None] + u[None, :] * (dy * size + skew * size)[:, None]
-    m.add(*sheet(root, edge, ns, nt, ruffle=ruffle, ruffle_freq=5), part, layer=1)
+    m.add(*sheet(root, edge, ns, nt, ruffle=ruffle, ruffle_freq=5), part + TAIL_TAG, layer=1)
 
 
 def side_fin(m, body, u, length, width, angle=35, droop=-20, part=FIN, zsign=1, yk=-0.35, ruffle=0.003, shape='round'):

@@ -1,5 +1,7 @@
 # Timeless Aquarium and the Elder fish: generators
 
+The current aquarium is **v3** (`tank3.py`, `swim.py`, `export_aquarium3.py`): the 6 x 4 show piece with swimming fish. The v2 files (`tank2.py`, `export_aquarium2.py`) stay as the base it builds on (shared geometry helpers and part ids).
+
 Builds `source/crates/vana-client/assets/timeless/aquarium/aquarium.bin`, which the client reads in
 `client/timeless/aquarium.rs`. Python 3 with numpy, scipy and Pillow. Every model is built in code. No DATs are
 read, and no outside art is used.
@@ -17,13 +19,26 @@ read, and no outside art is used.
 | `render_all.py` | Per-fish mock-up renders and icons (the Elder fish canvas). |
 | `gif.py` | An animated preview of the full tank. |
 
-Rebuild:
+Rebuild (v3):
 
 ```
-python3 make_aq_icon2.py           # writes out/aquarium_icon32.png (set OUT at the top of the scripts)
-python3 export_aquarium2.py <path to assets/timeless/aquarium/aquarium.bin>
-cargo test -p vana-client aquarium
+python3 swimcheck.py               # the fish paths: no fish touching another, the walls or the hourglass
+python3 make_aq_icon3.py           # writes out/aquarium_icon32.png (set OUT at the top of the scripts)
+python3 export_aquarium3.py <path to assets/timeless/aquarium/aquarium.bin>
+cargo test -p vana-client aquarium   # also checks the client's swim maths against swim.py (Moonfin at 7.3 s)
+python3 tank3.py full|empty|three|close|top [t]    # mock-up renders; gif3.py for the swimming loop
 ```
+
+v3 files:
+
+| File | What it is |
+| --- | --- |
+| `tank3.py` | The 6 x 4 show piece: gilt-trimmed charcoal cabinet, fluted columns, cornice with the "ELDERS OF THE DEEP" frieze and dentils, finials, sunburst crest, lamp hood, scrollwork stand on bun feet, night sky with the logo's landmark and light shafts, the hourglass at the back; the fish split into body and tail fin. |
+| `swim.py` | Each fish's loop (four layers, two fish each, never touching), sampled for the client (anim kinds 4 / 5), and the same matrix maths as the client's `Anim::local`. |
+| `swimcheck.py` | Simulates ten minutes of swimming and reports any fish touching another, a wall or the hourglass. |
+| `export_aquarium3.py` | Bundle version 3: u16 parameter count per group (the swim samples), fish exported centred, facing +x. |
+| `make_aq_icon3.py`, `gif3.py` | The item icon and the swimming preview. |
+
 
 Groups, and how they move:
 

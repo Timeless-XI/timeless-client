@@ -5,21 +5,25 @@
 //! draws its plant. The tank, the eight fish and their baked textures come from one bundle,
 //! `assets/timeless/aquarium/aquarium.bin` (built by the Elder fish tools, `export_aquarium.py`):
 //!
-//! - `b"TLAQ"`, u32 version 1, u32 entries; entry = u8 kind (0 mesh, 1 PNG, 2 raw), u16 name length, name, u32
+//! - `b"TLAQ"`, u32 version 3, u32 entries; entry = u8 kind (0 mesh, 1 PNG, 2 raw), u16 name length, name, u32
 //!   length, bytes.
-//! - Mesh (version 2) = one GROUP, drawn as its own piece so it can move on its own: u8 animation kind, f32 x 8
-//!   parameters, u32 models; model = u16 texture-name length, texture name, u16 blending (MMB bits: 0x8000
+//! - Mesh = one GROUP, drawn as its own piece so it can move on its own: u8 animation kind, u16 parameter count,
+//!   f32 parameters, u32 models; model = u16 texture-name length, texture name, u16 blending (MMB bits: 0x8000
 //!   blended, 0x2000 two-sided), u8 variant, u32 vertices, u32 indices, vertices (pos f32x3, normal f32x3, colour
 //!   u32 BGRA with 0x80 = 1.0, uv f32x2), indices u16 (a triangle list).
 //! - Animation (`Anim`): 0 none; 1 spin (pivot xyz, axis xyz, period s); 2 bob (pivot xyz, amplitude, period s,
-//!   phase, yaw degrees); 3 fall (direction xyz, spacing, period s): a looped slide by one spacing.
-//! - Variant: 0 always; 1 lit (1+ fish) / 2 dark (none); crown 3 off (none) / 4 dim (1-7) / 5 full (all 8).
-//! - Groups: `tank` (frame, night sky, sand, ruins, kelp, the hourglass), `crown` (the star
-//!   crystal on top, spins), `hgcrystal` (the hourglass's star crystal, spins), `grains` (falling sand),
-//!   `fish0`..`fish7` (placed in the tank, each drifts). The PNGs by
-//!   texture name; `icon32` the item icon in the item DAT layout (dat/items.rs `icon_rgba`).
+//!   phase, yaw degrees); 3 fall (direction xyz, spacing, period s): a looped slide by one spacing; 4 swim (a
+//!   fish's body) and 5 swim with a beating tail (its tail fin): lap s, start (0-1), sway rad, beat Hz, tail joint
+//!   x, wag rad, wag lag rad, sample count n, then n samples (x, y, z, yaw, pitch, roll) evenly spaced in time over
+//!   one lap (the Elder fish tools' `swim.py`, which this must match).
+//! - Variant: 0 always; 1 lit (1+ fish) / 2 dark (none); crown and finials 3 off (none) / 4 dim (1-7) / 5 full
+//!   (all 8).
+//! - Groups: `tank` (the cabinet, night sky, sand, ruins, kelp, the hourglass), `crown` (the star crystal on the
+//!   crest, spins), `hgcrystal` (the hourglass's star crystal, spins), `grains` (falling sand), `fish0`..`fish7`
+//!   (each swims its own loop round the tank) and `fish0t`..`fish7t` (their tail fins). The PNGs by texture name;
+//!   `icon32` the item icon in the item DAT layout (dat/items.rs `icon_rgba`).
 //!
-//! Model space is furniture space: origin at the middle of the 3 x 2 footprint on the floor, -y up.
+//! Model space is furniture space: origin at the middle of the 6 x 4 footprint on the floor, -y up.
 
 use crate::dat::furniture::Furn;
 use crate::dat::zone::{Mmb, Model, Placement, SwayCurves, Texture, Vertex, ZoneScene};
@@ -31,8 +35,9 @@ use std::sync::OnceLock;
 pub const ITEM: u16 = 75;
 /// The exdata byte holding the Elder fish bits.
 pub const MASK_BYTE: usize = 2;
-/// Its furniture entry (the item has none in the retail table): a floor piece, 3 x 2 cells, 1.4 tall.
-pub const FURN: Furn = Furn { flags: 0, model: 0, size: [3, 2], height: 140 };
+/// Its furniture entry (the item has none in the retail table): a floor piece, 6 x 4 cells, about 2.7 tall (matches
+/// timeless-server's item_furnishing row).
+pub const FURN: Furn = Furn { flags: 0, model: 0, size: [6, 4], height: 267 };
 /// The mesh name the scene's placements refer to.
 pub const MESH: &str = "tlaquarium";
 
@@ -50,15 +55,24 @@ const GROUPS: [&str; 4] = ["tank", "crown", "hgcrystal", "grains"];
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Anim {
     pub kind: u8,
-    pub p: [f32; 8],
+    pub p: &'static [f32],
 }
 
 impl Anim {
     /// The model-space transform at `t` seconds.
     pub fn local(&self, t: f32) -> glam::Mat4 {
         use glam::{Mat4, Quat, Vec3};
-        let p = &self.p;
+        let p = self.p;
         let tau = std::f32::consts::TAU;
+        let need = match self.kind {
+            1 | 2 => 7,
+            3 => 5,
+            4 | 5 => 8,
+            _ => 0,
+        };
+        if p.len() < need {
+            return Mat4::IDENTITY;
+        }
         match self.kind {
             1 if p[6] != 0.0 => {
                 let (c, axis) = (Vec3::new(p[0], p[1], p[2]), Vec3::new(p[3], p[4], p[5]).normalize_or_zero());
@@ -73,6 +87,7 @@ impl Anim {
                 Mat4::from_translation(off + c) * Mat4::from_quat(r) * Mat4::from_translation(-c)
             }
             3 if p[4] != 0.0 => Mat4::from_translation(Vec3::new(p[0], p[1], p[2]) * p[3] * (t / p[4]).rem_euclid(1.0)),
+            4 | 5 if p[0] > 0.0 => swim(p, t, self.kind == 5),
             _ => Mat4::IDENTITY,
         }
     }
@@ -82,13 +97,47 @@ impl Anim {
     }
 }
 
+/// A fish on its loop at `t` (kinds 4 and 5): the samples interpolated, then its body's sway, and for the tail
+/// fin the beat about its joint:
+/// `T(pos) * Ry(yaw) * Rz(pitch) * Rx(roll) * Ry(sway) [* T(joint) * Ry(wag) * T(-joint)]`.
+fn swim(p: &[f32], t: f32, tail: bool) -> glam::Mat4 {
+    use glam::{Mat4, Vec3};
+    let (lap, start, sway, beat, joint, wag, lag) = (p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
+    let n = p[7] as usize;
+    let s = &p[8..];
+    if n == 0 || s.len() < n * 6 {
+        return Mat4::IDENTITY;
+    }
+    let x = ((t / lap + start).rem_euclid(1.0) * n as f32).min(n as f32 - 1e-3);
+    let i0 = x.floor() as usize % n;
+    let i1 = (i0 + 1) % n;
+    let f = x - x.floor();
+    let (a, b) = (&s[i0 * 6..i0 * 6 + 6], &s[i1 * 6..i1 * 6 + 6]);
+    let lerp = |k: usize| a[k] + (b[k] - a[k]) * f;
+    let pi = std::f32::consts::PI;
+    let dyaw = (b[3] - a[3] + pi).rem_euclid(2.0 * pi) - pi;
+    let yaw = a[3] + dyaw * f;
+    let w = std::f32::consts::TAU * beat * t;
+    let mut m = Mat4::from_translation(Vec3::new(lerp(0), lerp(1), lerp(2)))
+        * Mat4::from_rotation_y(yaw)
+        * Mat4::from_rotation_z(lerp(4))
+        * Mat4::from_rotation_x(lerp(5))
+        * Mat4::from_rotation_y(sway * w.sin());
+    if tail && wag != 0.0 {
+        let j = Vec3::new(joint, 0.0, 0.0);
+        m = m * Mat4::from_translation(j) * Mat4::from_rotation_y(wag * (w - lag).sin()) * Mat4::from_translation(-j);
+    }
+    m
+}
+
 /// The Elder fish bits from a piece's exdata.
 pub fn mask(ext: &[u8]) -> u8 {
     ext.get(MASK_BYTE).copied().unwrap_or(0)
 }
 
 struct Bundle {
-    meshes: HashMap<String, (Anim, &'static [u8])>,
+    /// Each group: its animation kind and parameters, and its models.
+    meshes: HashMap<String, (u8, Vec<f32>, &'static [u8])>,
     pngs: HashMap<String, &'static [u8]>,
     raws: HashMap<String, &'static [u8]>,
 }
@@ -106,7 +155,7 @@ fn parse(b: &'static [u8]) -> Result<Bundle> {
         bail!("not a TLAQ bundle");
     }
     let version = r.u32()?;
-    if version != 2 {
+    if version != 3 {
         bail!("version {version}");
     }
     let n = r.u32()?;
@@ -121,11 +170,9 @@ fn parse(b: &'static [u8]) -> Result<Bundle> {
             0 => {
                 let mut g = Reader { b: data, at: 0 };
                 let kind = g.u8()?;
-                let mut p = [0f32; 8];
-                for v in &mut p {
-                    *v = g.f32()?;
-                }
-                out.meshes.insert(name, (Anim { kind, p }, &data[g.at..]));
+                let count = g.u16()? as usize;
+                let p = (0..count).map(|_| g.f32()).collect::<Result<Vec<_>>>()?;
+                out.meshes.insert(name, (kind, p, &data[g.at..]));
             }
             1 => {
                 out.pngs.insert(name, data);
@@ -240,20 +287,24 @@ pub struct Part {
     pub scene: ZoneScene,
 }
 
-/// The groups of a fill: the tank and its moving parts, then the fish of `mask`.
+/// The groups of a fill: the tank and its moving parts, then the fish of `mask` (each body, then its tail fin
+/// when it has one). Group numbers: the tank's groups, then fish n's body at `GROUPS.len() + n`, its tail at
+/// `GROUPS.len() + 8 + n`.
 pub fn parts(mask: u8) -> Result<Vec<Part>> {
     let b = bundle()?;
     let want = variants(mask);
-    let fish = (0..8).filter(|bit| mask & (1 << bit) != 0).map(|bit| format!("fish{bit}"));
-    let names: Vec<String> = GROUPS.iter().map(|g| g.to_string()).chain(fish).collect();
+    let mut names: Vec<(String, usize)> = GROUPS.iter().enumerate().map(|(k, g)| (g.to_string(), k)).collect();
+    for bit in (0..8).filter(|bit| mask & (1 << bit) != 0) {
+        names.push((format!("fish{bit}"), GROUPS.len() + bit));
+        let tail = format!("fish{bit}t");
+        if b.meshes.contains_key(&tail) {
+            names.push((tail, GROUPS.len() + 8 + bit));
+        }
+    }
     let mut out = Vec::new();
-    for name in names {
-        let group = GROUPS
-            .iter()
-            .position(|g| *g == name)
-            .unwrap_or_else(|| GROUPS.len() + name[4..].parse::<usize>().unwrap_or(0));
-        let (anim, data) = b.meshes.get(&name).with_context(|| format!("no group {name}"))?;
-        out.push(Part { group, anim: *anim, scene: scene_of(data, &want)? });
+    for (name, group) in names {
+        let (kind, p, data) = b.meshes.get(&name).with_context(|| format!("no group {name}"))?;
+        out.push(Part { group, anim: Anim { kind: *kind, p: p.as_slice() }, scene: scene_of(data, &want)? });
     }
     Ok(out)
 }
@@ -299,7 +350,8 @@ mod tests {
         parts.iter().flat_map(|p| p.scene.meshes[0].models.iter().map(|m| m.texture.clone())).collect()
     }
 
-    /// Every fill builds: the six tank groups, one group per fish bit, the right crown and lighting.
+    /// Every fill builds: the tank's groups, a body (and, but for Rimecoil, a tail fin) per fish bit, the right
+    /// crown and lighting, and the whole piece fits its 6 x 4 cells.
     #[test]
     fn fills() {
         let empty = parts(0).unwrap();
@@ -308,16 +360,22 @@ mod tests {
         assert!(t.iter().any(|n| n.starts_with("tlqcrow") && n.ends_with("_3")), "crown off when empty: {t:?}");
         assert!(t.iter().all(|n| !n.ends_with("_1")), "nothing lit when empty");
         let one = parts(1 << 4).unwrap();
-        assert_eq!(one.len(), GROUPS.len() + 1);
-        assert_eq!(one.last().unwrap().group, GROUPS.len() + 4);
+        assert_eq!(one.len(), GROUPS.len() + 2);
+        assert_eq!(one[GROUPS.len()].group, GROUPS.len() + 4);
+        assert_eq!(one[GROUPS.len() + 1].group, GROUPS.len() + 8 + 4);
         let t = textures(&one);
         assert!(t.iter().any(|n| n.starts_with("tlqf4_")) && !t.iter().any(|n| n.starts_with("tlqf0_")));
+        assert!(t.iter().any(|n| n.starts_with("tlqf4t_")), "the tail fin is its own group");
         assert!(t.iter().any(|n| n.starts_with("tlqcrow") && n.ends_with("_4")), "crown dim with some fish");
         let full = parts(0xff).unwrap();
-        assert_eq!(full.len(), GROUPS.len() + 8);
+        assert_eq!(full.len(), GROUPS.len() + 8 + 7, "Rimecoil swims without a tail fin of its own");
         assert!(textures(&full).iter().any(|n| n.starts_with("tlqcrow") && n.ends_with("_5")), "crown full at eight");
+        let mut ids: Vec<_> = full.iter().map(|p| p.group).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), full.len(), "each group its own file id");
         let (mut min, mut max) = ([f32::MAX; 3], [f32::MIN; 3]);
-        for p in &full {
+        for p in full.iter().filter(|p| p.group < GROUPS.len()) {
             let mesh = &p.scene.meshes[0];
             for m in &mesh.models {
                 assert!(p.scene.textures.iter().any(|t| t.name == m.texture));
@@ -329,11 +387,13 @@ mod tests {
                 max[k] = max[k].max(mesh.max[k]);
             }
         }
-        assert!(max[0] - min[0] <= 1.81 && max[2] - min[2] <= 1.21, "fits 3 x 2 cells: {min:?} {max:?}");
-        assert!(max[1] <= 0.001 && min[1] > -1.6, "stands on the floor, -y up: {min:?} {max:?}");
+        assert!(max[0] - min[0] <= 3.61 && max[2] - min[2] <= 2.41, "fits 6 x 4 cells: {min:?} {max:?}");
+        assert!(max[1] <= 0.001 && max[1] > -0.01 && min[1] > -2.7, "stands on the floor, -y up: {min:?} {max:?}");
+        assert!(-min[1] * 100.0 <= FURN.height as f32 + 1.0, "the entry's height covers it: {min:?}");
     }
 
-    /// The moving parts: the crown spins, the fish drift, the grains fall; the tank stays put.
+    /// The moving parts: the crown spins, the grains fall, the tank stays put; every fish swims its loop inside
+    /// the tank, its tail fin beating about a joint that stays on the body.
     #[test]
     fn movement() {
         let full = parts(0xff).unwrap();
@@ -351,11 +411,47 @@ mod tests {
         assert_eq!(grains.kind, 3);
         let y = |t: f32| grains.local(t).w_axis.y;
         assert!(y(grains.p[4] * 0.5) > y(0.0), "falls toward +y (down in furniture space)");
-        for g in GROUPS.len()..GROUPS.len() + 8 {
-            let a = by(g);
-            assert_eq!(a.kind, 2);
-            assert!(a.local(1.3).w_axis.truncate().length() < 0.1, "a drift, not a swim across the room");
+        let (tank_min, tank_max) = {
+            let m = &full[0].scene.meshes[0];
+            (glam::Vec3::from(m.min), glam::Vec3::from(m.max))
+        };
+        for bit in 0..8 {
+            let body = by(GROUPS.len() + bit);
+            assert_eq!(body.kind, 4);
+            let lap = body.p[0];
+            let (mut lo, mut hi) = (glam::Vec3::splat(f32::MAX), glam::Vec3::splat(f32::MIN));
+            for k in 0..200 {
+                let at = body.local(lap * k as f32 / 200.0).w_axis.truncate();
+                lo = lo.min(at);
+                hi = hi.max(at);
+                assert!(at.cmpgt(tank_min).all() && at.cmplt(tank_max).all(), "fish {bit} inside the tank: {at}");
+            }
+            assert!((hi - lo).max_element() > 0.6, "fish {bit} swims, not just drifts: {lo} {hi}");
+            if let Some(tail) = full.iter().find(|p| p.group == GROUPS.len() + 8 + bit).map(|p| p.anim) {
+                assert_eq!(tail.kind, 5);
+                let j = glam::Vec3::new(tail.p[4], 0.0, 0.0);
+                for t in [0.4f32, 3.3, 11.9] {
+                    let (bm, tm) = (body.local(t), tail.local(t));
+                    assert!((bm.transform_point3(j) - tm.transform_point3(j)).length() < 1e-4, "the joint holds");
+                    let tip = j - glam::Vec3::X * 0.1;
+                    let _ = (bm.transform_point3(tip) - tm.transform_point3(tip)).length();
+                }
+                let beat = (0..40)
+                    .map(|k| {
+                        let t = k as f32 * 0.05;
+                        let tip = j - glam::Vec3::X * 0.1;
+                        (body.local(t).transform_point3(tip) - tail.local(t).transform_point3(tip)).length()
+                    })
+                    .fold(0f32, f32::max);
+                assert!(beat > 0.01, "fish {bit}'s tail beats: {beat}");
+            }
         }
+        // the same maths as the tools' swim.py: Moonfin (bit 4) at 7.3 s
+        let (body, tail) = (by(GROUPS.len() + 4), by(GROUPS.len() + 8 + 4));
+        let b = body.local(7.3).transform_point3(glam::Vec3::new(0.1, 0.05, 0.02));
+        let t = tail.local(7.3).transform_point3(glam::Vec3::new(-0.4, 0.02, 0.03));
+        assert!((b - glam::Vec3::new(0.045_907, -1.348_229, -0.760_380)).length() < 2e-3, "body {b}");
+        assert!((t - glam::Vec3::new(0.529_529, -1.411_366, -0.817_873)).length() < 2e-3, "tail {t}");
     }
 
     #[test]
