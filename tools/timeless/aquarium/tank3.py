@@ -169,7 +169,9 @@ def group_tank():
             box(m, (min(x, x + d * 0.028), Y1 - 0.045, z - 0.018), (max(x, x + d * 0.028), Y1 - 0.015, z + 0.018), GILT)
     trim_box(m, (X0 - 0.18, Y1 + 0.105, Z0 - 0.18), (X1 + 0.18, CAP, Z1 + 0.18), OBSID, GILT, lines='b')
     # the lamp hood: a glowing panel under the cornice, inside
-    box(m, (X0 + 0.05, Y1 - 0.03, Z0 + 0.12), (X1 - 0.05, Y1 - 0.012, Z1 - 0.12), LAMP)
+    box(m, (X0 + 0.05, Y1 - 0.012, Z0 + 0.06), (X1 - 0.05, Y1, Z1 - 0.06), OBSID)
+    for zc in (Z0 + 0.3, Z1 - 0.35):
+        box(m, (X0 + 0.12, Y1 - 0.026, zc - 0.022), (X1 - 0.12, Y1 - 0.012, zc + 0.022), LAMP)
     # finials on the four corners
     for x in (X0 - 0.12, X1 + 0.12):
         for z in (Z0 - 0.12, Z1 + 0.12):
@@ -396,7 +398,7 @@ def material(part, uv, p, n):
         return dict(albedo=gilt(p, 40) * t + C('#0a0b12') * (1 - t), spec=1.2, gloss=70,
                     emit=np.tile(C('#6e5a2e'), (N, 1)) * t * 0.35)
     if part == LAMP:
-        return dict(albedo=np.tile(C('#dfe9ff'), (N, 1)), spec=0, emit=np.tile(C('#cfe0ff'), (N, 1)) * (0.08 + 1.6 * lit))
+        return dict(albedo=np.tile(C('#dfe9ff'), (N, 1)), spec=0, emit=np.tile(C('#cfe0ff'), (N, 1)) * (0.05 + 1.0 * lit))
     if part == RUIN:
         g = fbm(uv[:, 0] * 8, uv[:, 1] * 14)
         return dict(albedo=mix(C('#0e1220'), C('#222a3a'), g), spec=0.3, gloss=20, height=g)
