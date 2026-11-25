@@ -154,6 +154,9 @@ pub struct SavedLogin {
     pub saved_password: String,
     pub trust_computer: bool,
     pub trust_token: String,
+    /// Timeless XI: the account signs in with a one-time code (a login with one worked, or two-factor was turned on
+    /// here): the login form shows One-time code only then.
+    pub two_factor: bool,
     /// Fields of a newer client, kept as they are.
     #[serde(flatten)]
     pub unknown: serde_json::Map<String, serde_json::Value>,
@@ -760,12 +763,12 @@ impl Config {
     /// The form's login, first in the lists (after a login that worked, or a change to its Remember password).
     pub fn remember_login(&mut self) {
         let (server, username) = (self.server.trim().to_string(), self.username.trim().to_string());
-        // A newer client's fields of this login stay with it.
-        let unknown = self
+        // A newer client's fields of this login stay with it, and its two-factor mark.
+        let (unknown, two_factor) = self
             .logins
             .iter()
             .find(|o| same_server(&o.server, &server) && o.username == username)
-            .map(|o| o.unknown.clone())
+            .map(|o| (o.unknown.clone(), o.two_factor))
             .unwrap_or_default();
         let l = SavedLogin {
             server,
@@ -775,10 +778,23 @@ impl Config {
             saved_password: self.saved_password.clone(),
             trust_computer: self.trust_computer,
             trust_token: self.trust_token.clone(),
+            two_factor,
             unknown,
         };
         self.logins.retain(|o| !(same_server(&o.server, &l.server) && o.username == l.username));
         self.logins.insert(0, l);
+    }
+
+    /// Timeless XI: whether the form's account signs in with a one-time code (its saved login's mark).
+    pub fn two_factor(&self) -> bool {
+        self.saved_login(&self.server, Some(self.username.trim())).is_some_and(|l| l.two_factor)
+    }
+
+    /// Timeless XI: marks a saved login as signing in with a one-time code, or not.
+    pub fn set_two_factor(&mut self, server: &str, username: &str, on: bool) {
+        if let Some(l) = self.saved_login_mut(server, username) {
+            l.two_factor = on;
+        }
     }
 
     /// Drops a saved login (with its password); with no account, every login of the server.

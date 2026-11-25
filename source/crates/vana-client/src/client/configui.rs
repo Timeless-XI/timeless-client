@@ -290,12 +290,27 @@ impl Win {
 }
 
 /// What a step did.
+/// A server change from the title Config's Account page.
+#[derive(Clone, Debug, PartialEq)]
+pub enum AccountAct {
+    /// Server Type: PlayOnline (true) or Private.
+    Type(bool),
+    /// A server logged in to before.
+    Server(String),
+    /// A server not in the list: the login asks for its address.
+    Other,
+}
+
 #[derive(Default)]
 pub struct Out {
     pub sounds: Vec<Se>,
     /// Ids whose value changed (their effects run).
     pub changed: Vec<u16>,
     pub closed: bool,
+    /// The title's Config: Sign Out on its Account page (back to the login).
+    pub sign_out: bool,
+    /// The title's Config: another server type or server picked on its Account page (signs out to the login).
+    pub account: Option<AccountAct>,
     /// Enter on our Settings button or row.
     pub open_settings: bool,
     /// Enter on our Extras row.
@@ -387,6 +402,11 @@ pub struct ConfigUi {
     pub extra: super::configui2::Extra,
     /// Installed-content mask (DAT_10444110 + 0x10, not the server's) for lobycwin's title tracks.
     pub owned: u32,
+    /// The title's Config: the account signed in (its Account page).
+    pub account: String,
+    /// The title's Config: the server signed in to, and the servers logged in to before (not PlayOnline).
+    pub server: String,
+    pub servers: Vec<String>,
     /// Our Settings / Extras page is open over the windows (none of them has the hand).
     pub covered: bool,
     /// Opened in Monstrosity: Misc. 3's style lock rows are off.

@@ -75,7 +75,8 @@ impl Modern {
     }
 
     /// Timeless XI: the Timeless title's buttons, one row of text buttons low on the screen (`buttons` as
-    /// `title_buttons`): the glass, the label in the title serif, a steel-blue edge and soft glow on the lit one.
+    /// `title_buttons`), at `alpha` (they fade in as the login's actions hand over to them).
+    #[allow(clippy::too_many_arguments)]
     pub fn title_buttons_tl(
         &mut self,
         ctx: &Context,
@@ -83,49 +84,65 @@ impl Modern {
         scale: u32,
         ui_k: (f32, f32),
         buttons: &[([f32; 4], &str, bool, bool)],
+        alpha: f32,
     ) {
         self.zoom_to(ctx, window, scale);
         let k = ctx.pixels_per_point();
         let p =
             ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("timeless title buttons")));
         let hover = ctx.input(|i| i.pointer.hover_pos());
-        let focus = self.theme.color("focus");
         for (r, label, lit, on) in buttons {
             let rect = egui::Rect::from_min_size(
                 pos2(r[0] / (k * ui_k.0), r[1] / (k * ui_k.1)),
                 vec2(r[2] / (k * ui_k.0), r[3] / (k * ui_k.1)),
             );
             let hot = *on && hover.is_some_and(|h| rect.contains(h));
-            let face = if *lit || hot { "window_focused" } else { "window_normal" };
-            p.add(super::borders::window(self, face, rect));
-            if *lit {
-                for j in 1..=3 {
-                    let g = j as f32 * 2.0;
-                    p.rect_stroke(
-                        rect.expand(g),
-                        3.0 + g,
-                        egui::Stroke::new(1.5, focus.gamma_multiply(0.2 / j as f32)),
-                        egui::StrokeKind::Outside,
-                    );
-                }
-                p.rect_stroke(rect, 3.0, egui::Stroke::new(1.0, focus), egui::StrokeKind::Inside);
-            }
-            let c = if !on {
-                self.theme.color("muted")
-            } else if *lit {
-                self.theme.color("gold")
-            } else {
-                self.theme.color("text")
-            };
-            let size = (rect.height() * 0.42).clamp(self.theme.small, 24.0);
-            p.text(
-                rect.center() + vec2(0.0, 1.0),
-                Align2::CENTER_CENTER,
-                *label,
-                FontId::new(size, FontFamily::Name(super::theme::SERIF.into())),
-                c,
-            );
+            self.tl_tile(&p, rect, label, *lit, *on, hot, alpha);
         }
+    }
+
+    /// Timeless XI: one of the Timeless title's buttons: the glass, the label in the title serif, a steel-blue edge and
+    /// soft glow when lit; dimmed when it can't be used.
+    #[allow(clippy::too_many_arguments)]
+    fn tl_tile(&self, p: &egui::Painter, rect: egui::Rect, label: &str, lit: bool, on: bool, hot: bool, alpha: f32) {
+        let a = alpha.clamp(0.0, 1.0);
+        if a <= 0.0 {
+            return;
+        }
+        let focus = self.theme.color("focus");
+        let face = if lit || hot { "window_focused" } else { "window_normal" };
+        let mut shape = super::borders::window(self, face, rect);
+        if a < 1.0 {
+            shape = fade_shape(shape, a);
+        }
+        p.add(shape);
+        if lit {
+            for j in 1..=3 {
+                let g = j as f32 * 2.0;
+                p.rect_stroke(
+                    rect.expand(g),
+                    3.0 + g,
+                    egui::Stroke::new(1.5, focus.gamma_multiply(0.2 / j as f32 * a)),
+                    egui::StrokeKind::Outside,
+                );
+            }
+            p.rect_stroke(rect, 3.0, egui::Stroke::new(1.0, focus.gamma_multiply(a)), egui::StrokeKind::Inside);
+        }
+        let c = if !on {
+            self.theme.color("muted")
+        } else if lit {
+            self.theme.color("gold")
+        } else {
+            self.theme.color("text")
+        };
+        let size = (rect.height() * 0.42).clamp(self.theme.small, 24.0);
+        p.text(
+            rect.center() + vec2(0.0, 1.0),
+            Align2::CENTER_CENTER,
+            label,
+            FontId::new(size, FontFamily::Name(super::theme::SERIF.into())),
+            c.gamma_multiply(a),
+        );
     }
 
     /// The login form on the rects login_window placed (UI pixels): the frame, the labelled fields in the input art (the
@@ -151,7 +168,9 @@ impl Modern {
         p.add(super::borders::window(self, "window_normal", frame));
         let blink = (ctx.input(|i| i.time) * 2.0) as i64 % 2 == 0;
         // Text sized to the fields (the retail-sized form drew it far too small).
-        let size = v.fields.first().map_or(self.theme.small, |f| (pt(f.0).height() * 0.46).max(self.theme.small));
+        // Timeless XI: a size larger on the Timeless title.
+        let k_text = if self.theme.timeless() { 0.46 * TL_TEXT } else { 0.46 };
+        let size = v.fields.first().map_or(self.theme.small, |f| (pt(f.0).height() * k_text).max(self.theme.small));
         self.lobby_text.set(size);
         let font = FontId::proportional(size);
         for (i, (r, label, text, hint)) in v.fields.iter().enumerate() {
@@ -206,6 +225,15 @@ impl Modern {
         }
         let hover = ctx.input(|i| i.pointer.hover_pos());
         for (k, (r, label, enabled)) in v.buttons.iter().enumerate() {
+            // Timeless XI: the Timeless title's actions are tiles on the character menu's row.
+            if self.theme.timeless() {
+                let r = pt(*r);
+                let lit = v.focus == n + 1 + k && !v.busy;
+                let usable = *enabled && !v.busy;
+                let hot = usable && hover.is_some_and(|h| r.contains(h));
+                self.tl_tile(&p, r, label, lit, usable, hot, 1.0);
+                continue;
+            }
             let r = pt(*r).expand2(vec2(4.0, 3.0));
             let on = v.focus == n + 1 + k && !v.busy;
             let face = match () {
@@ -776,6 +804,11 @@ impl Modern {
         sw: f32,
     ) -> Out {
         self.zoom_to(ctx, window, scale);
+        // Timeless XI: the title's Settings (its Account page too) reads a size larger.
+        let sizes = (self.theme.ui, self.theme.small);
+        if self.theme.timeless() {
+            (self.theme.ui, self.theme.small) = (sizes.0 * TL_TEXT, sizes.1 * TL_TEXT);
+        }
         let mut layout = Default::default();
         let (mut changed, mut font) = (false, 15.0);
         let mut p = Panels {
@@ -801,9 +834,13 @@ impl Modern {
         };
         let out = super::config::lobby(&mut p, c, v, s, sw);
         *p.m.rects.borrow_mut() = std::mem::take(&mut p.this);
+        (self.theme.ui, self.theme.small) = sizes;
         out
     }
 }
+
+/// Timeless XI: the title's login and Settings text, larger than the theme's.
+const TL_TEXT: f32 = 1.15;
 
 /// A list row in the pack's art, lit on the cursor; its response.
 fn pick_row(ui: &mut Ui, m: &Modern, text: &str, on: bool, live: bool) -> egui::Response {
@@ -1427,4 +1464,28 @@ fn notes_layout(
         }
     }
     (items, y + size * 0.5)
+}
+
+/// Timeless XI: a shape (and what it holds) at `a` of its opacity.
+fn fade_shape(shape: egui::Shape, a: f32) -> egui::Shape {
+    let mut shape = shape;
+    let fade = |c: &mut Color32| *c = c.gamma_multiply(a);
+    match &mut shape {
+        egui::Shape::Vec(v) => {
+            let inner: Vec<egui::Shape> = std::mem::take(v).into_iter().map(|s| fade_shape(s, a)).collect();
+            *v = inner;
+        }
+        egui::Shape::Mesh(m) => {
+            let m = std::sync::Arc::make_mut(m);
+            for vx in &mut m.vertices {
+                fade(&mut vx.color);
+            }
+        }
+        egui::Shape::Rect(r) => {
+            fade(&mut r.fill);
+            fade(&mut r.stroke.color);
+        }
+        _ => {}
+    }
+    shape
 }
