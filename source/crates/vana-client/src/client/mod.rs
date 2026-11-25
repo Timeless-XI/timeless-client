@@ -165,6 +165,8 @@ mod textcmd;
 mod tilt;
 /// Timeless XI: the Timeless interface's own features (the hotbars).
 mod timeless;
+/// Timeless XI: the Timeless Aquarium, for the item and furniture tables (dat/items.rs, dat/furniture.rs).
+pub(crate) use timeless::aquarium;
 // Timeless XI: the title reel, for main.rs's reel-shot (tlreel.rs).
 pub(crate) use timeless::title as tl_title;
 mod timers;
@@ -19962,6 +19964,8 @@ fn world_prepare(cx: &mut WorldDraw, gfx: &Gfx, fg: &mut FrameGpu, w: &mut World
             r.set_furniture(&gfx.gpu, files);
         }
     }
+    // Timeless XI: the Timeless Aquarium's moving parts.
+    furniture::animate(w);
     // Pieces moved in place (layout mode).
     if let Some(r) = w.renderer.as_mut() {
         for (file, old, new) in std::mem::take(&mut w.furniture.moves) {
