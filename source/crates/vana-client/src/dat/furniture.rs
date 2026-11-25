@@ -76,6 +76,10 @@ impl FurnTable {
 
     /// FUN_101d31e0: the entry by item id, id - 0xc00 from 0xe00 on.
     pub fn entry(&self, item: u16) -> Option<Furn> {
+        // Timeless XI: the Timeless Aquarium has no entry in the retail table (client/timeless/aquarium.rs).
+        if item == crate::client::aquarium::ITEM {
+            return Some(crate::client::aquarium::FURN);
+        }
         let i = if item > 0xdff { item - 0xc00 } else { item };
         self.entries.get(i as usize).copied()
     }

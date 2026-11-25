@@ -3,6 +3,7 @@
 //! furnished room (FUN_100f9650), a flowerpot's plant above it (FUN_101cda60).
 
 use super::World;
+use super::timeless::aquarium;
 use crate::dat::DatIndex;
 use crate::dat::furniture::{Furn, FurnTable, model_file};
 use crate::dat::zone::{Keys, Placement, Texture};
@@ -66,6 +67,8 @@ pub struct Drawn {
     /// The box size (none for a plant) and the mesh triangles in model space.
     pub size: Option<Vec3>,
     pub local: Arc<Vec<[Vec3; 3]>>,
+    /// Timeless XI: a Timeless Aquarium part that moves (client/timeless/aquarium.rs), and the matrix it moves from.
+    pub anim: Option<(aquarium::Anim, glam::Mat4)>,
 }
 
 impl State {
@@ -207,6 +210,9 @@ fn move_in_place(w: &mut World, want: &[Key]) -> bool {
     for (k, d) in w.furniture.drawn.iter_mut().enumerate() {
         let Some((pos, yaw)) = place_of(d.key, &d.furn) else { continue };
         let m = matrix(if d.plant { pos - Vec3::new(0.0, 0.3, 0.0) } else { pos }, yaw);
+        if let Some((_, base)) = d.anim.as_mut() {
+            *base = m;
+        }
         if m != d.matrix {
             moves.push((d.file, d.matrix, m));
             d.matrix = m;
@@ -224,6 +230,27 @@ fn move_in_place(w: &mut World, want: &[Key]) -> bool {
     }
     w.furniture.want = want.to_vec();
     true
+}
+
+/// Timeless XI: the Timeless Aquarium's moving parts (client/timeless/aquarium.rs), once a frame: each part's
+/// matrix from where it stands and the time, sent as a move in place.
+pub fn animate(w: &mut World) {
+    let f = &mut w.furniture;
+    if f.applied != f.seq || !f.drawn.iter().any(|d| d.anim.is_some()) {
+        return;
+    }
+    let t = w.started.elapsed().as_secs_f32();
+    for (k, d) in f.drawn.iter_mut().enumerate() {
+        let Some((a, base)) = d.anim else { continue };
+        let m = base * a.local(t);
+        if m != d.matrix {
+            f.moves.push((d.file, d.matrix, m));
+            d.matrix = m;
+            if let Some(p) = f.pieces.get_mut(k) {
+                p.2 = m;
+            }
+        }
+    }
 }
 
 /// FUN_101d2b10's item types: furnishing 10, flowerpot 12 (mannequins, 14, are a race body: not drawn yet).
@@ -456,8 +483,20 @@ pub fn load(index: &DatIndex, keys: &Keys, seq: u64, want: &[Key], map: u16, flo
     // Per file: each piece's record, entry, place, and whether it is a plant.
     let mut by_file: BTreeMap<u32, Vec<((u8, u8), Furn, Vec3, f32, bool)>> = BTreeMap::new();
     let mut skinned = Vec::new();
+    // Timeless XI: Timeless Aquariums by fill (exdata byte 2, client/timeless/aquarium.rs).
+    let mut aquariums: BTreeMap<u8, Vec<((u8, u8), Furn, Vec3, f32, bool)>> = BTreeMap::new();
     for &(c, slot, item, ext) in want {
         let Some(f) = table.entry(item) else { continue };
+        if item == aquarium::ITEM {
+            if let Some((pos, yaw)) = place(&f, map, floor, ext[6] as i8, ext[7] as i8, ext[8] as i8, ext[9]) {
+                log::info!(
+                    "furniture {item:#x}: Timeless Aquarium, fish {:#010b}, {pos:?} yaw {yaw:.2}",
+                    aquarium::mask(&ext)
+                );
+                aquariums.entry(aquarium::mask(&ext)).or_default().push(((c, slot), f, pos, yaw, false));
+            }
+            continue;
+        }
         let Some(file) = model_file(f.model) else { continue };
         let Some((pos, yaw)) = place(&f, map, floor, ext[6] as i8, ext[7] as i8, ext[8] as i8, ext[9]) else {
             continue;
@@ -476,12 +515,26 @@ pub fn load(index: &DatIndex, keys: &Keys, seq: u64, want: &[Key], map: u16, flo
     }
     let mut files = Vec::new();
     let mut pieces = Vec::new();
-    for (file, places) in by_file {
+    // Each set of places with its scene: the DAT files', then ours (no 'init' scheduler, a file id no DAT has).
+    let dat_files = by_file.into_iter().map(|(file, places)| {
         let bytes = index.read(file);
         let init = bytes
             .as_ref()
             .is_ok_and(|b| crate::dat::chunks(b).is_ok_and(|c| c.iter().any(|c| c.kind == 0x07 && c.name() == "init")));
-        let scene = bytes.and_then(|b| crate::dat::zone::load_scene(keys, &b));
+        (file, init, places, bytes.and_then(|b| crate::dat::zone::load_scene(keys, &b)), None)
+    });
+    // A Timeless Aquarium is several groups (tank, moving parts, fish), each its own piece so it can move alone.
+    let mut ours = Vec::new();
+    for (mask, places) in aquariums {
+        match aquarium::parts(mask) {
+            Ok(parts) => ours.extend(parts.into_iter().map(|p| {
+                let anim = p.anim.moves().then_some(p.anim);
+                (aquarium::file_id(p.group, mask), false, places.clone(), Ok(p.scene), anim)
+            })),
+            Err(e) => log::warn!("Timeless Aquarium {mask:#010b}: {e:#}"),
+        }
+    }
+    for (file, init, places, scene, anim) in dat_files.chain(ours) {
         let mut scene = match scene {
             Ok(s) => s,
             Err(e) => {
@@ -511,7 +564,8 @@ pub fn load(index: &DatIndex, keys: &Keys, seq: u64, want: &[Key], map: u16, flo
             .collect();
         let local = Arc::new(scene.meshes[0].models.iter().flat_map(model_tris).collect::<Vec<_>>());
         for (p, &(key, furn, _, _, plant)) in scene.placements.iter().zip(&places) {
-            let size = (!plant)
+            // A moving part takes no room of its own (the tank's group has the footprint).
+            let size = (!plant && anim.is_none())
                 .then(|| Vec3::new(furn.size[0] as f32 * 0.6, furn.height as f32 * 0.01, furn.size[1] as f32 * 0.6));
             let matrix = glam::Mat4::from_cols_array_2d(&p.matrix());
             pieces.push(Drawn {
@@ -524,6 +578,7 @@ pub fn load(index: &DatIndex, keys: &Keys, seq: u64, want: &[Key], map: u16, flo
                 init,
                 size,
                 local: local.clone(),
+                anim: anim.map(|a| (a, matrix)),
             });
         }
         let geo = ZoneGeometry::build(&scene);

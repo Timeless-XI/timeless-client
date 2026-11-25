@@ -1,0 +1,72 @@
+name = "Timeless Artisan"
+version = "2.0.0"
+authors = ["TimelessXI"]
+description = "Crafting made easy (/artisan, or the Timeless menu): every recipe with your success, high-quality and skill-up chances, recipe search by name or material, Favorites, today's guild point items with a Craft button for the number still needed, a craft queue of up to 12 synths, and an account-wide crafting storage (crystals, clusters and materials) that crafting takes from, with Deposit all, Withdraw and auto-deposit. A small HUD window keeps the queue, Repeat and your favorites on screen. Needs the server's timeless_artisan module."
+permissions = ["packets.write"]
+
+[settings.hud]
+type = "bool"
+default = true
+label = "HUD Window"
+help = "The small Artisan window: what's crafting, Repeat, your favorites, storage and auto-deposit."
+
+[settings.key_artisan]
+type = "key"
+default = ""
+label = "Artisan Key"
+help = "A key that opens or closes the Artisan window."
+
+[settings.return_leftovers]
+type = "bool"
+default = true
+label = "Return Leftovers to Storage"
+help = "When a queue ends, materials it took from storage and didn't use go back into storage."
+
+[settings.deposit_satchel]
+type = "bool"
+default = true
+label = "Deposit From Mog Satchel"
+help = "Deposit all and an item's Deposit also take crafting materials from your Mog Satchel."
+
+[settings.deposit_sack]
+type = "bool"
+default = true
+label = "Deposit From Mog Sack"
+help = "Deposit all and an item's Deposit also take crafting materials from your Mog Sack."
+
+[settings.deposit_case]
+type = "bool"
+default = true
+label = "Deposit From Mog Case"
+help = "Deposit all and an item's Deposit also take crafting materials from your Mog Case."
+
+[settings.deposit_home]
+type = "bool"
+default = true
+label = "Deposit From Mog House Bags"
+help = "Deposit all and an item's Deposit also take from your Mog Safe, Storage and Locker (in your Mog House)."
+
+[settings.auto_bags]
+type = "bool"
+default = false
+label = "Auto-Deposit From Other Bags"
+help = "Auto-deposit also looks in your satchel, sack and case (as set above), not only your inventory."
+
+[commands.artisan]
+help = "Opens or closes Timeless Artisan."
+args = ""
+forms = [
+  { args = "recipes", help = "Opens the Recipes tab." },
+  { args = "favorites", help = "Opens your Favorites." },
+  { args = "guilds", help = "Opens today's guild items." },
+  { args = "storage", help = "Opens your crafting storage." },
+  { args = "queue", help = "Opens the craft queue and this session's log." },
+  { args = "hud", help = "Shows or hides the small HUD window." },
+  { args = "repeat", help = "Queues your last craft again." },
+  { args = "stop", help = "Stops the craft queue after the synth in progress." },
+  { args = "deposit", help = "Stores every crafting material in your bags." },
+]
+
+[commands.timelessartisan]
+help = "The same as /artisan."
+args = ""
