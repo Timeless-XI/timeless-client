@@ -91,6 +91,9 @@ impl Recorder {
                 "-i",
                 "-",
             ])
+            // Timeless XI: x264's 4:2:0 needs even sides; a window can be odd (1920 x 1009), which made ffmpeg refuse
+            // the whole recording. Trim the odd row / column.
+            .args(["-vf", "crop=trunc(iw/2)*2:trunc(ih/2)*2"])
             .args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"])
             .arg(&path)
             .stdin(std::process::Stdio::piped())

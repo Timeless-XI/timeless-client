@@ -14407,6 +14407,8 @@ impl App {
         }
         // Timeless XI: Director Mode's free camera flies on WASD, E / Page Up and Q / Page Down (Shift fast, Ctrl slow,
         // the arrows turn it); the character stays put meanwhile unless the window lets it walk too.
+        // Timeless XI: a take list dropped by a script (timeless/director.rs) films itself.
+        timeless::director::poll(world);
         if world.director.open {
             use KeyCode as Kc;
             let held = |k: &[Kc]| k.iter().any(|k| self.held_keys.contains(k));

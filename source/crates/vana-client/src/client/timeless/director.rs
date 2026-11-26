@@ -537,6 +537,43 @@ pub struct Director {
     pub pass: Option<crate::render::nostalgia::Nostalgia>,
     started: Instant,
     loaded: bool,
+    /// A take list being filmed by itself (`run`), and when the folder was last looked at for one.
+    pub run: Option<Run>,
+    polled: Option<Instant>,
+}
+
+/// A take list (`timeless-director\takes.json`, dropped there by a script): saved shots filmed one after another,
+/// zoning with the GM command `!zone` where a shot is set in another zone.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct TakeList {
+    /// Saved shots' names, in order.
+    pub takes: Vec<String>,
+    /// Seconds to wait after arriving in a zone (scenery and effects load), and between takes.
+    pub settle: Option<f32>,
+    pub fps: Option<u32>,
+}
+
+/// Where a take list is.
+#[derive(Clone, Debug)]
+pub struct Run {
+    pub list: TakeList,
+    pub index: usize,
+    pub stage: Stage,
+    pub at: Instant,
+    pub saved: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Stage {
+    /// `!zone` sent; waiting to arrive.
+    Zoning(u16),
+    /// In the zone: waiting for it to settle.
+    Settling,
+    /// The shot loaded: its time and weather taking hold.
+    Staging,
+    /// Recording while the shot plays.
+    Filming,
 }
 
 /// ffmpeg's state for video: not checked yet, checking, found, missing.
@@ -582,6 +619,8 @@ impl Default for Director {
             pass: None,
             started: Instant::now(),
             loaded: false,
+            run: None,
+            polled: None,
         }
     }
 }
@@ -712,6 +751,11 @@ pub fn open(w: &mut World) {
 }
 
 pub fn close(w: &mut World) {
+    if let Some(r) = w.director.run.take() {
+        let left = r.list.takes.len().saturating_sub(r.index);
+        super::angler::chat_note(w, &format!("Director: take list stopped ({left} takes not filmed)."));
+        let _ = std::fs::rename(shots_dir().join(RUNNING), shots_dir().join("takes.stopped.json"));
+    }
     stop_recording(w);
     let d = &mut w.director;
     d.save_prefs();
@@ -1273,6 +1317,10 @@ pub fn step(w: &mut World, dt: f32, input: FlyInput) {
     {
         w.director.recording = None;
         w.director.say("The recording stopped: is ffmpeg installed? Resizing the window also ends a recording.");
+        if w.director.run.is_some() {
+            super::angler::chat_note(w, "Director: a recording didn't start or stopped early (is ffmpeg installed? was the window resized?).");
+            close(w);
+        }
     }
     if w.director.note.as_ref().is_some_and(|n| n.1.elapsed().as_secs() > 8) {
         w.director.note = None;
@@ -1783,5 +1831,134 @@ mod tests {
         for (name, l) in look_presets().into_iter().skip(1) {
             assert!(!l.is_neutral(), "{name}");
         }
+    }
+}
+
+
+// ---------------------------------------------------------------------------------------------------------------
+// Take lists: a script drops `takes.json` in the shots folder; the client films every take on it by itself.
+
+const LIST: &str = "takes.json";
+const RUNNING: &str = "takes.running.json";
+
+/// Once a frame while in the world: looks for a take list (once a second) and moves a running one along.
+pub fn poll(w: &mut World) {
+    if w.director.run.is_none() {
+        if w.director.polled.is_some_and(|t| t.elapsed().as_secs_f32() < 1.0) || w.zone.is_none() {
+            return;
+        }
+        w.director.polled = Some(Instant::now());
+        let dir = shots_dir();
+        let Ok(text) = std::fs::read_to_string(dir.join(LIST)) else { return };
+        let _ = std::fs::rename(dir.join(LIST), dir.join(RUNNING));
+        let list: TakeList = match serde_json::from_str(&text) {
+            Ok(l) => l,
+            Err(e) => {
+                super::angler::chat_note(w, &format!("Director: couldn't read the take list: {e}"));
+                return;
+            }
+        };
+        if list.takes.is_empty() {
+            return;
+        }
+        use std::sync::atomic::Ordering;
+        open(w);
+        if w.director.ffmpeg.load(Ordering::Relaxed) == FF_MISSING {
+            super::angler::chat_note(w, "Director: the take list needs ffmpeg to record. Install it (winget install --id Gyan.FFmpeg -e) and restart Timeless XI.");
+            close(w);
+            return;
+        }
+        if let Some(fps) = list.fps {
+            w.director.prefs.fps = fps;
+        }
+        let n = list.takes.len();
+        super::angler::chat_note(w, &format!("Director: filming {n} takes by themselves. Hands off the keyboard and mouse; Ctrl+Shift+D stops."));
+        w.director.run = Some(Run { list, index: 0, stage: Stage::Settling, at: Instant::now(), saved: Vec::new() });
+        begin_take(w);
+        return;
+    }
+    let Some(run) = w.director.run.clone() else { return };
+    let settle = run.list.settle.unwrap_or(8.0).clamp(2.0, 60.0);
+    let waited = run.at.elapsed().as_secs_f32();
+    match run.stage {
+        Stage::Zoning(z) => {
+            if w.zone == Some(z) {
+                set_stage(w, Stage::Settling);
+            } else if waited > 40.0 {
+                super::angler::chat_note(w, &format!("Director: never reached zone {z}. The take list zones with !zone, which needs a GM character."));
+                close(w);
+            }
+        }
+        Stage::Settling if waited >= settle => {
+            let name = run.list.takes[run.index].clone();
+            load_shot(w, &name);
+            w.director.panel_hidden = true;
+            set_stage(w, Stage::Staging);
+        }
+        Stage::Staging if waited >= 3.0 => {
+            use std::sync::atomic::Ordering;
+            if w.director.ffmpeg.load(Ordering::Relaxed) == FF_MISSING {
+                super::angler::chat_note(w, "Director: the take list needs ffmpeg to record. Install it (winget install --id Gyan.FFmpeg -e) and restart Timeless XI.");
+                close(w);
+                return;
+            }
+            fire(w, Cue::RecordPath);
+            set_stage(w, Stage::Filming);
+        }
+        Stage::Filming if w.director.recording.is_none() && w.director.playing.is_none() && waited > 1.0 => {
+            let name = run.list.takes[run.index].clone();
+            if let Some(r) = w.director.run.as_mut() {
+                r.saved.push(name.clone());
+                r.index += 1;
+            }
+            super::angler::chat_note(w, &format!("Director: \"{name}\" filmed."));
+            let done = w.director.run.as_ref().is_some_and(|r| r.index >= r.list.takes.len());
+            if done {
+                let n = w.director.run.take().map_or(0, |r| r.saved.len());
+                let _ = std::fs::rename(shots_dir().join(RUNNING), shots_dir().join("takes.done.json"));
+                close(w);
+                let at = video_dir().display().to_string();
+                super::angler::chat_note(w, &format!("Director: all {n} takes are in {at}."));
+            } else {
+                begin_take(w);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn set_stage(w: &mut World, stage: Stage) {
+    if let Some(r) = w.director.run.as_mut() {
+        r.stage = stage;
+        r.at = Instant::now();
+    }
+}
+
+/// The next take: zones there first when its shot is set elsewhere.
+fn begin_take(w: &mut World) {
+    let Some(run) = w.director.run.as_ref() else { return };
+    let name = run.list.takes[run.index].clone();
+    let file = std::fs::read_to_string(shots_dir().join(format!("{name}.json"))).ok().and_then(|s| serde_json::from_str::<ShotFile>(&s).ok());
+    let Some(file) = file else {
+        super::angler::chat_note(w, &format!("Director: no saved shot \"{name}\"; skipping it."));
+        if let Some(r) = w.director.run.as_mut() {
+            r.index += 1;
+            if r.index >= r.list.takes.len() {
+                close(w);
+                return;
+            }
+        }
+        return begin_take(w);
+    };
+    // The camera back to the game's while travelling, the HUD and everyone hidden.
+    w.director.mode = GAME;
+    w.director.playing = None;
+    w.director.panel_hidden = true;
+    match file.zone {
+        Some(z) if w.zone != Some(z) => {
+            super::super::send_chat(w, format!("/say !zone {z}"));
+            set_stage(w, Stage::Zoning(z));
+        }
+        _ => set_stage(w, Stage::Settling),
     }
 }
