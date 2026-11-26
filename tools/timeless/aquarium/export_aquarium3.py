@@ -7,7 +7,10 @@ models as v1/v2. All in furniture space (-y up; origin = the middle of the 6 x 4
   kind 0 none; 1 spin (pivot xyz, axis xyz, period s); 3 fall (direction xyz, spacing, period s);
   4 swim (the body), 5 swim (the tail fin): lap s, start (0-1), sway rad, beat Hz, joint x, wag rad, wag lag rad,
   samples n, then n x (x, y, z, yaw, pitch, roll) at even time steps of one lap (swim.py).
-Groups: tank, crown, hgcrystal, grains, fish0..fish7 and their tails fish0t..fish7t (rimecoil has no tail).
+  6 slither (one segment of the eel): kind 4's parameters, then dt (s behind on the path), wave amplitude, wave
+  phase, wave slope.
+Groups: tank, crown, hgcrystal, grains, fish0..fish7 and their tails fish0t..fish7t; Rimecoil (bit 5) is
+fish5s0..fish5s11 instead, its segments from tail to head.
 Variants: 0 always; 1 lit (1+ fish) / 2 dark (none); 3 crown off (none) / 4 dim (1-7) / 5 full (all 8).
 """
 import struct, sys
@@ -120,7 +123,34 @@ def tank_group(gname, mesh, anim):
     return anim_header(anim) + struct.pack('<I', len(models)) + b''.join(models)
 
 
+def eel_entries(bit, name):
+    segs, mat, xh, length = T.eel_segments(name)
+    spec = swim.PATHS[name]
+    smp = swim.samples(spec, K, FLOOR)
+    out = []; prms = []
+    for k, (mesh, xc) in enumerate(segs):
+        prm = swim.eel_params(spec, smp, xc, xh, length, K)
+        P, N, UV, Tr, part, layer = mesh
+        models = []; tris = 0
+        for pid, lay, p, n, uv, tri in split(P, N, UV, Tr, part, layer):
+            W, H = (128, 64) if pid == 0 else (64, 32) if lay == 1 else (32, 32)
+            rgba, tuv = bake(p + [xc, 0, 0], n, uv, tri, mat, pid, W, H)
+            tex = f'tlqf{bit}s{k}_{pid}'
+            TEX[tex] = png(rgba)
+            col = vcol(p, n, pid, 1.0, lay == 1, fish=True)
+            fp, fn = to_f(p, n, floor=False)
+            blend = 0x2000 | (0x8000 if (rgba[..., 3] < 250).any() else 0)
+            models.append(model_bytes(tex, blend, 0, fp, fn, col, tuv.astype(np.float32), tri))
+            tris += len(tri)
+        out.append((0, f'fish{bit}s{k}', header(6, prm) + struct.pack('<I', len(models)) + b''.join(models)))
+        prms.append(prm)
+    print(f'fish{bit} {name}: {len(segs)} segments', flush=True)
+    return out, prms
+
+
 def fish_entries(bit, name):
+    if 'eel' in swim.PATHS[name]:
+        return eel_entries(bit, name)
     body, tail, mat, jx = T.fish_mesh(name)
     spec = swim.PATHS[name]
     smp = swim.samples(spec, K, FLOOR)
@@ -181,6 +211,9 @@ def bundle():
     for tail in (False, True):
         M = swim.matrix(prms['moonfin'], 7.3, tail)
         print('moonfin', 'tail' if tail else 'body', np.round(M, 5).tolist())
+    for k in (0, 7):
+        M = swim.matrix(prms['rimecoil'][k], 9.1, kind=6)
+        print('rimecoil seg', k, (M @ [0.02, 0.01, 0.0, 1.0])[:3].round(6).tolist())
 
 
 if __name__ == '__main__':

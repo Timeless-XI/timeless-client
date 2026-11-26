@@ -1,6 +1,6 @@
 import numpy as np, swim, importlib, tank2 as T
 SIZE = {'barbel': (0.70, 0.11), 'oreeater': (0.6, 0.08), 'whiskerwise': (0.69, 0.07), 'admiral': (0.67, 0.11),
-        'moonfin': (0.62, 0.09), 'rimecoil': (0.5, 0.07), 'herald': (0.96, 0.07), 'siren': (0.6, 0.1)}   # length, radius
+        'moonfin': (0.62, 0.09), 'rimecoil': (0.9, 0.06), 'herald': (0.96, 0.07), 'siren': (0.6, 0.1)}   # length, radius
 X, Y1, Z = 1.5, 1.3, 0.95
 HG_R, HG_TOP, HG_Z = 0.25, 0.9, -0.62
 
