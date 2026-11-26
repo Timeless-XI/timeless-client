@@ -15,12 +15,15 @@
 //!   phase, yaw degrees); 3 fall (direction xyz, spacing, period s): a looped slide by one spacing; 4 swim (a
 //!   fish's body) and 5 swim with a beating tail (its tail fin): lap s, start (0-1), sway rad, beat Hz, tail joint
 //!   x, wag rad, wag lag rad, sample count n, then n samples (x, y, z, yaw, pitch, roll) evenly spaced in time over
-//!   one lap (the Elder fish tools' `swim.py`, which this must match).
+//!   one lap (the Elder fish tools' `swim.py`, which this must match); 6 slither (one segment of an eel): kind 4's
+//!   parameters (sway and wag off), then dt (how many seconds behind it follows the path), wave amplitude, wave
+//!   phase and wave slope, so the segments trail each other round the loop with a wave running down the body.
 //! - Variant: 0 always; 1 lit (1+ fish) / 2 dark (none); crown and finials 3 off (none) / 4 dim (1-7) / 5 full
 //!   (all 8).
 //! - Groups: `tank` (the cabinet, night sky, sand, ruins, kelp, the hourglass), `crown` (the star crystal on the
 //!   crest, spins), `hgcrystal` (the hourglass's star crystal, spins), `grains` (falling sand), `fish0`..`fish7`
-//!   (each swims its own loop round the tank) and `fish0t`..`fish7t` (their tail fins). The PNGs by texture name;
+//!   (each swims its own loop round the tank) and `fish0t`..`fish7t` (their tail fins); Rimecoil, the eel (bit 5),
+//!   is `fish5s0`..`fish5s11` instead, its segments from tail to head, so the whole body slithers. The PNGs by texture name;
 //!   `icon32` the item icon in the item DAT layout (dat/items.rs `icon_rgba`).
 //!
 //! Model space is furniture space: origin at the middle of the 6 x 4 footprint on the floor, -y up.
@@ -67,7 +70,7 @@ impl Anim {
         let need = match self.kind {
             1 | 2 => 7,
             3 => 5,
-            4 | 5 => 8,
+            4 | 5 | 6 => 8,
             _ => 0,
         };
         if p.len() < need {
@@ -88,6 +91,7 @@ impl Anim {
             }
             3 if p[4] != 0.0 => Mat4::from_translation(Vec3::new(p[0], p[1], p[2]) * p[3] * (t / p[4]).rem_euclid(1.0)),
             4 | 5 if p[0] > 0.0 => swim(p, t, self.kind == 5),
+            6 if p[0] > 0.0 => slither(p, t),
             _ => Mat4::IDENTITY,
         }
     }
@@ -95,6 +99,22 @@ impl Anim {
     pub fn moves(&self) -> bool {
         self.kind != 0
     }
+}
+
+/// One segment of an eel at `t` (kind 6): where the path had it `dt` seconds ago, shifted sideways by a wave that runs
+/// from head to tail and turned to follow the wave's slope: `swim(t - dt) * T(0, 0, a sin w) * Ry(-atan(s cos w))`,
+/// with `w = 2 pi beat t - phase`.
+fn slither(p: &[f32], t: f32) -> glam::Mat4 {
+    use glam::{Mat4, Vec3};
+    let n = p[7] as usize;
+    let Some(e) = p.get(8 + n * 6..8 + n * 6 + 4) else {
+        return Mat4::IDENTITY;
+    };
+    let (dt, amp, phase, slope) = (e[0], e[1], e[2], e[3]);
+    let w = std::f32::consts::TAU * p[3] * t - phase;
+    swim(p, t - dt, false)
+        * Mat4::from_translation(Vec3::new(0.0, 0.0, amp * w.sin()))
+        * Mat4::from_rotation_y(-(slope * w.cos()).atan())
 }
 
 /// A fish on its loop at `t` (kinds 4 and 5): the samples interpolated, then its body's sway, and for the tail
@@ -287,6 +307,12 @@ pub struct Part {
     pub scene: ZoneScene,
 }
 
+/// The most segments an eel can have, and the group number of segment `k` of fish `bit` (after the bodies and tails).
+pub const SEGMENTS: usize = 16;
+pub fn segment_group(bit: usize, k: usize) -> usize {
+    GROUPS.len() + 16 + bit * SEGMENTS + k
+}
+
 /// The groups of a fill: the tank and its moving parts, then the fish of `mask` (each body, then its tail fin
 /// when it has one). Group numbers: the tank's groups, then fish n's body at `GROUPS.len() + n`, its tail at
 /// `GROUPS.len() + 8 + n`.
@@ -295,10 +321,21 @@ pub fn parts(mask: u8) -> Result<Vec<Part>> {
     let want = variants(mask);
     let mut names: Vec<(String, usize)> = GROUPS.iter().enumerate().map(|(k, g)| (g.to_string(), k)).collect();
     for bit in (0..8).filter(|bit| mask & (1 << bit) != 0) {
-        names.push((format!("fish{bit}"), GROUPS.len() + bit));
+        let body = format!("fish{bit}");
+        if b.meshes.contains_key(&body) || !b.meshes.contains_key(&format!("fish{bit}s0")) {
+            names.push((body, GROUPS.len() + bit));
+        }
         let tail = format!("fish{bit}t");
         if b.meshes.contains_key(&tail) {
             names.push((tail, GROUPS.len() + 8 + bit));
+        }
+        // an eel's segments
+        for k in 0..SEGMENTS {
+            let seg = format!("fish{bit}s{k}");
+            if !b.meshes.contains_key(&seg) {
+                break;
+            }
+            names.push((seg, segment_group(bit, k)));
         }
     }
     let mut out = Vec::new();
@@ -368,7 +405,12 @@ mod tests {
         assert!(t.iter().any(|n| n.starts_with("tlqf4t_")), "the tail fin is its own group");
         assert!(t.iter().any(|n| n.starts_with("tlqcrow") && n.ends_with("_4")), "crown dim with some fish");
         let full = parts(0xff).unwrap();
-        assert_eq!(full.len(), GROUPS.len() + 8 + 7, "Rimecoil swims without a tail fin of its own");
+        assert_eq!(full.len(), GROUPS.len() + 7 + 7 + 12, "Rimecoil is twelve segments, not a body and a tail");
+        let eel = parts(1 << 5).unwrap();
+        assert_eq!(eel.len(), GROUPS.len() + 12);
+        assert!(
+            eel[GROUPS.len()..].iter().enumerate().all(|(k, p)| p.group == segment_group(5, k) && p.anim.kind == 6)
+        );
         assert!(textures(&full).iter().any(|n| n.starts_with("tlqcrow") && n.ends_with("_5")), "crown full at eight");
         let mut ids: Vec<_> = full.iter().map(|p| p.group).collect();
         ids.sort();
@@ -415,7 +457,7 @@ mod tests {
             let m = &full[0].scene.meshes[0];
             (glam::Vec3::from(m.min), glam::Vec3::from(m.max))
         };
-        for bit in 0..8 {
+        for bit in (0..8).filter(|&bit| bit != 5) {
             let body = by(GROUPS.len() + bit);
             assert_eq!(body.kind, 4);
             let lap = body.p[0];
@@ -446,12 +488,45 @@ mod tests {
                 assert!(beat > 0.01, "fish {bit}'s tail beats: {beat}");
             }
         }
+        // Rimecoil slithers: its segments stay a body length together round the whole lap, each inside the tank,
+        // and a segment swings from side to side as the wave runs down it
+        let segs: Vec<_> = (0..12).map(|k| by(segment_group(5, k))).collect();
+        let lap = segs[0].p[0];
+        for k in 0..100 {
+            let t = lap * k as f32 / 100.0;
+            let at: Vec<glam::Vec3> = segs.iter().map(|a| a.local(t).w_axis.truncate()).collect();
+            for w in at.windows(2) {
+                assert!((w[1] - w[0]).length() < 0.15, "segments hold together at {t}: {}", (w[1] - w[0]).length());
+            }
+            assert!(at.iter().all(|a| a.cmpgt(tank_min).all() && a.cmplt(tank_max).all()), "the eel inside the tank");
+            let span = (at[11] - at[0]).length();
+            assert!(span > 0.6 && span < 1.0, "head to tail about its length: {span}");
+        }
+        let tail = segs[0];
+        let side = |t: f32| {
+            let base = slither_base(tail, t);
+            (base.inverse() * tail.local(t)).w_axis.z
+        };
+        let swing =
+            (0..40).map(|k| side(k as f32 * 0.05)).fold((f32::MAX, f32::MIN), |(lo, hi), z| (lo.min(z), hi.max(z)));
+        assert!(swing.1 - swing.0 > 0.05, "the tail swings side to side: {swing:?}");
+        // the same maths as swim.py: segments 0 and 7 at 9.1 s
+        let s0 = segs[0].local(9.1).transform_point3(glam::Vec3::new(0.02, 0.01, 0.0));
+        let s7 = segs[7].local(9.1).transform_point3(glam::Vec3::new(0.02, 0.01, 0.0));
+        assert!((s0 - glam::Vec3::new(0.940_679, -1.649_565, -0.579_681)).length() < 2e-3, "segment 0 {s0}");
+        assert!((s7 - glam::Vec3::new(1.009_693, -1.643_569, -0.009_225)).length() < 2e-3, "segment 7 {s7}");
         // the same maths as the tools' swim.py: Moonfin (bit 4) at 7.3 s
         let (body, tail) = (by(GROUPS.len() + 4), by(GROUPS.len() + 8 + 4));
         let b = body.local(7.3).transform_point3(glam::Vec3::new(0.1, 0.05, 0.02));
         let t = tail.local(7.3).transform_point3(glam::Vec3::new(-0.4, 0.02, 0.03));
         assert!((b - glam::Vec3::new(0.045_907, -1.348_229, -0.760_380)).length() < 2e-3, "body {b}");
         assert!((t - glam::Vec3::new(0.529_529, -1.411_366, -0.817_873)).length() < 2e-3, "tail {t}");
+    }
+
+    /// A segment's place on the path, before its wave.
+    fn slither_base(a: Anim, t: f32) -> glam::Mat4 {
+        let n = a.p[7] as usize;
+        super::swim(a.p, t - a.p[8 + n * 6], false)
     }
 
     #[test]

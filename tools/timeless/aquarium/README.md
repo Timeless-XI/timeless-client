@@ -33,8 +33,8 @@ v3 files:
 
 | File | What it is |
 | --- | --- |
-| `tank3.py` | The 6 x 4 show piece: gilt-trimmed charcoal cabinet, fluted columns, cornice with the "ELDERS OF THE DEEP" frieze and dentils, finials, sunburst crest, lamp hood, scrollwork stand on bun feet, night sky with the logo's landmark and light shafts, the hourglass at the back; the fish split into body and tail fin. |
-| `swim.py` | Each fish's loop (four layers, two fish each, never touching), sampled for the client (anim kinds 4 / 5), and the same matrix maths as the client's `Anim::local`. |
+| `tank3.py` | The 6 x 4 show piece: gilt-trimmed charcoal cabinet, fluted columns, cornice with the "ELDERS OF THE DEEP" frieze and dentils, finials, sunburst crest, lamp hood, scrollwork stand on bun feet, night sky with the logo's landmark and light shafts, the hourglass at the back; the fish split into body and tail fin; `eel_segments` cuts a straight Rimecoil (`fish_rimecoil.STRAIGHT`) into 12 segments. |
+| `swim.py` | Each fish's loop (four layers, two fish each, never touching), sampled for the client (anim kinds 4 / 5), and the same matrix maths as the client's `Anim::local`. Rimecoil slithers: `eel_params` gives each of its 12 segments (kind 6) a time lag along the path and a wave running from head to tail. |
 | `swimcheck.py` | Simulates ten minutes of swimming and reports any fish touching another, a wall or the hourglass. |
 | `export_aquarium3.py` | Bundle version 3: u16 parameter count per group (the swim samples), fish exported centred, facing +x. |
 | `make_aq_icon3.py`, `gif3.py` | The item icon and the swimming preview. |
