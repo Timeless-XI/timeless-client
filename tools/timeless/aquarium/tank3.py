@@ -32,6 +32,7 @@ FLOOR = -0.515         # the bottom of the feet
 CAP = Y1 + 0.17        # top of the cornice
 SCALE = {'barbel': 0.68, 'oreeater': 0.64, 'whiskerwise': 0.63, 'admiral': 0.64, 'moonfin': 0.68, 'rimecoil': 0.6,
          'herald': 0.7, 'siren': 0.62}
+SCALE['rimecoil'] = 0.66      # the straight eel: about 0.92 long
 
 
 # ----------------------------------------------------------------------------- helpers
@@ -282,6 +283,38 @@ def fish_mesh(name):
     return body_mesh, tail_mesh, mod.material, joint
 
 
+def eel_segments(name='rimecoil'):
+    """The straight eel cut across its length into segments: [(mesh centred on the segment, segment centre x)],
+    the material, the head end x and the body length (tank units, already scaled)."""
+    mod = importlib.import_module('fish_' + name)
+    mod.STRAIGHT = True
+    (P, N, UV, T, part, layer), b = mod.build()
+    mod.STRAIGHT = False
+    s = SCALE[name]
+    body = part == fishlib.BODY
+    used = np.unique(T[body]); lo, hi = P[used].min(0), P[used].max(0)
+    c = np.array([(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, 0.0])
+    P = (P - c) * s
+    xh, xt = (hi[0] - c[0]) * s, (lo[0] - c[0]) * s
+    nseg = swim.PATHS[name]['eel']['segments']
+    edges = np.linspace(xt, xh, nseg + 1)
+    cx = P[T].mean(1)[:, 0]
+    out = []
+    for k in range(nseg):
+        a, b2 = edges[k], edges[k + 1]
+        ov = (b2 - a) * 0.12
+        sel = np.where(body, (cx >= a - ov) & (cx < b2 + ov), (cx >= a) & (cx < b2))
+        if k == 0:
+            sel |= cx < a
+        if k == nseg - 1:
+            sel |= cx >= b2
+        tris = T[sel]; u = np.unique(tris)
+        remap = -np.ones(len(P), int); remap[u] = np.arange(len(u))
+        xc = (a + b2) / 2
+        out.append(((P[u] - [xc, 0, 0], N[u], UV[u], remap[tris], part[sel], layer[sel]), xc))
+    return out, mod.material, xh, xh - xt
+
+
 def PATH_SPEC(name):
     return swim.PATHS[name]
 
@@ -453,6 +486,14 @@ def scene(names, t=0.0):
         mm, anim = fn()
         out.append((mm.build(), anim, None))
     for nm in names:
+        if 'eel' in swim.PATHS[nm]:
+            segs, fmat, xh, ln = eel_segments(nm)
+            spec = swim.PATHS[nm]; smp = swim.samples(spec, 1.0, 0.0)
+            for mesh, xc in segs:
+                p = swim.eel_params(spec, smp, xc, xh, ln, 1.0)
+                S = np.diag([1.0, -1, -1, 1])
+                out.append((mesh, ('mat', S @ swim.matrix(p, t, kind=6) @ S), (fmat, nm)))
+            continue
         body, tail, fmat, jx = fish_mesh(nm)
         p = swim.params(swim.PATHS[nm], swim.samples(swim.PATHS[nm], 1.0, 0.0), jx)
         for mesh, is_tail in ((body, False), (tail, True)):
