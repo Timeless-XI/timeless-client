@@ -17,7 +17,7 @@ pub const TIMELESS_CLIENT: &str = "timelessxi";
 /// TimelessXI: this build's number, raised with each release. The server can turn away builds below its minimum
 /// (TIMELESS_CLIENT_MIN_BUILD), which is how a required update is enforced. The crate's version ends in
 /// "-timeless.<this>" (Cargo.toml), so the release tag and the updater agree with it.
-pub const TIMELESS_BUILD: u32 = 13;
+pub const TIMELESS_BUILD: u32 = 14;
 /// The most of a login reply taken before giving up: xi_connect's replies are a few hundred bytes of JSON.
 const MAX_REPLY: usize = 64 * 1024;
 

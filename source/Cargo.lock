@@ -4603,7 +4603,7 @@ dependencies = [
 
 [[package]]
 name = "vana-client"
-version = "1.0.14-timeless.13"
+version = "1.0.14-timeless.14"
 dependencies = [
  "ab_glyph",
  "anyhow",
