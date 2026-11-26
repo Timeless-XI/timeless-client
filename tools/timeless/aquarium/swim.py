@@ -40,7 +40,10 @@ PATHS = {
     'moonfin':     dict(shape='loop',  c=(0.0, 0.83, 0.27),    A=1.0, R=0.45, lap=34, start=0.0,  dir=1,  rise=0.03,  k=2, wob=0.25, beat=0.6, sway=4, wag=16),
     'barbel':      dict(shape='loop',  c=(0.0, 0.83, 0.27),    A=1.0, R=0.45, lap=34, start=0.5,  dir=1,  rise=0.02,  k=3, wob=0.25, beat=1.1, sway=4, wag=22),
     'herald':      dict(shape='loop',  c=(0.0, 1.1, 0.05),  A=1.0, R=0.58, lap=40, start=0.25, dir=-1, rise=0.025, k=2, wob=0.2, beat=0.7, sway=3, wag=14),
-    'rimecoil':    dict(shape='loop',  c=(0.0, 1.1, 0.05),  A=1.0, R=0.58, lap=40, start=0.75, dir=-1, rise=0.025, k=3, wob=0.2, beat=0.5, sway=6, wag=0),
+    # Rimecoil slithers: a straight eel cut into segments, each following the path a little behind the one before,
+    # with a wave running down the body (kind 6). Same lap and no speed changes, so the segments hold together.
+    'rimecoil':    dict(shape='loop',  c=(0.0, 1.1, 0.05),  A=1.0, R=0.58, lap=40, start=0.75, dir=-1, rise=0.02, k=2, wob=0.0, beat=0.75, sway=0, wag=0,
+                        eel=dict(segments=12, amp=0.07, wavelength=0.8)),
 }
 
 
@@ -114,8 +117,30 @@ def params(spec, smp, joint_x):
             np.radians(spec['wag']), 1.2, float(len(smp))] + smp.reshape(-1).astype(float).tolist()
 
 
-def matrix(p, t, tail=False):
-    """Furniture-space 4x4 at t for a kind-4 parameter list (the client's Anim::local)."""
+def eel_params(spec, smp, xc, xhead, length, K):
+    """Kind 6 for one eel segment centred at body x = xc (tank units; the head end at xhead): the swim parameters
+    with the sway and wag off, then: dt (how far behind in time it follows the path), wave amplitude, wave phase,
+    wave slope (all furniture units / radians)."""
+    P, s, lap_len = lap_points(spec)
+    e = spec['eel']
+    u = (xhead - xc) / length                                  # 0 at the head, 1 at the tail
+    dt = -xc * spec['lap'] / lap_len                           # follows the path: behind the centre for xc < 0
+    amp = e['amp'] * (0.2 + 0.8 * u) * K
+    lam = e['wavelength'] * length * K
+    phase = 2 * np.pi * (xhead - xc) * K / lam
+    slope = amp * 2 * np.pi / lam
+    prm = [float(spec['lap']), float(spec['start']), 0.0, float(spec['beat']), 0.0, 0.0, 0.0, float(len(smp))]
+    return prm + smp.reshape(-1).astype(float).tolist() + [float(dt), float(amp), float(phase), float(slope)]
+
+
+def matrix(p, t, tail=False, kind=None):
+    """Furniture-space 4x4 at t for a kind-4/5/6 parameter list (the client's Anim::local)."""
+    kind = kind or (5 if tail else 4)
+    if kind == 6:
+        n = int(p[7]); dt, amp, ph, slope = p[8 + 6 * n: 12 + 6 * n]
+        w = 2 * np.pi * p[3] * t - ph
+        return matrix(p, t - dt, kind=4) @ tr((0, 0, amp * np.sin(w))) @ ry(-np.arctan(slope * np.cos(w)))
+    tail = kind == 5
     period, phase, sway_a, beat, jx, wag_a, lag, n = p[:8]
     n = int(n); S = np.asarray(p[8:8 + 6 * n], float).reshape(n, 6)
     x = ((t / period + phase) % 1.0) * n

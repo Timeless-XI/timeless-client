@@ -1,7 +1,12 @@
 from fishlib import *
 
 
+STRAIGHT = False   # the aquarium (v3) cuts a straight Rimecoil into segments that slither along its path
+
+
 def spine(u):
+    if STRAIGHT:
+        return np.stack([-0.7 + 1.4 * u, 0.012 * np.clip(u - 0.85, 0, 1) * 6, np.zeros_like(u)], -1)
     # a loose S-coil, mostly in the horizontal plane with a rising head
     x = -0.55 + 1.1 * u
     y = 0.13 * np.sin(u * 2 * np.pi * 1.15 + 0.3) * (0.35 + 0.65 * (1 - u)) + 0.06 * np.clip(u - 0.8, 0, 1) * 5
