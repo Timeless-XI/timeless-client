@@ -3580,6 +3580,8 @@ pub fn hide(w: &World, out: &mut HashSet<u32>) {
     if let Some(id) = moogle_gone(w) {
         out.insert(id);
     }
+    // Timeless XI: whoever Director Mode hides (timeless/director.rs).
+    super::timeless::director::hide(w, out);
 }
 
 /// `hidden(w).contains(&id)` for one actor, without building the set.

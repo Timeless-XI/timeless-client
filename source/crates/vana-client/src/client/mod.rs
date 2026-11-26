@@ -3133,6 +3133,8 @@ fn world_hud(
                 egui::Key::V if modifiers.ctrl && modifiers.alt && modifiers.shift => voicechat::toggle(world),
                 // The auto-translate list takes its keys first (FUN_101b5d10).
                 k if world.typing && world.fep.is_some() && fep::key(world, *k, modifiers.shift) => {}
+                // Timeless XI: Director Mode's Ctrl+Shift keys (timeless/director.rs), with the chat line closed.
+                k if !world.typing && timeless::director::key(world, physical_key.unwrap_or(*k), *modifiers) => {}
                 // Ours: Tab on a command's name completes it (cmdhint.rs); elsewhere the auto-translate list.
                 egui::Key::Tab if world.typing && cmdhint::tab(world, modifiers.shift) => {}
                 egui::Key::Tab if world.typing => fep::open(world),
@@ -8096,6 +8098,8 @@ struct World {
     tl_cam: timeless::title::CamState,
     /// Timeless XI: custom looks (timeless/looks.rs): our recoloured face and the Appearance window.
     looks: timeless::looks::Looks,
+    /// Timeless XI: Director Mode, the filming toolkit (timeless/director.rs, the window in modern/tldirector.rs).
+    director: timeless::director::Director,
     /// Config `modern_condense` (with `modern`): an action's battle lines merge (combat::condense).
     condense: bool,
     /// The lines later records of their action merge into, and the last action's serial.
@@ -9087,6 +9091,8 @@ pub struct App {
     tasks_tx: Sender<Task>,
     tasks: Receiver<Task>,
     keys: HashSet<KeyCode>,
+    /// Timeless XI: the keys held down now (Director Mode's free camera reads them).
+    held_keys: HashSet<KeyCode>,
     dragging: bool,
     left_down: bool,
     middle_down: bool,
@@ -9458,6 +9464,7 @@ impl App {
             tasks_tx,
             tasks,
             keys: HashSet::new(),
+            held_keys: HashSet::new(),
             dragging: false,
             left_down: false,
             middle_down: false,
@@ -10844,6 +10851,7 @@ impl App {
                             angler: Default::default(),
                             tl_cam: Default::default(),
                             looks: Default::default(),
+                            director: Default::default(),
                             condense: self.cfg.modern_condense,
                             condensed: Vec::new(),
                             condensed_targets: Vec::new(),
@@ -13121,8 +13129,11 @@ impl App {
                         world.weather_chain.push((w, Instant::now(), secs));
                     }
                     world.weather = w;
-                    // One Vana'diel minute is 2.4 s (FUN_101804d0's duration is u16 @0x0a x 3600 units).
-                    world.effects.set_weather(crate::dat::weather::weather_tag(w), minutes as f32 * 2.4);
+                    // One Vana'diel minute is 2.4 s (FUN_101804d0's duration is u16 @0x0a x 3600 units). Not while
+                    // Director Mode holds a weather of its own (it puts the server's back when it lets go).
+                    if timeless::director::weather(world).is_none() {
+                        world.effects.set_weather(crate::dat::weather::weather_tag(w), minutes as f32 * 2.4);
+                    }
                 }
                 NetEvent::Assist { player, target: t } => target::assist(world, player, t),
                 // FUN_10098710: tables 0..7 only; the owned bits, then the seen bits (keyitems::Seen).
@@ -14394,6 +14405,28 @@ impl App {
         if world.tl_fish.active() {
             (ax, ay) = (0.0, 0.0);
         }
+        // Timeless XI: Director Mode's free camera flies on WASD, E / Page Up and Q / Page Down (Shift fast, Ctrl slow,
+        // the arrows turn it); the character stays put meanwhile unless the window lets it walk too.
+        if world.director.open {
+            use KeyCode as Kc;
+            let held = |k: &[Kc]| k.iter().any(|k| self.held_keys.contains(k));
+            let axis = |a: &[Kc], b: &[Kc]| held(a) as i32 as f32 - held(b) as i32 as f32;
+            let fly = timeless::director::FlyInput {
+                forward: axis(&[Kc::KeyW], &[Kc::KeyS]),
+                right: axis(&[Kc::KeyD], &[Kc::KeyA]),
+                up: axis(&[Kc::KeyE, Kc::PageUp], &[Kc::KeyQ, Kc::PageDown]),
+                fast: held(&[Kc::ShiftLeft, Kc::ShiftRight]),
+                slow: held(&[Kc::ControlLeft, Kc::ControlRight]),
+                turn: axis(&[Kc::ArrowRight], &[Kc::ArrowLeft]),
+                tilt: axis(&[Kc::ArrowUp], &[Kc::ArrowDown]),
+            };
+            timeless::director::step(world, dt, fly);
+        }
+        let director_holds = timeless::director::holds_movement(world);
+        if director_holds {
+            (ax, ay) = (0.0, 0.0);
+            world.autorun = false;
+        }
         // Camera axes 6 / 7: the arrows (with Shift in a window) or the compact I / J / K / L stick.
         let (mut cx, mut cy) = (self.input.axis(6), self.input.axis(7));
         // The controller's camera stick, apart: Camera Keys (ours) is for the keys alone.
@@ -14439,7 +14472,7 @@ impl App {
             let f = Vec3::new(h.sin(), 0.0, h.cos());
             -f * ay + if fp_side { f.cross(Vec3::NEG_Y) * ax } else { Vec3::ZERO }
         };
-        let turn = if type2 && !face_cam && cx == 0.0 && cy == 0.0 && px == 0.0 && py == 0.0 && ax == 0.0 {
+        let turn = if type2 && !face_cam && !director_holds && cx == 0.0 && cy == 0.0 && px == 0.0 && py == 0.0 && ax == 0.0 {
             self.input.test(0xaa, input::mode::HELD) as i32 as f32
                 - self.input.test(0xa9, input::mode::HELD) as i32 as f32
         } else {
@@ -14671,6 +14704,10 @@ impl App {
             // Timeless XI: the free camera takes the wheel.
             wheel: if world.looks.cam.on {
                 timeless::looks::cam_wheel(world, std::mem::take(&mut self.wheel));
+                0.0
+            } else if timeless::director::wheel(world, self.wheel) {
+                // Timeless XI: Director Mode's camera takes the wheel while it has the view.
+                self.wheel = 0.0;
                 0.0
             } else {
                 std::mem::take(&mut self.wheel)
@@ -15532,6 +15569,10 @@ impl App {
             _ if world.map.is_some() || world.cnq.is_some() => {}
             // Timeless XI: the custom looks' free camera takes the drag (middle button: up / down).
             _ if world.looks.cam.on => timeless::looks::cam_drag(world, dx, dy, self.middle_down),
+            // Timeless XI: Director Mode's camera takes the drag while it has the view.
+            _ if world.director.open
+                && world.director.mode != timeless::director::GAME
+                && timeless::director::drag(world, dx, dy, self.middle_down) => {}
             // Mouse/Cam. 0x8b / 0x8c invert the third-person camera's X / Y (FUN_1001e030).
             // Down is positive as retail's mode-5 axis 7 (FUN_10122590, the pointer below the drag's start); with
             // 0x8c on, the default, down raises the eye as the camera keys do.
@@ -15707,7 +15748,9 @@ impl App {
 
     fn camera(world: &World) -> Camera {
         // Timeless XI: the custom looks' free camera (timeless/looks.rs) first.
+        // Then Director Mode's (timeless/director.rs) when it has the view.
         let mut c = timeless::looks::free_camera(world)
+            .or_else(|| timeless::director::camera(world))
             .or_else(|| rig_camera(world))
             .or_else(|| event::camera(world))
             .unwrap_or_else(|| camera::view(world));
@@ -17995,6 +18038,12 @@ impl App {
                     }
                     m.tl_fishing(ctx, world);
                 }
+                // Timeless XI: Director Mode's window and overlays, with the HUD hidden too (the window has its own
+                // hide, Ctrl+Shift+H).
+                if world.director.open {
+                    let m = self.modern.get_or_insert_with(|| modern::Modern::new(ctx));
+                    m.tl_director(ctx, world);
+                }
                 // What the Config windows and the settings screen hand to the app.
                 let keys = [world.cam_keys[1] as u32, world.cam_keys[0] as u32];
                 if keys != [self.cfg.cam_keys_x, self.cfg.cam_keys_y] {
@@ -19323,6 +19372,17 @@ impl App {
         }
         // A Print Screen shot from the game (key function 0x55).
         let mut game_shot = false;
+        // Timeless XI: Director Mode's photo, full size, once its window and the HUD are out of the frame.
+        if script_shot.is_none()
+            && let Phase::World(w) = &mut self.phase
+            && let Some(p) = timeless::director::photo_due(w)
+        {
+            if let Some(dir) = p.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            *script_shot = Some(p);
+            return false;
+        }
         if script_shot.is_none()
             && let Phase::World(w) = &mut self.phase
             && let Some(p) = w.shot_request.take()
@@ -19987,7 +20047,13 @@ impl App {
             Phase::World(w) => w.lua.mod_ids(),
             _ => self.lobby_mods.mod_ids(),
         };
-        if self.recorder.as_ref().is_some_and(|r| r.size != size || !ids.contains(&r.owner))
+        // Timeless XI: Director Mode's takes (timeless/director.rs) belong to no mod: one ends when the Director lets
+        // it go (or the world it was filming is gone).
+        let director_takes = matches!(&self.phase, Phase::World(w) if w.director.recording.is_some());
+        if self.recorder.as_ref().is_some_and(|r| {
+            r.size != size
+                || if r.owner == timeless::director::OWNER { !director_takes } else { !ids.contains(&r.owner) }
+        })
             && let Some(r) = self.recorder.take()
         {
             r.stop();
@@ -20455,7 +20521,9 @@ fn world_prepare(cx: &mut WorldDraw, gfx: &Gfx, fg: &mut FrameGpu, w: &mut World
             }
         }
     }
-    let lines = layout::overlay(w);
+    let mut lines = layout::overlay(w);
+    // Timeless XI: Director Mode's shot drawn in the world while it is being set up.
+    lines.extend(timeless::director::path_lines(w));
     let ceiling = !w.layout.as_ref().is_some_and(|l| l.view == 0);
     let shapes = lua::world_shapes(w);
     if let Some(r) = w.renderer.as_mut() {
@@ -20468,7 +20536,8 @@ fn world_prepare(cx: &mut WorldDraw, gfx: &Gfx, fg: &mut FrameGpu, w: &mut World
     } else {
         None
     };
-    let ev_clock = event::clock(w);
+    // Timeless XI: Director Mode's hour and moon are held as an event's clock is (timeless/director.rs).
+    let ev_clock = timeless::director::clock(w).or_else(|| event::clock(w));
     // The Lua HUD's portraits: each wanted actor's face camera, or its whole body (client/portrait.rs).
     portrait_cams.extend(w.lua.portraits_wanted().into_iter().take(portrait::SLOTS).filter_map(|p| {
         let cam = if p.body || preview::is(p.entity) {
@@ -20588,6 +20657,8 @@ fn world_lighting(cx: &WorldDraw, w: &mut World, r: &mut ZoneRenderer, wf: &Worl
     if let (Some(zw), Some((t, at))) = (zw, w.clock) {
         // Op 0x77 sets the hour and weather while an event runs.
         let ev_weather = w.event.as_ref().and_then(|l| l.st.weather);
+        // Timeless XI: Director Mode's weather, as an event's.
+        let ev_weather = timeless::director::weather(w).or(ev_weather);
         let clock = crate::dat::weather::vana_minute(t, at.elapsed().as_secs_f32());
         let minute = ev_clock.map_or(clock, |c| c.minute as f32);
         // An area's `@ini` op 0xc0 fixes its lighting's time (FUN_10182c40, online).
@@ -21790,7 +21861,8 @@ fn draw_scene(
     fg.mark("mips");
     // FUN_10179390: the camera list under the eye (render/cull.rs); past Retail it holds within retail's
     // distance and the rest draws beyond it.
-    let list = w.ground.as_ref().map_or(0, |g| g.camera_list(camera.eye));
+    // Timeless XI: Director Mode's "all of the zone's scenery" draws list 0 (no mask), as the title reel's shots can.
+    let list = if timeless::director::all_scenery(w) { 0 } else { w.ground.as_ref().map_or(0, |g| g.camera_list(camera.eye)) };
     let far = (cx.cfg.draw_distance != 100).then_some(r.retail_reach).filter(|d| *d > 0.0);
     r.set_camera_list(&gfx.gpu, list, far);
     // Config 0017: bump mapping's lighting (one eased light, vertex fog) or the two-light model; never in 182.
@@ -22167,6 +22239,12 @@ fn world_overlays(
             &want,
         );
     }
+    // Timeless XI: Director Mode's look (the nostalgia filter's grade, render/nostalgia.rs) over the scene, under the
+    // fades and the 2D layer.
+    if let Some(g) = timeless::director::grade(w) {
+        let pass = w.director.pass.get_or_insert_with(|| crate::render::nostalgia::Nostalgia::new(&gfx.gpu, scene_fmt));
+        pass.draw(&gfx.gpu, &mut fg.encoder, &scene_raw, &scene_tex, bg, &g, [0.0; 3]);
+    }
     // A zone change's held frame under the fade to black (the camera has moved on); soft (ours): the held frame alone,
     // dimmed almost to black, while the new zone loads, then (still that dark) over it as the new zone fades in.
     if let (Some(_), Some(fx)) = (w.zone_hold.filter(|h| h.captured), &cx.screen_fx_zone) {
@@ -22377,7 +22455,10 @@ impl ApplicationHandler for App {
             WindowEvent::MouseInput { state, button, .. } => {
                 crate::voice::raw_button(*button, *state == ElementState::Pressed)
             }
-            WindowEvent::Focused(false) => crate::voice::release(),
+            WindowEvent::Focused(false) => {
+                crate::voice::release();
+                self.held_keys.clear();
+            }
             _ => {}
         }
         // Lua mods see keys and the mouse first, and may take them; a press over a window (a mod's pop-up, a panel) is
@@ -22482,6 +22563,12 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(code) = event.physical_key {
+                    // Timeless XI: what is held, for Director Mode's free camera.
+                    if event.state == ElementState::Pressed {
+                        self.held_keys.insert(code);
+                    } else {
+                        self.held_keys.remove(&code);
+                    }
                     // Other key functions hide the cursor (FUN_10125f70(0)), except during a drag; Keys Hide the Cursor
                     // off keeps it shown (ours).
                     let modifier = matches!(

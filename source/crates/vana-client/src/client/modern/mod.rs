@@ -77,6 +77,8 @@ mod tlfish;
 // Timeless XI: Timeless Angler's HUD and school banner (every interface).
 mod tlangler;
 mod tllooks;
+// Timeless XI: the Director window (timeless/director.rs).
+mod tldirector;
 
 /// The pack's names for mods (lua/skin.rs).
 pub(in crate::client) mod pack {

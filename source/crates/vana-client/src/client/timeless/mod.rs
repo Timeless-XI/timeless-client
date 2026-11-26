@@ -4,6 +4,7 @@
 pub mod angler;
 pub mod aquarium;
 pub mod book;
+pub mod director;
 pub mod fishing;
 pub mod hdicon;
 pub mod hotbar;

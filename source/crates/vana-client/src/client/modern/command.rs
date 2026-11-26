@@ -20,6 +20,8 @@ enum Kind {
     Roe,
     /// Ours: the GM window (gmwin.rs), listed only while the server gives a GM level above 0.
     Gm,
+    /// Timeless XI: Director Mode's window (timeless/director.rs).
+    Director,
 }
 
 const fn row(label: &'static str, icon: &'static str, page: u8, id: u16) -> Entry {
@@ -49,6 +51,7 @@ const WORLD: &[Entry] = &[
 const SYSTEM: &[Entry] = &[
     row("Macros", "icons/macro", 1, 6),
     row("Config", "icons/config", 1, 7),
+    Entry { label: "Director Mode", icon: "icons/map", kind: Kind::Director },
     row("Help Desk", "icons/help", 1, 8),
     row("Log Out", "icons/cancel", 1, 12),
     row("Shut Down", "icons/system", 1, 11),
@@ -120,7 +123,7 @@ fn disabled(w: &World, e: &Entry) -> bool {
         Kind::Row(page, id) => menu_disabled_on(w, page).contains(&id),
         // As Quests.
         Kind::Roe => menu_disabled_on(w, 1).contains(&2),
-        Kind::Sub(_) | Kind::Gm => false,
+        Kind::Sub(_) | Kind::Gm | Kind::Director => false,
     }
 }
 
@@ -133,7 +136,7 @@ pub fn key(w: &mut World, key: egui::Key) {
     c.top = c.top.min(top.len() - 1);
     let sub = match top[c.top].kind {
         Kind::Sub(s) => Some(s),
-        Kind::Row(..) | Kind::Roe | Kind::Gm => None,
+        Kind::Row(..) | Kind::Roe | Kind::Gm | Kind::Director => None,
     };
     match (c.sub, key) {
         (None, K::ArrowDown | K::ArrowUp) => {
@@ -186,6 +189,10 @@ pub fn bar_focus(w: &World) -> BarFocus {
             BarFocus::Text("Records of Eminence", "View your Records of Eminence objectives and progress.".into())
         }
         Kind::Gm => BarFocus::Text("Game Master", format!("GM commands for your level ({}).", w.gm.level)),
+        Kind::Director => BarFocus::Text(
+            "Director Mode",
+            "Film and photograph Vana'diel: free camera, shots, time, weather and looks (Ctrl+Shift+D).".into(),
+        ),
         Kind::Sub(s) => BarFocus::Text(e.label, s.iter().map(|r| label(w, r)).collect::<Vec<_>>().join(", ") + "."),
     }
 }
@@ -204,6 +211,11 @@ fn pick(w: &mut World, e: &Entry) {
         }
         Kind::Gm => {
             w.gm.open = true;
+            w.menu = None;
+            w.sounds.push(Se::Select as u32);
+        }
+        Kind::Director => {
+            super::super::timeless::director::open(w);
             w.menu = None;
             w.sounds.push(Se::Select as u32);
         }
@@ -267,7 +279,7 @@ pub fn draw(p: &mut Panels, w: &mut World) {
                 c.sub = Some(0);
                 w.sounds.push(Se::Select as u32);
             }
-            Kind::Row(..) | Kind::Roe | Kind::Gm => pick(w, list_top[k]),
+            Kind::Row(..) | Kind::Roe | Kind::Gm | Kind::Director => pick(w, list_top[k]),
         }
     }
     // The submenu opens at the right of the menu, as the rows' arrows point, level with its category; at the left when
