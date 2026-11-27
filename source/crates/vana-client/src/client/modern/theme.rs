@@ -35,12 +35,14 @@ const ATLASES: [(&str, &[u8]); 13] = [
     ("atlases/actions_2@2x.png", include_bytes!("../../../assets/modern/atlases/actions_2@2x.png")),
     ("atlases/actions_3@2x.png", include_bytes!("../../../assets/modern/atlases/actions_3@2x.png")),
 ];
-const FONTS: [(&str, &[u8]); 5] = [
+const FONTS: [(&str, &[u8]); 6] = [
     ("FiraSans-Regular", include_bytes!("../../../assets/fonts/FiraSans-Regular.ttf")),
     ("FiraSans-SemiBold", include_bytes!("../../../assets/fonts/FiraSans-SemiBold.ttf")),
     ("Inter-SemiBold", include_bytes!("../../../assets/fonts/Inter-SemiBold.ttf")),
     ("Inter-BoldItalic", include_bytes!("../../../assets/fonts/Inter-BoldItalic.ttf")),
     ("JetBrainsMono-Regular", include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf")),
+    // Timeless XI: Timeless View's names (owner, 2026-11-26: plates over heads, the Target and Party windows; OFL).
+    ("Signika-SemiBold", include_bytes!("../../../assets/fonts/Signika-SemiBold.ttf")),
 ];
 /// The window frames (80 x 80 logical, 24 insets, NINE_SLICE.md); their border is cut out with the border-only
 /// frame's alpha, which every variant shares.
@@ -50,7 +52,8 @@ const FRAME_MASK: &str = "frames/window_normal_border";
 /// Emphasis beside egui's Proportional (Fira Sans) and Monospace (JetBrains Mono): titles and names; the bars' labels.
 pub const STRONG: &str = "strong";
 pub const LABEL: &str = "label";
-/// Party-list names out of the zone: their face, kept whatever the interface's is.
+/// Party-list names out of the zone: their face, kept whatever the interface's is. Timeless XI: in the Timeless
+/// interface every name (the Target and Party windows; the plates over heads read the same face, plates.rs).
 pub const NAME: &str = "name";
 /// Timeless XI: Timeless View's titles and menu rows (Cormorant Garamond, Fira Sans behind it); STRONG elsewhere.
 pub const SERIF: &str = "serif";
@@ -650,7 +653,8 @@ fn install_fonts_inner(ctx: &Context, body: Option<(Vec<u8>, Vec<u8>)>, timeless
         FontFamily::Name(SERIF.into()),
         std::iter::once("CormorantGaramond-SemiBold".to_string()).chain(with(strong)).collect(),
     );
-    let (name, label) = if timeless { (strong, strong) } else { ("Inter-SemiBold", "Inter-BoldItalic") };
+    // Timeless XI: Timeless View's names in Signika SemiBold (the "Names over heads" canvas, option A).
+    let (name, label) = if timeless { ("Signika-SemiBold", strong) } else { ("Inter-SemiBold", "Inter-BoldItalic") };
     defs.families.insert(FontFamily::Name(NAME.into()), with(name));
     defs.families.insert(FontFamily::Name(LABEL.into()), with(label));
     let mono = defs.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();

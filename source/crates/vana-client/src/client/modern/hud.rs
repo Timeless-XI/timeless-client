@@ -909,7 +909,8 @@ fn tl_party_row(
 ) {
     let painter = ui.painter();
     let name_w = 104.0f32.min((right - x) * 0.4);
-    let name_font = FontId::new(m.theme.ui, FontFamily::Name(super::STRONG.into()));
+    // Timeless XI: names in the Timeless name face (Signika SemiBold).
+    let name_font = FontId::new(m.theme.ui, FontFamily::Name(super::NAME.into()));
     let name_y = if full { r.min.y + 13.0 } else { r.min.y + 15.0 };
     let g = super::one_line(painter, &row.name, name_font, m.theme.color("text"), name_w);
     let at = pos2(x, name_y - g.size().y / 2.0);
@@ -968,7 +969,9 @@ fn pet_row(ui: &mut Ui, m: &Modern, pet: &PetRow) -> bool {
     let x = r.min.x + 54.0;
     let right = r.max.x - 10.0;
     let name_col = if pet.pet { m.theme.color("text") } else { m.theme.color("focus") };
-    let font = FontId::new(LABEL_SIZE, FontFamily::Name(super::LABEL.into()));
+    // Timeless XI: the pet's name in the Timeless name face (Signika SemiBold), as every other name there.
+    let face = if m.theme.timeless() { super::NAME } else { super::LABEL };
+    let font = FontId::new(LABEL_SIZE, FontFamily::Name(face.into()));
     let small_font = FontId::new(14.0, FontFamily::Name(super::LABEL.into()));
     paint::outlined(painter, pos2(x, r.min.y + 10.0), Align2::LEFT_CENTER, &pet.name, font, name_col);
     let kind = if pet.pet { "Pet" } else { "Fellow" };
@@ -1073,7 +1076,7 @@ fn tl_target(p: &mut Panels, v: &TargetView, frame: &str, dist: Option<&str>) {
         let pct = v.hp.map(|(pct, _)| format!("{pct}%"));
         let small = FontId::proportional(m.theme.ui);
         let pct_w = pct.as_ref().map_or(0.0, |s| painter.layout_no_wrap(s.clone(), small.clone(), m.theme.color("muted")).size().x);
-        let name_font = FontId::new(m.theme.title + 3.0, FontFamily::Name(super::STRONG.into()));
+        let name_font = FontId::new(m.theme.title + 3.0, FontFamily::Name(super::NAME.into()));
         let colour = v.colour.unwrap_or(m.theme.color("text"));
         let g = super::one_line(painter, &v.name, name_font, colour, (width - pct_w - 12.0).max(0.0));
         let at = pos2(row.min.x, row.center().y - g.size().y / 2.0);
