@@ -225,6 +225,12 @@ fn body(ui: &mut egui::Ui, s: &mut Settings, has: looks::Has) {
         heading(ui, "Lips");
         rgb(ui, &mut s.lips, &LIPS);
     }
+    heading(ui, "Cheek Blush");
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("None").color(muted()));
+        ui.add(egui::Slider::new(&mut s.blush, 0.0..=1.0).show_value(false));
+        ui.label(RichText::new("Flushed").color(muted()));
+    });
     // Nose colour removed (owner 2026-11-23: noses stay the standard / original look on every race).
     if false && has.nose {
         heading(ui, "Nose");

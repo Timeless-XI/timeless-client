@@ -156,6 +156,8 @@ pub struct Settings {
     pub marks: Vec<u8>,
     pub mark_colour: [u8; 3],
     pub mark_strength: f32,
+    /// Cheek blush, 0 none .. 1 a soft flush (owner 2026-11-28: "subtle and realistic").
+    pub blush: f32,
 }
 
 impl Default for Settings {
@@ -175,6 +177,7 @@ impl Default for Settings {
             marks: vec![BOTH, BOTH, 0, 0, 0, 0, 0, 0, 0],
             mark_colour: [90, 52, 32],
             mark_strength: 0.85,
+            blush: 0.0,
         }
     }
 }
@@ -450,6 +453,8 @@ struct Layers {
     m2: Vec<u8>,
     m3: Vec<u8>,
     m4: Vec<u8>,
+    /// Cheek blush (grey in R, same size as m1).
+    blush: Vec<u8>,
 }
 
 fn png(bytes: &[u8]) -> Vec<u8> {
@@ -494,6 +499,8 @@ pub const RACE_SIZE: u32 = 512;
 /// Another race's style masks (m1..m4, and m5 / m6 when the right side has its own), decoded when first used.
 pub struct RaceLayers {
     m: Vec<Vec<u8>>,
+    /// The cheek blush map (grey), the same size and layout as m1; empty when the style has none.
+    blush: Vec<u8>,
 }
 
 pub fn race_layers(race: u8, style: u8) -> Option<&'static RaceLayers> {
@@ -504,7 +511,8 @@ pub fn race_layers(race: u8, style: u8) -> Option<&'static RaceLayers> {
     let cell = all.get(&(race, style))?;
     Some(cell.get_or_init(|| {
         let files = super::look_files::RACE_MASKS.iter().find(|(r, s, _)| (*r, *s) == (race, style)).map(|x| x.2);
-        RaceLayers { m: files.unwrap_or(&[]).iter().map(|b| png_square(b)).collect() }
+        let blush = super::look_files::BLUSH.iter().find(|(r, s, _)| (*r, *s) == (race, style)).map_or(Vec::new(), |x| png_grey(x.2));
+        RaceLayers { m: files.unwrap_or(&[]).iter().map(|b| png_square(b)).collect(), blush }
     }))
 }
 
@@ -547,6 +555,8 @@ pub struct Prep {
     b: Vec<[u8; 4]>,
     /// The hair's grey at each texel (0..255, middle tone 128).
     g: Vec<u8>,
+    /// The cheek blush weight at each texel (empty: none).
+    bl: Vec<u8>,
     /// The texels with any marking: index, the nine markings' cover (MARKS order) and the right-side masks' seven.
     marks: Vec<(u32, [u8; 12], [u8; 7])>,
 }
@@ -630,7 +640,18 @@ impl Prep {
                 }
             }
         }
-        Prep { rl, f, w, h, tex, a, b, g, marks }
+        let mut bl = Vec::new();
+        if !rl.blush.is_empty() {
+            let ks = mask_scale(rl, w, f.race);
+            bl = (0..n)
+                .map(|i| {
+                    let (x, y) = (i % w as usize, i / w as usize);
+                    let (u, v) = (ks * (x as f32 + 0.5) / w as f32, ks * (y as f32 + 0.5) / h as f32);
+                    (sample(&rl.blush, u, v)[0] * 255.0 + 0.5) as u8
+                })
+                .collect();
+        }
+        Prep { rl, f, w, h, tex, a, b, g, bl, marks }
     }
 }
 
@@ -815,7 +836,8 @@ fn compose_race_rows(p: &Prep, out: &mut [u8], at: usize, s: &Settings, _side: u
         let k = at + i;
         let a = p.a[k];
         let n0 = p.b[k][0];
-        if a == [0; 4] && n0 == 0 {
+        let bw = if s.blush > 0.0 { p.bl.get(k).copied().unwrap_or(0) } else { 0 };
+        if a == [0; 4] && n0 == 0 && bw == 0 {
             continue;
         }
         let mut c = [px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0];
@@ -836,6 +858,9 @@ fn compose_race_rows(p: &Prep, out: &mut [u8], at: usize, s: &Settings, _side: u
         if a[3] > 0 {
             c = mix(c, shade(hw(knee(l * 0.5 / ml)), lips), un(a[3]));
         }
+        if bw > 0 {
+            c = blush(c, un(bw) * s.blush.clamp(0.0, 1.0));
+        }
         // Nose: left as the model's own (owner 2026-11-23, every race) - no recolour.
         let _ = (n0, mn, nose);
         for k in 0..3 {
@@ -853,6 +878,27 @@ fn hair_shade(g: f32, col: [f32; 3]) -> [f32; 3] {
     let lite = t.max(0.0);
     let wl = 0.22 + 0.2 * (1.0 - luma(col));
     std::array::from_fn(|k| col[k] * dark * (1.0 + lite * 0.45) + (1.0 - col[k]) * lite * wl)
+}
+
+/// Cheek blush: the skin itself a little warmer and rosier (red kept, green and blue drawn down), never a paint over
+/// it, so it follows every skin tone and the face's own shading. `a` 0..1 (map weight x the slider).
+fn blush(c: [f32; 3], a: f32) -> [f32; 3] {
+    let t = [c[0] * 1.04 + 0.015, c[1] * 0.86, c[2] * 0.88];
+    mix(c, t, (a * 0.6).clamp(0.0, 1.0))
+}
+
+/// A grey PNG as RGBA (the grey in R), any square size; empty if it can't be read.
+fn png_grey(bytes: &[u8]) -> Vec<u8> {
+    let dec = png::Decoder::new(std::io::Cursor::new(bytes));
+    let Ok(mut r) = dec.read_info() else { return Vec::new() };
+    let mut buf = vec![0; r.output_buffer_size().unwrap_or(0)];
+    match r.next_frame(&mut buf) {
+        Ok(info) if info.width == info.height && info.color_type == png::ColorType::Grayscale && info.bit_depth == png::BitDepth::Eight => {
+            buf.truncate(info.buffer_size());
+            buf.iter().flat_map(|g| [*g, 0, 0, 0]).collect()
+        }
+        _ => Vec::new(),
+    }
 }
 
 fn luma(c: [f32; 3]) -> f32 {
@@ -922,6 +968,7 @@ macro_rules! style_layers {
             m2: png(include_bytes!(concat!("../../../assets/timeless/looks/mithra", $n, "_m2.png"))),
             m3: png(include_bytes!(concat!("../../../assets/timeless/looks/mithra", $n, "_m3.png"))),
             m4: png(include_bytes!(concat!("../../../assets/timeless/looks/mithra", $n, "_m4.png"))),
+            blush: png_grey(include_bytes!(concat!("../../../assets/timeless/looks/blush/mithra", $n, "_blush.png"))),
         }
     };
 }
@@ -1011,6 +1058,11 @@ fn compose_into(l: &Layers, s: &Settings, side: u8, skin_mid: f32, at: usize, ou
         }
         if m1[3] > 0 {
             c = mix(c, shade(g, lips), w(m1[3]));
+        }
+        if s.blush > 0.0 {
+            if let Some(bw) = l.blush.get(o).filter(|v| **v > 0) {
+                c = blush(c, w(*bw) * s.blush.clamp(0.0, 1.0));
+            }
         }
         // Nose: left as the model's own (owner 2026-11-23, every race) - no recolour.
         let _ = nose;

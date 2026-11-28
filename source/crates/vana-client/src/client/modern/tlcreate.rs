@@ -566,6 +566,7 @@ fn colors(
     if has.lips {
         tabs.push(("Lips", 3));
     }
+    tabs.push(("Blush", 5));
     // Nose colour removed (owner 2026-11-23: noses stay the original look on every race).
     let id = Id::unique("tl create colours tab");
     let mut tab = ui.ctx().data(|d| d.get_temp::<usize>(id)).unwrap_or(0);
@@ -668,6 +669,10 @@ fn colors(
             }
         }
         3 => colour(ui, m, "lips", &mut s.lips, &LIPS),
+        5 => {
+            caption(ui, m, "Cheek Blush");
+            slider(ui, m, "blush", &mut s.blush, (0.0, 1.0), ("None", "Flushed"));
+        }
         _ => slider(ui, m, "nose", &mut s.nose, (0.0, 1.0), ("Gray", "Black")),
     }
     ui.add_space(8.0);
@@ -684,6 +689,7 @@ fn colors(
                 1 => s.eyes = o.eyes,
                 2 => (s.marks, s.mark_colour, s.mark_strength) = (o.marks.clone(), o.mark_colour, o.mark_strength),
                 3 => s.lips = o.lips,
+                5 => s.blush = o.blush,
                 _ => s.nose = o.nose,
             }
         }
