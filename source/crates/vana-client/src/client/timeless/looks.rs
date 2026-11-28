@@ -800,7 +800,7 @@ fn compose_race_rows(p: &Prep, out: &mut [u8], at: usize, s: &Settings, _side: u
     if p.rl.m.first().is_none_or(|m| m.is_empty()) {
         return;
     }
-    let (hair, tip, eyes, lips) = (tame(unit(s.hair)), tame(unit(s.tip)), tame(unit(s.eyes)), tame(unit(s.lips)));
+    let (hair, tip, eyes, lips) = (tone(unit(s.hair), Tone::Hair), tone(unit(s.tip), Tone::Hair), tone(unit(s.eyes), Tone::Eyes), tone(unit(s.lips), Tone::Lips));
     let nose = [nose_grey(s.nose); 3];
     let (t0, t1) = (s.tip_start - s.tip_blend, s.tip_start + s.tip_blend.max(0.005));
     // Floors (hair and skin 20, iris, lips and nose 40, as the tools' preview): a layer nearly black on the face
@@ -859,23 +859,59 @@ fn luma(c: [f32; 3]) -> f32 {
     0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
 }
 
-/// A picked colour kept in a range that still shades: the most saturated picks eased a little (pure primaries read as
-/// plastic), and the brightest channel soft-capped at 0.8 so strands and highlights still have room above it.
-fn tame(c: [f32; 3]) -> [f32; 3] {
+/// What a picked colour is used for: each kind is kept in its own realistic range (owner 2026-11-28: "keep colours a
+/// little more muted ... still let players choose a spectrum of colours ... extra muted on the eye colour").
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Tone {
+    Hair,
+    Eyes,
+    Lips,
+}
+
+impl Tone {
+    /// (most saturation a colour keeps, soft cap on its brightest channel, where that cap starts to bend)
+    fn range(self) -> (f32, f32, f32) {
+        match self {
+            Tone::Hair => (0.40, 0.72, 0.50),
+            Tone::Lips => (0.34, 0.66, 0.46),
+            Tone::Eyes => (0.22, 0.56, 0.40),
+        }
+    }
+}
+
+/// A picked colour eased into its kind's range: every hue stays choosable, but saturation rolls off smoothly toward
+/// the kind's ceiling (so a pure red reads as a deep natural red, a pure blue eye as a grey-blue) and the brightest
+/// channel is soft-capped so strands, highlights and the eye's shine still have room above it.
+pub fn tone(c: [f32; 3], kind: Tone) -> [f32; 3] {
+    let (smax, cap, knee) = kind.range();
     let lum = luma(c);
     let (mx, mn) = (c[0].max(c[1]).max(c[2]), c[0].min(c[1]).min(c[2]));
-    let sat = if mx > 0.0 { (mx - mn) / mx } else { 0.0 };
+    let sat = if mx > 1e-4 { (mx - mn) / mx } else { 0.0 };
     let mut c = c;
-    if sat > 0.7 {
-        let k = (0.7 + (sat - 0.7) * 0.5) / sat;
-        c = c.map(|v| lum + (v - lum) * k);
+    if sat > 1e-4 {
+        let to = smax * (sat / smax).tanh();
+        let k = to / sat;
+        c = c.map(|v| (lum + (v - lum) * k).max(0.0));
+    }
+    if kind == Tone::Eyes {
+        // irises are never near-black or near-white: keep their brightness in a believable band
+        let l = luma(c).max(1e-4);
+        let want = l.clamp(0.10, 0.50);
+        c = c.map(|v| v * want / l);
     }
     let mx = c[0].max(c[1]).max(c[2]);
-    if mx > 0.6 {
-        let to = 0.6 + 0.2 * ((mx - 0.6) / 0.2).tanh();
+    if mx > knee {
+        let to = knee + (cap - knee) * ((mx - knee) / (cap - knee)).tanh();
         c = c.map(|v| v * to / mx);
     }
     c
+}
+
+/// The same easing on an 8-bit colour, for the creator's swatches and sliders (what the player sees there is what
+/// the character gets).
+pub fn tone_u8(c: [u8; 3], kind: Tone) -> [u8; 3] {
+    let t = tone(c.map(|v| v as f32 / 255.0), kind);
+    t.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u8)
 }
 
 macro_rules! style_layers {
@@ -955,7 +991,7 @@ pub fn compose(style: u8, s: &Settings, side: u8) -> Vec<u8> {
 fn compose_into(l: &Layers, s: &Settings, side: u8, skin_mid: f32, at: usize, out: &mut [u8]) {
     let on: Vec<bool> = (0..MARKS.len()).map(|k| s.mark(k) & side != 0).collect();
     let (hair, tip, eyes, lips, mark) =
-        (tame(unit(s.hair)), tame(unit(s.tip)), tame(unit(s.eyes)), tame(unit(s.lips)), unit(s.mark_colour));
+        (tone(unit(s.hair), Tone::Hair), tone(unit(s.tip), Tone::Hair), tone(unit(s.eyes), Tone::Eyes), tone(unit(s.lips), Tone::Lips), unit(s.mark_colour));
     let ng = nose_grey(s.nose);
     let nose = [ng; 3];
     let (t0, t1) = (s.tip_start - s.tip_blend, s.tip_start + s.tip_blend.max(0.005));

@@ -387,6 +387,14 @@ fn card(ui: &mut Ui, m: &Modern, gu: Option<&GameUi>, c: &Page) {
 
 /// Colour picks: the palette as chips, then the colour's hue, depth and light as three bars to drag.
 fn colour(ui: &mut Ui, m: &Modern, id: &str, c: &mut [u8; 3], picks: &[[u8; 3]]) {
+    // swatches and bars show the colour as the character gets it (hair, eyes and lips are eased into a natural range)
+    let kind = match id {
+        "hair" | "tip" => Some(looks::Tone::Hair),
+        "eyes" => Some(looks::Tone::Eyes),
+        "lips" => Some(looks::Tone::Lips),
+        _ => None,
+    };
+    let shown = |c: [u8; 3]| c32(kind.map_or(c, |k| looks::tone_u8(c, k)));
     let w = ui.available_width();
     let per = 6usize;
     let size = (w - (per - 1) as f32 * 8.0) / per as f32;
@@ -396,7 +404,7 @@ fn colour(ui: &mut Ui, m: &Modern, id: &str, c: &mut [u8; 3], picks: &[[u8; 3]])
             let chip = Rect::from_min_size(pos2(r.min.x + k as f32 * (size + 8.0), r.min.y), vec2(size, size * 0.62));
             let resp = ui.interact(chip, Id::unique(("tl chip", id, k, pick)), Sense::click());
             let p = ui.painter();
-            p.rect_filled(chip, 3.0, c32(*pick));
+            p.rect_filled(chip, 3.0, shown(*pick));
             let on = *pick == *c;
             let edge = if on {
                 Stroke::new(2.0, m.theme.color("text"))
@@ -441,7 +449,7 @@ fn colour(ui: &mut Ui, m: &Modern, id: &str, c: &mut [u8; 3], picks: &[[u8; 3]])
         let ends = |t: u8| {
             let mut e = before;
             e[k] = t;
-            c32(e)
+            shown(e)
         };
         let mut mesh = egui::Mesh::default();
         for (s, col) in [ends(0), ends(255)].into_iter().enumerate() {
