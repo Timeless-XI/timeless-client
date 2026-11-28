@@ -74,7 +74,7 @@ pub const FACE_TEXTURES: [(&str, u8); 41] = [
 /// Each style's median skin brightness in its base (0..255): markings follow the skin's shading against it.
 const SKIN_MID: [f32; 8] = [90.3, 89.9, 88.7, 86.4, 91.6, 91.9, 87.4, 90.7];
 /// The markings, in mask order (Mithra; the other races have RACE_MARKS in the same nine slots).
-pub const MARKS: [&str; 12] = [
+pub const MARKS: [&str; 20] = [
     "Swept crest",
     "Cheek stripes",
     "Brow & cheek line",
@@ -88,25 +88,62 @@ pub const MARKS: [&str; 12] = [
     "Whisker marks",
     "Fang tears",
     "Sunset band",
+    // 2026-11-28 owner picks: the retail Mithra marks redrawn in HD, and new subtle ones (x1 RGBA, x2 RGBA).
+    "Tear streaks",
+    "Brow sunburst",
+    "Cheek swoops",
+    "Tiger stripes",
+    "Tabby shading",
+    "Pale muzzle",
+    "Leopard spots",
+    "Ear scar",
 ];
 /// The markings that can go on one side only (under one eye).
-pub const SIDED: [bool; 12] = [false, true, true, true, true, false, true, true, true, false, false, false];
+pub const SIDED: [bool; 20] =
+    [false, true, true, true, true, false, true, true, true, false, false, false, true, false, true, true, true, false, true, true];
+/// Mithra's markings drawn as (MARKS order).
+const MITHRA_KINDS: [Kind; 20] =
+    [Ink, Ink, Ink, Ink, Ink, Ink, Ink, Ink, Ink, Ink, Ink, Ink, Ink, Ink, Ink, Ink, Shade, Pale, Freckle, Scar];
 
-/// How a race marking is drawn: in the marking colour, as darker skin (freckles) or as a raised pink scar.
+/// How a race marking is drawn: in the marking colour, as darker skin (freckles), as a raised pink scar, or as the
+/// skin itself shaded darker, paler or flushed (2026-11-28: subtle, believable marks that follow every skin tone).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
     Ink,
     Freckle,
     Scar,
+    Shade,
+    Pale,
+    Flush,
 }
-use Kind::{Freckle, Ink, Scar};
+use Kind::{Flush, Freckle, Ink, Pale, Scar, Shade};
 
 /// Each race's own markings (owner picks 2026-11-23), in mask slot order (m2 G B A, m3 R G B A, m4 R G); drawn on both
 /// sides. Made by Custom_Faces/looks/race_marks.py - keep the two lists the same.
 pub fn race_marks(race: u8) -> &'static [(&'static str, Kind)] {
     match race {
-        1 => &[("Freckles", Freckle), ("Steam line", Ink), ("Smelter's soot", Ink), ("Cartographer's cross", Ink), ("Foreman's chevrons", Ink)],
-        2 => &[("Freckles", Freckle), ("Steam line", Ink), ("Cartographer's cross", Ink), ("Filigree scroll", Ink), ("Envoy's crescent", Ink)],
+        1 => &[
+            ("Freckles", Freckle),
+            ("Steam line", Ink),
+            ("Smelter's soot", Ink),
+            ("Cartographer's cross", Ink),
+            ("Foreman's chevrons", Ink),
+            ("Nose freckles", Freckle),
+            ("Brow scar", Scar),
+            ("Sun flush", Flush),
+            ("Beauty mark", Freckle),
+        ],
+        2 => &[
+            ("Freckles", Freckle),
+            ("Steam line", Ink),
+            ("Cartographer's cross", Ink),
+            ("Filigree scroll", Ink),
+            ("Envoy's crescent", Ink),
+            ("Nose freckles", Freckle),
+            ("Brow scar", Scar),
+            ("Sun flush", Flush),
+            ("Beauty mark", Freckle),
+        ],
         3 => &[
             ("Freckles", Freckle),
             ("Fleur sigil", Ink),
@@ -116,12 +153,94 @@ pub fn race_marks(race: u8) -> &'static [(&'static str, Kind)] {
             ("Iron jaw", Ink),
             ("Lance stripes", Ink),
             ("Knight's chevron", Ink),
+            ("Silver tracery", Ink),
+            ("Jaw scar", Scar),
+            ("Cheekbone shade", Shade),
+            ("House sigil", Ink),
         ],
-        4 => &[("Freckles", Freckle), ("Fleur sigil", Ink), ("Shield bars", Ink), ("Lance stripes", Ink), ("Blade tear", Ink), ("Knight's chevron", Ink)],
-        5 => &[("Mana drop", Ink), ("Freckles", Freckle), ("Star map", Ink)],
-        6 => &[("Mana drop", Ink), ("Freckles", Freckle), ("Crescent moon", Ink), ("Petal spray", Ink), ("Comet trail", Ink), ("Twin stars", Ink)],
-        8 => &[("Freckles", Freckle), ("Ember streak", Ink), ("Ash stripes", Ink), ("Brow band", Ink)],
+        4 => &[
+            ("Freckles", Freckle),
+            ("Fleur sigil", Ink),
+            ("Shield bars", Ink),
+            ("Lance stripes", Ink),
+            ("Blade tear", Ink),
+            ("Knight's chevron", Ink),
+            ("Silver tracery", Ink),
+            ("Jaw scar", Scar),
+            ("Cheekbone shade", Shade),
+            ("House sigil", Ink),
+        ],
+        5 => &[
+            ("Mana drop", Ink),
+            ("Freckles", Freckle),
+            ("Star map", Ink),
+            ("Cheek freckles", Freckle),
+            ("Star mark", Ink),
+            ("Eye dots", Ink),
+            ("Paint stripes", Pale),
+        ],
+        6 => &[
+            ("Mana drop", Ink),
+            ("Freckles", Freckle),
+            ("Crescent moon", Ink),
+            ("Petal spray", Ink),
+            ("Comet trail", Ink),
+            ("Twin stars", Ink),
+            ("Cheek freckles", Freckle),
+            ("Star mark", Ink),
+            ("Eye dots", Ink),
+            ("Paint stripes", Pale),
+        ],
+        8 => &[
+            ("Freckles", Freckle),
+            ("Ember streak", Ink),
+            ("Ash stripes", Ink),
+            ("Brow band", Ink),
+            ("Weathered scars", Scar),
+            ("Ridge shading", Shade),
+            ("Faded band", Ink),
+            ("Deep creases", Shade),
+        ],
         _ => &[],
+    }
+}
+
+/// How many of a race's markings are its first ones (in the m2..m4 slots); the rest are the added ones (x1 RGBA,
+/// slots 12..).
+fn race_old(race: u8) -> usize {
+    match race {
+        1 | 2 => 5,
+        3 => 8,
+        4 | 6 => 6,
+        5 => 3,
+        8 => 4,
+        _ => 0,
+    }
+}
+
+/// The mask slot (Prep's cover order) of a race's k-th marking (Mithra: MARKS order is the slot order).
+fn mark_slot(race: u8, k: usize) -> usize {
+    let old = race_old(race);
+    if race == 7 || k < old { k } else { 12 + k - old }
+}
+
+/// A marking's colour over the skin `c` (all 0..1): `mc` the marking colour at this texel's shading, `a` its weight.
+fn mark_blend(kind: Kind, c: [f32; 3], mc: [f32; 3], a: f32, rosy: bool) -> [f32; 3] {
+    match kind {
+        Ink => mix(c, mc, a),
+        // The skin itself, darker and warmer (Tarutaru: rosy).
+        Freckle => {
+            let t = if rosy { [0.78, 0.6, 0.55] } else { [0.66, 0.55, 0.48] };
+            mix(c, [c[0] * t[0], c[1] * t[1], c[2] * t[2]], a * 0.75)
+        }
+        // A healed scar: raised, lighter and pinker than the skin round it.
+        Scar => mix(c, [(c[0] * 1.3 + 0.16).min(1.0), (c[1] * 1.3 + 0.03).min(1.0), (c[2] * 1.3 + 0.04).min(1.0)], a * 0.9),
+        // The skin in shadow (hollows, creases, tabby bands).
+        Shade => mix(c, [c[0] * 0.74, c[1] * 0.70, c[2] * 0.69], a * 0.75),
+        // The skin paler (a muzzle, chalk stripes).
+        Pale => mix(c, c.map(|v| (v * 1.16 + 0.05).min(1.0)), a * 0.7),
+        // Sun-warmed skin, as the cheek blush.
+        Flush => blush(c, a),
     }
 }
 
@@ -455,6 +574,9 @@ struct Layers {
     m4: Vec<u8>,
     /// Cheek blush (grey in R, same size as m1).
     blush: Vec<u8>,
+    /// The added markings (x1, x2: MARKS 12..20).
+    x1: Vec<u8>,
+    x2: Vec<u8>,
 }
 
 fn png(bytes: &[u8]) -> Vec<u8> {
@@ -501,6 +623,8 @@ pub struct RaceLayers {
     m: Vec<Vec<u8>>,
     /// The cheek blush map (grey), the same size and layout as m1; empty when the style has none.
     blush: Vec<u8>,
+    /// The added markings' masks (x1, Mithra also x2), the same size and layout as m1.
+    x: Vec<Vec<u8>>,
 }
 
 pub fn race_layers(race: u8, style: u8) -> Option<&'static RaceLayers> {
@@ -512,7 +636,8 @@ pub fn race_layers(race: u8, style: u8) -> Option<&'static RaceLayers> {
     Some(cell.get_or_init(|| {
         let files = super::look_files::RACE_MASKS.iter().find(|(r, s, _)| (*r, *s) == (race, style)).map(|x| x.2);
         let blush = super::look_files::BLUSH.iter().find(|(r, s, _)| (*r, *s) == (race, style)).map_or(Vec::new(), |x| png_grey(x.2));
-        RaceLayers { m: files.unwrap_or(&[]).iter().map(|b| png_square(b)).collect(), blush }
+        let x = super::look_files::MARK_X.iter().find(|(r, s, _)| (*r, *s) == (race, style)).map_or(Vec::new(), |x| x.2.iter().map(|b| png_square(b)).collect());
+        RaceLayers { m: files.unwrap_or(&[]).iter().map(|b| png_square(b)).collect(), blush, x }
     }))
 }
 
@@ -557,8 +682,9 @@ pub struct Prep {
     g: Vec<u8>,
     /// The cheek blush weight at each texel (empty: none).
     bl: Vec<u8>,
-    /// The texels with any marking: index, the nine markings' cover (MARKS order) and the right-side masks' seven.
-    marks: Vec<(u32, [u8; 12], [u8; 7])>,
+    /// The texels with any marking: index, every slot's cover (m2..m4's twelve, then x1 / x2's eight) and the
+    /// right-side masks' seven.
+    marks: Vec<(u32, [u8; 20], [u8; 7])>,
 }
 
 impl Prep {
@@ -621,6 +747,7 @@ impl Prep {
         let (m3, m4, m5, m6) = (rl.m.get(2), rl.m.get(3), rl.m.get(4), rl.m.get(5));
         if let (Some(m3), Some(m4)) = (m3, m4) {
             let ks = mask_scale(rl, w, f.race);
+            let p_x = &rl.x;
             for i in 0..n {
                 let (x, y) = (i % w as usize, i / w as usize);
                 let (u, v) = (ks * (x as f32 + 0.5) / w as f32, ks * (y as f32 + 0.5) / h as f32);
@@ -629,7 +756,16 @@ impl Prep {
                 let q = |v: f32| (v * 255.0 + 0.5) as u8;
                 // MARKS order; Mithra's last three (whisker marks, fang tears, sunset band) in m2 R, m4 B, m4 A.
                 let (x0, x1, x2) = if f.race == 7 { (bb[0], q(d[2]), q(d[3])) } else { (0, 0, 0) };
-                let left = [bb[1], bb[2], bb[3], q(c3[0]), q(c3[1]), q(c3[2]), q(c3[3]), q(d[0]), q(d[1]), x0, x1, x2];
+                let mut left = [0u8; 20];
+                left[..12].copy_from_slice(&[bb[1], bb[2], bb[3], q(c3[0]), q(c3[1]), q(c3[2]), q(c3[3]), q(d[0]), q(d[1]), x0, x1, x2]);
+                for (j, xm) in p_x.iter().enumerate().take(2) {
+                    if !xm.is_empty() {
+                        let e = sample(xm, u, v);
+                        for c in 0..4 {
+                            left[12 + j * 4 + c] = q(e[c]);
+                        }
+                    }
+                }
                 let mut right = [0u8; 7];
                 if let (Some(m5), Some(m6)) = (m5.filter(|m| !m.is_empty()), m6.filter(|m| !m.is_empty())) {
                     let (e, g6) = (sample(m5, u, v), sample(m6, u, v));
@@ -683,15 +819,25 @@ pub fn compose_prep(p: &Prep, s: &Settings, side: u8) -> Vec<u8> {
 fn marks_pass(p: &Prep, out: &mut [u8], s: &Settings, side: u8) {
     let f = p.f;
     // Each race's own markings (2026-11-23): drawn on both sides, in the nine slots; no right-side masks.
-    // Mithra (on its own HD face, 2026-11-24): the twelve markings in ink, each on the sides picked.
-    const MITHRA: [(&str, Kind); 12] = [("", Ink); 12];
-    let list: &[(&str, Kind)] = if f.race == 7 { &MITHRA } else { race_marks(f.race) };
-    let left_on: Vec<bool> = (0..12)
-        .map(|k| k < list.len() && if f.race == 7 { s.mark(k) & side != 0 } else { s.marks.get(k).copied().unwrap_or(0) != 0 })
-        .collect();
+    // Mithra (on its own HD face, 2026-11-24): every marking, each on the sides picked.
+    // Per slot: the marking's kind when it is on.
+    let mut on: [Option<Kind>; 20] = [None; 20];
+    if f.race == 7 {
+        for k in 0..MARKS.len() {
+            if s.mark(k) & side != 0 {
+                on[k] = Some(MITHRA_KINDS[k]);
+            }
+        }
+    } else {
+        for (k, m) in race_marks(f.race).iter().enumerate() {
+            if s.marks.get(k).copied().unwrap_or(0) != 0 {
+                on[mark_slot(f.race, k)] = Some(m.1);
+            }
+        }
+    }
     let right_on = [false; 12];
     let right = false;
-    if !(left_on.iter().any(|o| *o) && s.mark_strength > 0.0) {
+    if !(on.iter().any(|o| o.is_some()) && s.mark_strength > 0.0) {
         return;
     }
     let rosy = matches!(f.race, 5 | 6);
@@ -706,19 +852,11 @@ fn marks_pass(p: &Prep, out: &mut [u8], s: &Settings, side: u8) {
         let mut c = [px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0];
         let sk = l / msk;
         let mc = mark.map(|x| (x * sk).min(1.0));
-        for (k, v) in left.iter().enumerate() {
-            if left_on[k] && *v > 0 {
-                let a = *v as f32 / 255.0 * strength;
-                c = match list[k].1 {
-                    Ink => mix(c, mc, a),
-                    // The skin itself, darker and warmer (Tarutaru: rosy).
-                    Freckle => {
-                        let t = if rosy { [0.78, 0.6, 0.55] } else { [0.66, 0.55, 0.48] };
-                        mix(c, [c[0] * t[0], c[1] * t[1], c[2] * t[2]], a * 0.75)
-                    }
-                    // A healed scar: raised, lighter and pinker than the skin round it.
-                    Scar => mix(c, [(c[0] * 1.3 + 0.16).min(1.0), (c[1] * 1.3 + 0.03).min(1.0), (c[2] * 1.3 + 0.04).min(1.0)], a * 0.9),
-                };
+        for (kind, v) in on.iter().zip(left) {
+            if let Some(kind) = kind
+                && *v > 0
+            {
+                c = mark_blend(*kind, c, mc, *v as f32 / 255.0 * strength, rosy);
             }
         }
         if right {
@@ -969,6 +1107,8 @@ macro_rules! style_layers {
             m3: png(include_bytes!(concat!("../../../assets/timeless/looks/mithra", $n, "_m3.png"))),
             m4: png(include_bytes!(concat!("../../../assets/timeless/looks/mithra", $n, "_m4.png"))),
             blush: png_grey(include_bytes!(concat!("../../../assets/timeless/looks/blush/mithra", $n, "_blush.png"))),
+            x1: png(include_bytes!(concat!("../../../assets/timeless/looks/mithra", $n, "_x1.png"))),
+            x2: png(include_bytes!(concat!("../../../assets/timeless/looks/mithra", $n, "_x2.png"))),
         }
     };
 }
@@ -1066,12 +1206,16 @@ fn compose_into(l: &Layers, s: &Settings, side: u8, skin_mid: f32, at: usize, ou
         }
         // Nose: left as the model's own (owner 2026-11-23, every race) - no recolour.
         let _ = nose;
-        let cover = [m2[1], m2[2], m2[3], m3[0], m3[1], m3[2], m3[3], m4[0], m4[1], m2[0], m4[2], m4[3]];
+        let (x1, x2) = (&l.x1[o..o + 4], &l.x2[o..o + 4]);
+        let cover = [
+            m2[1], m2[2], m2[3], m3[0], m3[1], m3[2], m3[3], m4[0], m4[1], m2[0], m4[2], m4[3], x1[0], x1[1], x1[2], x1[3], x2[0], x2[1],
+            x2[2], x2[3],
+        ];
         let sk = g * 255.0 / skin_mid;
-        for (on, v) in on.iter().zip(cover) {
+        let mc = mark.map(|x| (x * sk).min(1.0));
+        for ((on, v), kind) in on.iter().zip(cover).zip(MITHRA_KINDS) {
             if *on && v > 0 {
-                let mc = mark.map(|x| (x * sk).min(1.0));
-                c = mix(c, mc, w(v) * s.mark_strength.clamp(0.0, 1.0));
+                c = mark_blend(kind, c, mc, w(v) * s.mark_strength.clamp(0.0, 1.0), false);
             }
         }
         for k in 0..3 {
@@ -1552,7 +1696,8 @@ mod tests {
         assert_eq!(Settings { marks: vec![LEFT], ..Settings::default() }.mark(0), BOTH);
         assert_eq!(Settings { marks: vec![0, RIGHT], ..Settings::default() }.mark(1), RIGHT);
         let old: Settings = serde_json::from_str(r#"{"marks":[true,false,true,false,false,false]}"#).unwrap();
-        assert_eq!(old.marks, vec![BOTH, 0, BOTH, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(old.marks.len(), MARKS.len());
+        assert_eq!(old.marks[..4], [BOTH, 0, BOTH, 0]);
     }
 
     #[test]
@@ -1583,14 +1728,14 @@ mod tests {
         // Every race's own markings (owner 2026-11-23): each one changes the face, freckles darken the skin.
         for race in [1u8, 2, 3, 4, 5, 6, 8] {
             let list = race_marks(race);
-            assert!(!list.is_empty() && list.len() <= 9);
+            assert!(!list.is_empty() && list.len() <= 12 && race_old(race) <= 9);
             assert!(layers_of(race, 0).marks);
             let mut shown = vec![0; list.len()];
             for style in 1..=8u8 {
                 let face = (style as u16 - 1) * 2;
                 let f = race_face(race, face).unwrap();
                 let rl = race_layers(race, f.style).unwrap();
-                let n = 256u32;
+                let n = 512u32;
                 let tex = vec![150u8; (n * n * 4) as usize];
                 let prep = Prep::new(rl, f, tex, n, n);
                 let off = compose_prep(&prep, &Settings { marks: vec![0; MARKS.len()], ..Settings::default() }, BOTH);
@@ -1613,7 +1758,7 @@ mod tests {
                 assert!(*n >= 5, "race {race} {}: shows on {n} of 8 styles", list[k].0);
             }
         }
-        assert_eq!(mark_names(7).len(), 12);
+        assert_eq!(mark_names(7).len(), MARKS.len());
     }
 
     #[test]
